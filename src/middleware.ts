@@ -8,7 +8,8 @@ export function middleware(request: NextRequest) {
     const ip = request.ip || request.headers.get('x-forwarded-for') || request.headers.get('x-real-ip');
     
     // Allowed IPs
-    const allowedIps = ['175.193.50.137'];
+    const envIps = process.env.ADMIN_ALLOWED_IP ? process.env.ADMIN_ALLOWED_IP.split(',').map(i => i.trim()) : [];
+    const allowedIps = envIps.length > 0 ? envIps : ['175.193.50.137'];
     
     // Allow localhost during local development
     const isDev = process.env.NODE_ENV === 'development';
@@ -18,7 +19,7 @@ export function middleware(request: NextRequest) {
     }
 
     // Check if current IP is in allowed list
-    let clientIp = ip ? ip.split(',')[0].trim() : '';
+    const clientIp = ip ? ip.split(',')[0].trim() : '';
     
     if (!clientIp || !allowedIps.includes(clientIp)) {
       // If IP is not allowed, return 403 Forbidden
