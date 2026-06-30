@@ -15,12 +15,14 @@ export const initMixpanel = () => {
 };
 
 export const identifyUser = (userId: string) => {
+  initMixpanel();
   if (isInitialized) {
     mixpanel.identify(userId);
   }
 };
 
 export const trackEvent = (eventName: string, properties?: Record<string, any>) => {
+  initMixpanel();
   if (isInitialized) {
     mixpanel.track(eventName, properties);
   }
