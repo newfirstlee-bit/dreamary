@@ -4,13 +4,20 @@ const MIXPANEL_TOKEN = process.env.NEXT_PUBLIC_MIXPANEL_TOKEN || '';
 let isInitialized = false;
 
 export const initMixpanel = () => {
-  if (typeof window !== 'undefined' && MIXPANEL_TOKEN && !isInitialized) {
-    mixpanel.init(MIXPANEL_TOKEN, {
-      debug: process.env.NODE_ENV !== 'production',
-      track_pageview: true,
-      persistence: 'localStorage',
-    });
-    isInitialized = true;
+  if (typeof window !== 'undefined') {
+    if (!MIXPANEL_TOKEN) {
+      console.warn('Mixpanel Token is missing! Check .env.local and restart the server.');
+      return;
+    }
+    if (!isInitialized) {
+      console.log('Initializing Mixpanel with token:', MIXPANEL_TOKEN);
+      mixpanel.init(MIXPANEL_TOKEN, {
+        debug: true, // Force debug mode to see logs in console
+        track_pageview: true,
+        persistence: 'localStorage',
+      });
+      isInitialized = true;
+    }
   }
 };
 
@@ -24,6 +31,9 @@ export const identifyUser = (userId: string) => {
 export const trackEvent = (eventName: string, properties?: Record<string, any>) => {
   initMixpanel();
   if (isInitialized) {
+    console.log(`Tracking Event: ${eventName}`, properties);
     mixpanel.track(eventName, properties);
+  } else {
+    console.warn(`Failed to track ${eventName}: Mixpanel not initialized.`);
   }
 };
