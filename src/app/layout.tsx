@@ -2,7 +2,6 @@ import type { Metadata } from "next";
 import localFont from "next/font/local";
 import "./globals.css";
 import BottomNav from "@/components/BottomNav";
-import AdBanner from "@/components/AdBanner";
 
 const geistSans = localFont({
   src: "./fonts/GeistVF.woff",
@@ -30,11 +29,11 @@ export default function RootLayout({
       <body className={`${geistSans.variable} ${geistMono.variable}`}>
         <div className="pc-banner-wrapper">
           <div className="pc-banner-left">
-            <AdBanner width={160} height={600} adKey="50def04d16f8e9305d859a279a6d77d0" />
+            <iframe src="/ad_160x600.html" width={160} height={600} frameBorder="0" scrolling="no" style={{ border: 'none', overflow: 'hidden' }} />
           </div>
           {children}
           <div className="pc-banner-right">
-            <AdBanner width={160} height={600} adKey="50def04d16f8e9305d859a279a6d77d0" />
+            <iframe src="/ad_160x600.html" width={160} height={600} frameBorder="0" scrolling="no" style={{ border: 'none', overflow: 'hidden' }} />
           </div>
         </div>
         <BottomNav />
