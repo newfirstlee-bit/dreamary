@@ -343,7 +343,7 @@ function DiaryContent() {
                       </div>
                       <button 
                         onClick={async () => {
-                          window.open('https://example.com/adsterra-smart-link', '_blank');
+                          window.open('https://www.effectivecpmnetwork.com/rk8wuv0t?key=d9c3569d98ad59723168cace64459dd2', '_blank');
                           await unlockDiaryAd(todayDiary.id);
                           loadInitialData();
                         }}
