@@ -140,6 +140,24 @@ function DiaryContent() {
     init();
   }, [router]);
 
+  useEffect(() => {
+    loadInitialData();
+  }, []);
+
+  useEffect(() => {
+    if (todayDiary && !todayDiary.isAdLocked && todayDiary.charReply) {
+      // Check if we already tracked it for this diary to prevent spam
+      const trackedKey = `tracked_diary_view_${todayDiary.id}`;
+      if (!sessionStorage.getItem(trackedKey)) {
+        trackEvent('Diary_Response_Viewed', {
+          diary_id: todayDiary.id,
+          character_id: activeCharId
+        });
+        sessionStorage.setItem(trackedKey, 'true');
+      }
+    }
+  }, [todayDiary, activeCharId]);
+
   const handleCharSelect = async (charId: string) => {
     setActiveCharId(charId);
     setUserEntry('');

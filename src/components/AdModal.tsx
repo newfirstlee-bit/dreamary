@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from 'react';
+import { trackEvent } from '@/lib/mixpanel';
 
 interface AdModalProps {
   isOpen: boolean;
@@ -13,6 +14,12 @@ export default function AdModal({ isOpen, onConfirm }: AdModalProps) {
   useEffect(() => {
     setMounted(true);
   }, []);
+
+  useEffect(() => {
+    if (mounted && isOpen) {
+      trackEvent('Ad_Shown');
+    }
+  }, [isOpen, mounted]);
 
   if (!mounted || !isOpen) return null;
 

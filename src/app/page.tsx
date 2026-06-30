@@ -7,6 +7,7 @@ import { getUserId } from '@/lib/auth';
 import { getCharactersByUser, Character, updateCharacter, getDiariesByUserAndChar, getTopics, Topic, getUserProfile, UserProfile, getChatMessages, ChatMessage } from '@/lib/db';
 import { uploadImageToImgbb } from '@/lib/imgbb';
 import { Loader2, User, Settings, Camera, Image as ImageIcon, ChevronRight } from 'lucide-react';
+import { trackEvent } from '@/lib/mixpanel';
 
 
 class ErrorBoundary extends React.Component {
@@ -36,6 +37,8 @@ export default function Home() {
   const [latestChat, setLatestChat] = useState<ChatMessage | null>(null);
 
   useEffect(() => {
+    trackEvent('Home_Viewed');
+    
     const init = async () => {
       try {
         const userId = getUserId();

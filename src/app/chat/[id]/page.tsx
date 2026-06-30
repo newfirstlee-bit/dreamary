@@ -40,6 +40,8 @@ export default function ChatDetail({ params }: { params: { id: string } }) {
   };
 
   useEffect(() => {
+    trackEvent('Chat_Opened', { character_id: params.id });
+    
     const init = async () => {
       try {
         const userId = getUserId();
@@ -165,6 +167,10 @@ export default function ChatDetail({ params }: { params: { id: string } }) {
           await adWaitPromise;
           await unlockMessageAd(data.savedId);
         }
+        trackEvent('Chat_Response_Received', {
+          character_id: character.id,
+          message_length: data.reply.length
+        });
         await loadMessages(); // reload to get the saved message
       } else {
         alert(data.error || '답장을 생성하지 못했습니다.');
