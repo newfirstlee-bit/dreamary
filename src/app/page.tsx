@@ -387,10 +387,10 @@ export default function Home() {
                 }}
               >
                 <div style={{ flex: 1, paddingRight: '10px' }}>
-                  <p style={{ color: hasBg ? (isLightMode ? 'var(--point-color)' : 'rgba(255,255,255,0.9)') : 'var(--point-color)', fontSize: '0.85rem', fontWeight: 'bold', marginBottom: '8px' }}>
+                  <p style={{ color: hasBg ? (isLightMode ? '#000000' : 'rgba(255,255,255,0.9)') : 'var(--point-color)', fontSize: '0.85rem', fontWeight: 'bold', marginBottom: '8px' }}>
                     {todayTopic.order}번째 질문
                   </p>
-                  <h3 style={{ fontSize: '1.2rem', lineHeight: '1.4', color: hasBg ? (isLightMode ? 'var(--gray-900)' : 'white') : 'var(--foreground)' }}>
+                  <h3 style={{ fontSize: '1.2rem', lineHeight: '1.4', color: hasBg ? (isLightMode ? 'var(--gray-700)' : 'white') : 'var(--foreground)' }}>
                     {formattedContent}
                   </h3>
                 </div>
