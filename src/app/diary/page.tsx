@@ -21,7 +21,7 @@ function DiaryContent() {
   const [modalResolver, setModalResolver] = useState<(() => void) | null>(null);
 
   const confirmAd = () => {
-    window.open('https://example.com/adsterra-smart-link', '_blank'); // TODO: Replace with real smartlink
+    window.open('https://www.effectivecpmnetwork.com/rk8wuv0t?key=d9c3569d98ad59723168cace64459dd2', '_blank');
     setAdModalOpen(false);
     if (modalResolver) {
       modalResolver();
