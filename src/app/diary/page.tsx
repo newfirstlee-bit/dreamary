@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, Suspense } from 'react';
 import Image from 'next/image';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { getUserId } from '@/lib/auth';
@@ -10,7 +10,7 @@ import Link from 'next/link';
 import AdModal from '@/components/AdModal';
 import { trackDiaryAndCheckAd } from '@/lib/adTracker';
 
-export default function DiaryPage() {
+function DiaryContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const [loading, setLoading] = useState(true);
@@ -471,5 +471,13 @@ export default function DiaryPage() {
         @keyframes spin { 100% { transform: rotate(360deg); } }
       `}} />
     </div>
+  );
+}
+
+export default function DiaryPage() {
+  return (
+    <Suspense fallback={<div className="app-container" style={{ display: 'flex', justifyContent: 'center', alignItems: 'center' }}><Loader2 className="animate-spin" size={32} color="var(--point-color)" /></div>}>
+      <DiaryContent />
+    </Suspense>
   );
 }

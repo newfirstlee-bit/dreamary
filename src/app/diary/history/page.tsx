@@ -1,13 +1,13 @@
 "use client";
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { getUserId } from '@/lib/auth';
 import { getCharactersByUser, getDiariesByUserAndChar, Character, Diary } from '@/lib/db';
 import { Loader2, ChevronLeft, ChevronRight } from 'lucide-react';
 import Link from 'next/link';
 
-export default function DiaryHistoryPage() {
+function DiaryHistoryContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const [loading, setLoading] = useState(true);
@@ -136,5 +136,13 @@ export default function DiaryHistoryPage() {
         @keyframes spin { 100% { transform: rotate(360deg); } }
       `}} />
     </div>
+  );
+}
+
+export default function DiaryHistoryPage() {
+  return (
+    <Suspense fallback={<div className="app-container" style={{ display: 'flex', justifyContent: 'center', alignItems: 'center' }}><Loader2 className="animate-spin" size={32} color="var(--point-color)" /></div>}>
+      <DiaryHistoryContent />
+    </Suspense>
   );
 }
