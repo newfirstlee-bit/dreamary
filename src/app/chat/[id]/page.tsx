@@ -218,7 +218,21 @@ export default function ChatDetail({ params }: { params: { id: string } }) {
   };
 
   const renderMessageContent = (content: string, isUser: boolean) => {
-    const parts = content.split(/(\([^)]+\))/g);
+    let text = content;
+    // Fix missing opening parenthesis
+    const firstClose = text.indexOf(')');
+    const firstOpen = text.indexOf('(');
+    if (firstClose !== -1 && (firstOpen === -1 || firstClose < firstOpen)) {
+      text = '(' + text;
+    }
+    // Fix missing closing parenthesis
+    const lastOpen = text.lastIndexOf('(');
+    const lastClose = text.lastIndexOf(')');
+    if (lastOpen !== -1 && (lastClose === -1 || lastOpen > lastClose)) {
+      text = text + ')';
+    }
+
+    const parts = text.split(/(\([^)]+\))/g);
     
     return parts.map((part, i) => {
       const trimmed = part.trim();
@@ -338,17 +352,8 @@ export default function ChatDetail({ params }: { params: { id: string } }) {
                       </button>
                     </div>
                   ) : (
-                    <div style={{ 
-                      backgroundColor: 'white',
-                      padding: '10px 14px',
-                      borderRadius: '16px',
-                      borderTopLeftRadius: '4px',
-                      border: '1px solid var(--border-color)',
-                      fontSize: '0.95rem',
-                      lineHeight: '1.5',
-                      color: 'var(--gray-900)'
-                    }}>
-                      {formatActionText(msg.content)}
+                    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', width: '100%' }}>
+                      {renderMessageContent(msg.content, false)}
                     </div>
                   )}
                   
