@@ -25,10 +25,10 @@ export default function ChatList() {
         }
 
         const messagesObj: Record<string, ChatMessage | null> = {};
-        for (const char of chars) {
+        await Promise.all(chars.map(async (char) => {
           const msgs = await getChatMessages(userId, char.id);
           messagesObj[char.id] = msgs.length > 0 ? msgs[msgs.length - 1] : null;
-        }
+        }));
         
         // Sort chars by recent (LRU) to match home tab
         const recentHistory: string[] = JSON.parse(localStorage.getItem(`recentChars_${userId}`) || '[]');
@@ -80,7 +80,7 @@ export default function ChatList() {
           
           let timeString = '';
           if (lastMsg) {
-            const d = new Date(lastMsg.createdAt);
+            const d = new Date(lastMsg.timestamp || lastMsg.createdAt);
             const today = new Date();
             if (d.toDateString() === today.toDateString()) {
               timeString = d.toLocaleTimeString('ko-KR', { hour: 'numeric', minute: '2-digit' });

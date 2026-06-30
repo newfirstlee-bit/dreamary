@@ -32,14 +32,12 @@ export default function RootLayout({
           <div className="pc-banner-left">
             <AdBanner width={160} height={600} adKey="50def04d16f8e9305d859a279a6d77d0" />
           </div>
-          <div style={{ width: '100%', maxWidth: '480px', position: 'relative' }}>
-            {children}
-            <BottomNav />
-          </div>
+          {children}
           <div className="pc-banner-right">
             <AdBanner width={160} height={600} adKey="50def04d16f8e9305d859a279a6d77d0" />
           </div>
         </div>
+        <BottomNav />
       </body>
     </html>
   );

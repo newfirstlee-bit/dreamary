@@ -135,7 +135,7 @@ export default function EditCharacterPage() {
   }
 
   return (
-    <div className="app-container" style={{ paddingBottom: '65px', backgroundColor: 'var(--gray-50)' }}>
+    <div className="app-container" style={{ paddingBottom: '100px', backgroundColor: 'var(--gray-50)' }}>
       <header className="header" style={{ borderBottomLeftRadius: 0, borderBottomRightRadius: 0, position: 'relative', display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
         <button onClick={handleBack} style={{ position: 'absolute', left: '20px', background: 'none', border: 'none', color: 'var(--foreground)', cursor: 'pointer', display: 'flex', alignItems: 'center' }}>
           <ChevronLeft size={28} color="var(--gray-800)" />
@@ -251,17 +251,20 @@ export default function EditCharacterPage() {
 
         </div>
 
+
+      </main>
+
+            {/* Pinned Bottom Button */}
+      <div style={{ position: 'fixed', bottom: 0, left: '50%', transform: 'translateX(-50%)', width: '100%', maxWidth: '480px', padding: '5px 20px 15px', backgroundColor: 'white', borderTop: '1px solid var(--border-color)', zIndex: 100 }}>
         <button 
           onClick={handleSave}
           disabled={!hasChanges || saving || !name.trim() || !feeling.trim() || !title.trim() || !exampleChat.trim() || !negative.trim()}
           className="btn-primary"
-          style={{ marginTop: '10px', display: 'flex', justifyContent: 'center', alignItems: 'center' }}
+          style={{ width: '100%', display: 'flex', justifyContent: 'center', alignItems: 'center' }}
         >
           {saving ? <Loader2 className="animate-spin" size={24} /> : '저장하기'}
         </button>
-
-      </main>
-
+      </div>
       {showExitModal && (
         <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.5)', zIndex: 1000, display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
           <div style={{ backgroundColor: 'white', padding: '25px', borderRadius: '15px', width: '80%', maxWidth: '320px', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '20px' }}>

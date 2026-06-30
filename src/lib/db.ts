@@ -1,5 +1,5 @@
 import { db } from './firebase';
-import { collection, doc, getDocs, setDoc, deleteDoc, getDoc, query, where, orderBy } from 'firebase/firestore';
+import { collection, doc, getDocs, setDoc, updateDoc, deleteDoc, getDoc, query, where, orderBy } from 'firebase/firestore';
 
 export interface Character {
   id: string;
@@ -13,6 +13,7 @@ export interface Character {
   image?: string;
   pairName?: string;
   homeBackgroundImage?: string;
+  homeTheme?: 'dark' | 'light';
   dDayStartDate?: number;
   createdAt: number;
 }
@@ -158,7 +159,7 @@ export const getChatMessages = async (userId: string, characterId: string): Prom
   );
   const snapshot = await getDocs(q);
   const msgs = snapshot.docs.map(doc => doc.data() as ChatMessage);
-  return msgs.sort((a, b) => a.createdAt - b.createdAt);
+  return msgs.sort((a: any, b: any) => (a.createdAt || a.timestamp || 0) - (b.createdAt || b.timestamp || 0));
 };
 
 export const saveChatMessage = async (message: ChatMessage) => {

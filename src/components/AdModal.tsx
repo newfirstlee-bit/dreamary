@@ -43,27 +43,12 @@ export default function AdModal({ isOpen, onConfirm }: AdModalProps) {
         animation: 'fadeInUp 0.3s ease-out'
       }}>
         
-        <div style={{
-          width: '50px',
-          height: '50px',
-          borderRadius: '50%',
-          backgroundColor: 'var(--point-color)',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          marginBottom: '16px',
-          color: 'white',
-          fontSize: '24px'
-        }}>
-          ✨
-        </div>
-
-        <h3 style={{ fontSize: '1.1rem', fontWeight: 'bold', color: 'var(--gray-900)', textAlign: 'center', marginBottom: '8px' }}>
-          서비스 응답 대기 중
+        <h3 style={{ fontSize: '1.1rem', fontWeight: 'bold', color: 'var(--gray-900)', textAlign: 'center', marginBottom: '16px', lineHeight: '1.4' }}>
+          원활한 서비스 운영을 위해<br/>광고가 보일 수 있어요
         </h3>
         
         <p style={{ fontSize: '0.95rem', color: 'var(--gray-600)', textAlign: 'center', marginBottom: '24px', lineHeight: '1.4' }}>
-          원활한 서비스 운영을 위해<br/>잠시 후 광고가 보여요.
+          광고를 닫고 다시 앱으로 돌아와주세요
         </p>
 
         <button

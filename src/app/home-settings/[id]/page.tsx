@@ -51,6 +51,12 @@ export default function HomeSettingsPage({ params }: { params: { id: string } })
     setCharacter({ ...character, dDayStartDate: ts });
   };
 
+  const handleThemeChange = async (theme: 'dark' | 'light') => {
+    if (!character) return;
+    await updateCharacter(character.id, { homeTheme: theme });
+    setCharacter({ ...character, homeTheme: theme });
+  };
+
   if (loading) {
     return (
       <div className="app-container" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
@@ -101,6 +107,37 @@ export default function HomeSettingsPage({ params }: { params: { id: string } })
             onChange={handleDDayChange}
             style={{ padding: '8px 12px', borderRadius: '8px', border: '1px solid var(--border-color)', outline: 'none', fontFamily: 'inherit' }}
           />
+        </div>
+
+        <div style={{ padding: '20px', backgroundColor: 'var(--gray-50)', borderRadius: '15px', display: 'flex', flexDirection: 'column', gap: '15px' }}>
+          <div>
+            <div style={{ fontWeight: 'bold', color: 'var(--foreground)', marginBottom: '5px' }}>홈 화면 텍스트 테마</div>
+            <div style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>배경화면 밝기에 맞춰 글자색을 변경하세요</div>
+          </div>
+          <div style={{ display: 'flex', gap: '10px' }}>
+            <button
+              onClick={() => handleThemeChange('dark')}
+              style={{
+                flex: 1, padding: '12px', borderRadius: '10px', fontWeight: 'bold', cursor: 'pointer', transition: 'all 0.2s',
+                backgroundColor: (character.homeTheme || 'dark') === 'dark' ? 'var(--gray-900)' : 'white',
+                color: (character.homeTheme || 'dark') === 'dark' ? 'white' : 'var(--gray-600)',
+                border: (character.homeTheme || 'dark') === 'dark' ? 'none' : '1px solid var(--border-color)'
+              }}
+            >
+              어두운 배경용 (기본)
+            </button>
+            <button
+              onClick={() => handleThemeChange('light')}
+              style={{
+                flex: 1, padding: '12px', borderRadius: '10px', fontWeight: 'bold', cursor: 'pointer', transition: 'all 0.2s',
+                backgroundColor: character.homeTheme === 'light' ? 'white' : 'transparent',
+                color: character.homeTheme === 'light' ? 'var(--gray-900)' : 'var(--gray-600)',
+                border: character.homeTheme === 'light' ? '2px solid var(--gray-900)' : '1px solid var(--border-color)'
+              }}
+            >
+              밝은 배경용
+            </button>
+          </div>
         </div>
       </div>
     </div>

@@ -289,6 +289,7 @@ input[type="range"]::-moz-range-track {
   display: flex;
   justify-content: center;
   width: 100%;
+  min-height: 100vh;
 }
 
 .pc-banner-left, .pc-banner-right {

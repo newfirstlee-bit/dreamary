@@ -8,7 +8,7 @@ export default function BottomNav() {
   const pathname = usePathname();
   
   // Hide bottom nav on onboarding and specific pages
-  if (pathname === '/onboarding' || pathname.startsWith('/mypage/edit-pairname') || pathname.startsWith('/home-settings') || pathname.startsWith('/chat/') || pathname.startsWith('/admin')) return null;
+  if (pathname === '/onboarding' || pathname.startsWith('/mypage/edit-pairname') || pathname.startsWith('/home-settings') || pathname.startsWith('/chat/') || pathname.startsWith('/admin') || pathname.startsWith('/mypage/edit-character') || pathname.startsWith('/mypage/edit-user')) return null;
 
   const navItems = [
     { name: '홈', path: '/', icon: Home },

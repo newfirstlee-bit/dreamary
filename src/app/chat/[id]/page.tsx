@@ -358,7 +358,7 @@ export default function ChatDetail({ params }: { params: { id: string } }) {
                   )}
                   
                   {showTime && (
-                    <span style={{ fontSize: '0.65rem', color: 'var(--gray-400)', marginTop: '4px', marginLeft: '4px' }}>
+                    <span style={{ fontSize: '0.65rem', color: 'var(--gray-500)', marginTop: '4px', marginLeft: '4px' }}>
                       {timeString}
                     </span>
                   )}
@@ -371,7 +371,7 @@ export default function ChatDetail({ params }: { params: { id: string } }) {
             <div key={msg.id} style={{ display: 'flex', flexDirection: 'row-reverse', gap: '10px', alignItems: 'flex-start' }}>
               <div style={{ display: 'flex', flexDirection: 'column', maxWidth: '75%', alignItems: 'flex-end' }}>
                 {renderMessageContent(msg.content, true)}
-                <span style={{ fontSize: '0.75rem', color: 'var(--gray-500)', marginTop: '4px', alignSelf: 'flex-end' }}>
+                <span style={{ fontSize: '0.75rem', color: 'var(--gray-600)', marginTop: '4px', alignSelf: 'flex-end' }}>
                   {new Date(msg.createdAt).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' })}
                 </span>
               </div>
@@ -390,6 +390,9 @@ export default function ChatDetail({ params }: { params: { id: string } }) {
             </div>
           </div>
         )}
+        <p style={{ fontSize: '0.75rem', color: 'var(--gray-600)', textAlign: 'center', marginTop: '10px', marginBottom: '20px', wordBreak: 'keep-all', lineHeight: '1.4' }}>
+          캐붕이 생긴다면 <span onClick={() => router.push(`/mypage/edit-character/${character.id}`)} style={{ textDecoration: 'underline', cursor: 'pointer', color: 'var(--point-color)' }}>[캐릭터 수정]</span> &gt; <span onClick={() => setShowSettings(true)} style={{ textDecoration: 'underline', cursor: 'pointer', color: 'var(--gray-800)' }}>[채팅방 삭제]</span> 후 새로 대화를 시작해주세요.
+        </p>
         <div ref={messagesEndRef} />
       </div>
 
@@ -459,7 +462,7 @@ export default function ChatDetail({ params }: { params: { id: string } }) {
               내 프로필 수정
             </button>
             <button 
-              onClick={() => router.push(`/mypage/edit-char/${character.id}`)}
+              onClick={() => router.push(`/mypage/edit-character/${character.id}`)}
               style={{ padding: '15px', borderRadius: '12px', backgroundColor: 'var(--gray-50)', border: '1px solid var(--border-color)', textAlign: 'left', fontSize: '1rem', fontWeight: 'bold', cursor: 'pointer' }}
             >
               캐릭터 프로필 수정

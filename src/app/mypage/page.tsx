@@ -156,6 +156,7 @@ export default function MyPage() {
             </p>
           </div>
         </section>
+
       </main>
 
       {/* Bottom Sheet */}

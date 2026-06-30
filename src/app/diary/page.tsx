@@ -90,9 +90,10 @@ function DiaryContent() {
         let initialCharId = chars[0].id;
         let allAnswered = true;
 
-        for (const char of chars) {
-          const diaries = await getDiariesByUserAndChar(userId, char.id);
-          const hasToday = diaries.some(d => d.dateString === dateString);
+        const diariesArrays = await Promise.all(chars.map(c => getDiariesByUserAndChar(userId, c.id)));
+        for (let i = 0; i < chars.length; i++) {
+          const char = chars[i];
+          const hasToday = diariesArrays[i].some(d => d.dateString === dateString);
           if (!hasToday) {
             initialCharId = char.id;
             allAnswered = false;
@@ -465,6 +466,7 @@ function DiaryContent() {
           </div>
         )}
         
+        <AdModal isOpen={adModalOpen} onConfirm={confirmAd} />
       </main>
       
       <style dangerouslySetInnerHTML={{__html: `

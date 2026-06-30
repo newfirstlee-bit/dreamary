@@ -117,7 +117,7 @@ function DiaryHistoryContent() {
               }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px' }}>
                   <span style={{ color: 'var(--point-color)', fontSize: '0.8rem', fontWeight: 'bold' }}>
-                    {Number(diary.topicId.split('-')[1] || 0) + 1}번째 질문
+                    {Number(diary.topicId.match(/\\d+/)?.[0] || 0) + 1}번째 질문
                   </span>
                   <span style={{ color: 'var(--gray-500)', fontSize: '0.8rem', fontWeight: 500 }}>
                     {diary.dateString.replace(/-/g, '.')}

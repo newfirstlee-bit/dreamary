@@ -88,7 +88,7 @@ export default function EditUserPage({ params }: { params: { id: string } }) {
   }
 
   return (
-    <div className="app-container" style={{ paddingBottom: '65px', backgroundColor: 'var(--gray-50)' }}>
+    <div className="app-container" style={{ paddingBottom: '100px', backgroundColor: 'var(--gray-50)' }}>
       <header className="header" style={{ borderBottomLeftRadius: 0, borderBottomRightRadius: 0, position: 'relative', display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
         <button onClick={() => router.back()} style={{ position: 'absolute', left: '20px', background: 'none', border: 'none', color: 'var(--foreground)', cursor: 'pointer', display: 'flex', alignItems: 'center' }}>
           <ChevronLeft size={28} color="var(--gray-800)" />
@@ -160,17 +160,20 @@ export default function EditUserPage({ params }: { params: { id: string } }) {
 
         </div>
 
+
+      </main>
+
+            {/* Pinned Bottom Button */}
+      <div style={{ position: 'fixed', bottom: 0, left: '50%', transform: 'translateX(-50%)', width: '100%', maxWidth: '480px', padding: '5px 20px 15px', backgroundColor: 'white', borderTop: '1px solid var(--border-color)', zIndex: 100 }}>
         <button 
           onClick={handleSave}
           disabled={saving || !name.trim() || !feeling.trim()}
           className="btn-primary"
-          style={{ marginTop: '10px', display: 'flex', justifyContent: 'center', alignItems: 'center' }}
+          style={{ width: '100%', display: 'flex', justifyContent: 'center', alignItems: 'center' }}
         >
           {saving ? <Loader2 className="animate-spin" size={24} /> : '저장하기'}
         </button>
-
-      </main>
-
+      </div>
       <style dangerouslySetInnerHTML={{__html: `
         @keyframes spin { 100% { transform: rotate(360deg); } }
       `}} />

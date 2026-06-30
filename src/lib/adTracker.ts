@@ -36,6 +36,10 @@ export const saveAdStats = (stats: AdStats) => {
 };
 
 export const trackDiaryAndCheckAd = (): boolean => {
+  if (typeof window !== 'undefined' && localStorage.getItem('dev_force_ads') === 'true') {
+    return true;
+  }
+
   const stats = getAdStats();
   stats.diaryCount += 1;
   saveAdStats(stats);
@@ -47,6 +51,10 @@ export const trackDiaryAndCheckAd = (): boolean => {
 };
 
 export const trackChatAndCheckAd = (): boolean => {
+  if (typeof window !== 'undefined' && localStorage.getItem('dev_force_ads') === 'true') {
+    return true;
+  }
+
   const stats = getAdStats();
   stats.chatCount += 1;
   saveAdStats(stats);
