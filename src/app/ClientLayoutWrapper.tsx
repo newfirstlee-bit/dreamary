@@ -1,11 +1,25 @@
 "use client";
 
 import { usePathname } from 'next/navigation';
+import { useEffect } from 'react';
 import BottomNav from "@/components/BottomNav";
+import { getUserId } from '@/lib/auth';
+import { initMixpanel, identifyUser, trackEvent } from '@/lib/mixpanel';
 
 export default function ClientLayoutWrapper({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const isAdmin = pathname?.startsWith('/admin');
+
+  useEffect(() => {
+    if (!isAdmin) {
+      initMixpanel();
+      const userId = getUserId();
+      if (userId) {
+        identifyUser(userId);
+      }
+      trackEvent('App_Opened');
+    }
+  }, [isAdmin]);
 
   if (isAdmin) {
     // For admin pages, just render children without any wrappers or bottom nav.

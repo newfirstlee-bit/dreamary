@@ -7,6 +7,7 @@ import { getUserId } from '@/lib/auth';
 import { getUserProfile, saveUserProfile, UserProfile } from '@/lib/db';
 import { uploadImageToImgbb } from '@/lib/imgbb';
 import { Loader2, ChevronLeft, Camera, User } from 'lucide-react';
+import { trackEvent } from '@/lib/mixpanel';
 
 export default function EditUserPage({ params }: { params: { id: string } }) {
   const router = useRouter();
@@ -71,6 +72,7 @@ export default function EditUserPage({ params }: { params: { id: string } }) {
       }
 
       await saveUserProfile(updatedUser);
+      trackEvent('Settings_Changed', { type: 'user_profile' });
       router.push('/mypage');
     } catch (err) {
       console.error(err);

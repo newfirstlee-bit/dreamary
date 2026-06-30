@@ -9,6 +9,7 @@ import { Loader2, Send, ChevronDown, User, Lock } from 'lucide-react';
 import Link from 'next/link';
 import AdModal from '@/components/AdModal';
 import { trackDiaryAndCheckAd } from '@/lib/adTracker';
+import { trackEvent } from '@/lib/mixpanel';
 
 function DiaryContent() {
   const router = useRouter();
@@ -207,6 +208,13 @@ function DiaryContent() {
         await adWaitPromise;
         await unlockDiaryAd(data.savedId);
       }
+
+      trackEvent('Diary_Written', {
+        topic_order: todayTopic.order,
+        topic_id: todayTopic.id,
+        character_id: char.id,
+        content_length: userEntry.length
+      });
 
       setUserEntry('');
       await loadInitialData();

@@ -7,6 +7,7 @@ import { getUserId } from '@/lib/auth';
 import { getCharacterById, Character, getUserProfile, UserProfile, getChatMessages, ChatMessage, saveChatMessage, deleteChatMessages, unlockMessageAd } from '@/lib/db';
 import { Loader2, ChevronLeft, MoreVertical, Send, User, MoreHorizontal, Lock } from 'lucide-react';
 import AdModal from '@/components/AdModal';
+import { trackEvent } from '@/lib/mixpanel';
 import { trackChatAndCheckAd } from '@/lib/adTracker';
 
 export default function ChatDetail({ params }: { params: { id: string } }) {
@@ -122,6 +123,10 @@ export default function ChatDetail({ params }: { params: { id: string } }) {
 
     setMessages(prev => [...prev, userMsg]);
     setInputMsg("");
+    trackEvent('Chat_Message_Sent', {
+      character_id: character.id,
+      message_length: inputMsg.length
+    });
     if (inputRef.current) {
       inputRef.current.style.height = 'auto';
     }

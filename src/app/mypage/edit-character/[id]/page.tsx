@@ -7,6 +7,7 @@ import { getUserId } from '@/lib/auth';
 import { getCharacterById, saveCharacter, Character } from '@/lib/db';
 import { uploadImageToImgbb } from '@/lib/imgbb';
 import { Loader2, ChevronLeft, Camera, User } from 'lucide-react';
+import { trackEvent } from '@/lib/mixpanel';
 
 export default function EditCharacterPage() {
   const router = useRouter();
@@ -118,6 +119,7 @@ export default function EditCharacterPage() {
       }
 
       await saveCharacter(updatedChar);
+      trackEvent('Settings_Changed', { type: 'character_profile', character_id: updatedChar.id });
       router.push('/mypage');
     } catch (err) {
       console.error(err);

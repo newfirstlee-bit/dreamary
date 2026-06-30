@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import Image from 'next/image';
 import { useRouter } from 'next/navigation';
 import { useOnboardingStore } from '@/store/useOnboardingStore';
@@ -8,6 +8,7 @@ import { getUserId } from '@/lib/auth';
 import { saveCharacter, saveUserProfile, Character, UserProfile } from '@/lib/db';
 import { uploadImageToImgbb } from '@/lib/imgbb';
 import { ChevronLeft, Camera, Loader2, User } from 'lucide-react';
+import { trackEvent } from '@/lib/mixpanel';
 
 function getJosa(word: string, josaType: '이/가' | '을/를' | '은/는' | '으로/로' | '과/와' | '아/야'): string {
   if (!word) return josaType.split('/')[0];
@@ -31,6 +32,10 @@ export default function OnboardingPage() {
   const [phase, setPhase] = useState<Phase>('character');
   const [charStep, setCharStep] = useState(1);
   const [userStep, setUserStep] = useState(1);
+
+  useEffect(() => {
+    trackEvent('Onboarding_Started');
+  }, []);
 
   const handleNextCharStep = () => {
     if (charStep < 7) {
@@ -118,6 +123,10 @@ export default function OnboardingPage() {
       }
 
       store.reset();
+      trackEvent('Character_Created', {
+        character_name: newChar.name,
+        has_image: !!charImgUrl
+      });
       router.push('/');
     } catch (err) {
       console.error(err);
