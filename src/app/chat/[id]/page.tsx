@@ -141,8 +141,8 @@ export default function ChatDetail({ params }: { params: { id: string } }) {
       let adWaitPromise = Promise.resolve();
       if (isAdTurn) {
         setAdModalOpen(true);
-        adWaitPromise = new Promise((resolve) => {
-          setModalResolver(() => resolve);
+        adWaitPromise = new Promise<void>((resolve) => {
+          setModalResolver(() => () => resolve());
         });
       }
 
@@ -217,7 +217,7 @@ export default function ChatDetail({ params }: { params: { id: string } }) {
     if (inner.startsWith('(') && inner.endsWith(')')) {
       inner = inner.slice(1, -1).trim();
     }
-    const sentences = inner.match(/[^.!?]+[.!?]+/g) || [inner];
+    const sentences = inner.match(/[^.!?]+[.!?]*/g) || [inner];
     let result = '';
     for (let i = 0; i < sentences.length; i++) {
       result += sentences[i].trim() + ' ';
@@ -328,11 +328,12 @@ export default function ChatDetail({ params }: { params: { id: string } }) {
           if (msg.role === 'assistant') {
             return (
               <div key={msg.id} style={{ display: 'flex', gap: '8px', marginBottom: '8px', alignItems: 'flex-start' }}>
-                {showProfile && character?.image ? (
+                {showProfile && character?.image && (
                   <div style={{ width: '32px', height: '32px', borderRadius: '50%', backgroundColor: 'var(--gray-200)', overflow: 'hidden', position: 'relative', flexShrink: 0 }}>
                     <Image src={character.image} alt={character.name} fill style={{ objectFit: 'cover' }} />
                   </div>
-                ) : (
+                )}
+                {!showProfile && character?.image && (
                   <div style={{ width: '32px', flexShrink: 0 }} />
                 )}
                 <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', maxWidth: '75%' }}>
@@ -391,9 +392,11 @@ export default function ChatDetail({ params }: { params: { id: string } }) {
         })}
         {isTyping && (
           <div style={{ display: 'flex', justifyContent: 'flex-start', gap: '10px', alignItems: 'flex-end', marginBottom: '20px' }}>
-            <div style={{ width: '36px', height: '36px', borderRadius: '50%', backgroundColor: 'var(--gray-200)', overflow: 'hidden', position: 'relative', flexShrink: 0 }}>
-              {character?.image ? <Image src={character.image} alt="char" fill style={{ objectFit: 'cover' }} /> : <User size={20} color="var(--gray-500)" />}
-            </div>
+            {character?.image && (
+              <div style={{ width: '36px', height: '36px', borderRadius: '50%', backgroundColor: 'var(--gray-200)', overflow: 'hidden', position: 'relative', flexShrink: 0 }}>
+                <Image src={character.image} alt="char" fill style={{ objectFit: 'cover' }} />
+              </div>
+            )}
             <div className="chat-bubble char" style={{ padding: '15px 18px', display: 'flex', alignItems: 'center', gap: '6px', height: '44px' }}>
               <div className="typing-dot" style={{ animationDelay: '0s' }}></div>
               <div className="typing-dot" style={{ animationDelay: '0.2s' }}></div>
@@ -468,13 +471,13 @@ export default function ChatDetail({ params }: { params: { id: string } }) {
             
             <button 
               onClick={() => router.push(`/mypage/edit-user/${character.id}`)}
-              style={{ padding: '15px', borderRadius: '12px', backgroundColor: 'var(--gray-50)', border: '1px solid var(--border-color)', textAlign: 'left', fontSize: '1rem', fontWeight: 'bold', cursor: 'pointer' }}
+              style={{ padding: '15px', borderRadius: '12px', backgroundColor: 'var(--gray-50)', border: '1px solid var(--border-color)', color: 'var(--gray-800)', textAlign: 'left', fontSize: '1rem', fontWeight: 'bold', cursor: 'pointer' }}
             >
               내 프로필 수정
             </button>
             <button 
               onClick={() => router.push(`/mypage/edit-character/${character.id}`)}
-              style={{ padding: '15px', borderRadius: '12px', backgroundColor: 'var(--gray-50)', border: '1px solid var(--border-color)', textAlign: 'left', fontSize: '1rem', fontWeight: 'bold', cursor: 'pointer' }}
+              style={{ padding: '15px', borderRadius: '12px', backgroundColor: 'var(--gray-50)', border: '1px solid var(--border-color)', color: 'var(--gray-800)', textAlign: 'left', fontSize: '1rem', fontWeight: 'bold', cursor: 'pointer' }}
             >
               캐릭터 프로필 수정
             </button>

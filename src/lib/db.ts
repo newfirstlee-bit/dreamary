@@ -63,6 +63,14 @@ export const unlockMessageAd = async (msgId: string) => {
 
 export const deleteCharacter = async (id: string) => {
   await deleteDoc(doc(db, 'characters', id));
+  // Delete related diaries
+  const diaryQ = query(collection(db, 'diaries'), where('characterId', '==', id));
+  const diarySnap = await getDocs(diaryQ);
+  for (const d of diarySnap.docs) await deleteDoc(d.ref);
+  // Delete related chat messages
+  const chatQ = query(collection(db, 'chatMessages'), where('characterId', '==', id));
+  const chatSnap = await getDocs(chatQ);
+  for (const c of chatSnap.docs) await deleteDoc(c.ref);
 };
 
 // Users CRUD

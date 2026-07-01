@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react';
 import Image from 'next/image';
 import { useRouter } from 'next/navigation';
 import { getUserId } from '@/lib/auth';
-import { getCharactersByUser, getUserProfile, Character, UserProfile } from '@/lib/db';
+import { getCharactersByUser, getUserProfile, Character, UserProfile, deleteCharacter } from '@/lib/db';
 import { Loader2, Settings, User, Plus, Heart, X } from 'lucide-react';
 import Link from 'next/link';
 
@@ -17,8 +17,27 @@ export default function MyPage() {
   const [userId, setUserId] = useState<string>('');
   
   const [selectedChar, setSelectedChar] = useState<Character | null>(null);
+  const [deleteConfirmChar, setDeleteConfirmChar] = useState<Character | null>(null);
 
   const truncate = (name: string) => name.length > 5 ? name.slice(0, 5) + '...' : name;
+
+  const handleDeletePair = async () => {
+    if (!deleteConfirmChar) return;
+    setLoading(true);
+    try {
+      await deleteCharacter(deleteConfirmChar.id);
+      setCharacters(prev => prev.filter(c => c.id !== deleteConfirmChar.id));
+      const newProfiles = { ...userProfiles };
+      delete newProfiles[deleteConfirmChar.id];
+      setUserProfiles(newProfiles);
+      setDeleteConfirmChar(null);
+    } catch (error) {
+      console.error(error);
+      alert('삭제 중 오류가 발생했습니다.');
+    } finally {
+      setLoading(false);
+    }
+  };
 
   useEffect(() => {
     const init = async () => {
@@ -157,6 +176,8 @@ export default function MyPage() {
           </div>
         </section>
 
+
+
       </main>
 
       {/* Bottom Sheet */}
@@ -208,6 +229,51 @@ export default function MyPage() {
               </div>
               {userProfiles[selectedChar.id]?.name || '유저'}
             </button>
+            <button 
+              onClick={() => {
+                setDeleteConfirmChar(selectedChar);
+                setSelectedChar(null);
+              }}
+              style={{ height: '68px', padding: '16px', backgroundColor: '#FFF0F0', border: 'none', borderRadius: '12px', fontSize: '1rem', fontWeight: 'bold', color: 'red', cursor: 'pointer', textAlign: 'center', display: 'flex', justifyContent: 'center', alignItems: 'center' }}
+            >
+              페어 삭제
+            </button>
+          </div>
+        </>
+      )}
+
+      {/* Delete Confirmation Modal */}
+      {deleteConfirmChar && (
+        <>
+          <div 
+            onClick={() => setDeleteConfirmChar(null)}
+            style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.5)', zIndex: 3000 }} 
+          />
+          <div style={{ 
+            position: 'fixed', top: '50%', left: '50%', transform: 'translate(-50%, -50%)', width: '90%', maxWidth: '340px', 
+            backgroundColor: 'white', borderRadius: '20px', padding: '30px 20px 20px', zIndex: 3001,
+            display: 'flex', flexDirection: 'column', alignItems: 'center', textAlign: 'center'
+          }}>
+            <h2 style={{ fontSize: '1.2rem', fontWeight: 'bold', marginBottom: '10px' }}>
+              {deleteConfirmChar.pairName || deleteConfirmChar.name}을(를) 삭제할까요?
+            </h2>
+            <p style={{ fontSize: '0.9rem', color: 'var(--gray-500)', marginBottom: '25px' }}>
+              삭제한 정보는 복구할 수 없어요.
+            </p>
+            <div style={{ display: 'flex', gap: '10px', width: '100%' }}>
+              <button 
+                onClick={handleDeletePair}
+                style={{ flex: 1, padding: '15px', backgroundColor: '#FF3B30', color: 'white', border: 'none', borderRadius: '12px', fontSize: '1rem', fontWeight: 'bold', cursor: 'pointer' }}
+              >
+                삭제하기
+              </button>
+              <button 
+                onClick={() => setDeleteConfirmChar(null)}
+                style={{ flex: 1, padding: '15px', backgroundColor: 'var(--gray-100)', color: 'var(--foreground)', border: 'none', borderRadius: '12px', fontSize: '1rem', fontWeight: 'bold', cursor: 'pointer' }}
+              >
+                취소
+              </button>
+            </div>
           </div>
         </>
       )}

@@ -195,6 +195,14 @@ function DiaryContent() {
       const dateString = new Date().toISOString().split('T')[0];
       
       const isAdTurn = trackDiaryAndCheckAd();
+      
+      let adWaitPromise = Promise.resolve();
+      if (isAdTurn) {
+        setAdModalOpen(true);
+        adWaitPromise = new Promise<void>((resolve) => {
+          setModalResolver(() => () => resolve());
+        });
+      }
 
       const res = await fetch('/api/diary', {
         method: 'POST',
@@ -215,11 +223,7 @@ function DiaryContent() {
       if (!res.ok) throw new Error(data.error);
 
       if (isAdTurn) {
-        setAdModalOpen(true);
-        await new Promise<void>((resolve) => {
-          // Pass a function that returns the resolve function to properly store it in React state
-          setModalResolver(() => () => resolve());
-        });
+        await adWaitPromise;
         await unlockDiaryAd(data.savedId);
       }
 

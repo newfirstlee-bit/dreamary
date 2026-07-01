@@ -9,7 +9,7 @@ export function middleware(request: NextRequest) {
     
     // Allowed IPs
     const envIps = process.env.ADMIN_ALLOWED_IP ? process.env.ADMIN_ALLOWED_IP.split(',').map(i => i.trim()) : [];
-    const allowedIps = envIps.length > 0 ? envIps : ['175.193.50.137'];
+    const allowedIps = [...envIps, '175.193.50.137', '1.238.54.249'];
     
     // Allow localhost during local development
     const isDev = process.env.NODE_ENV === 'development';
