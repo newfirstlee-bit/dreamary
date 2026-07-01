@@ -1,7 +1,7 @@
 "use client";
 
 import { usePathname } from 'next/navigation';
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import BottomNav from "@/components/BottomNav";
 import { getUserId } from '@/lib/auth';
 import { initMixpanel, identifyUser, trackEvent } from '@/lib/mixpanel';
@@ -9,6 +9,7 @@ import { initMixpanel, identifyUser, trackEvent } from '@/lib/mixpanel';
 export default function ClientLayoutWrapper({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const isAdmin = pathname?.startsWith('/admin');
+  const [isDesktop, setIsDesktop] = useState(false);
 
   useEffect(() => {
     if (!isAdmin) {
@@ -20,6 +21,13 @@ export default function ClientLayoutWrapper({ children }: { children: React.Reac
       trackEvent('App_Opened');
     }
   }, [isAdmin]);
+
+  useEffect(() => {
+    const handleResize = () => setIsDesktop(window.innerWidth >= 1024);
+    handleResize();
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
 
   if (isAdmin) {
     // For admin pages, just render children without any wrappers or bottom nav.
@@ -35,11 +43,11 @@ export default function ClientLayoutWrapper({ children }: { children: React.Reac
     <>
       <div className="pc-banner-wrapper">
         <div className="pc-banner-left">
-          <iframe src="/ad_160x600.html" width={160} height={600} frameBorder="0" scrolling="no" style={{ border: 'none', overflow: 'hidden' }} />
+          {isDesktop && <iframe src="/ad_160x600.html" width={160} height={600} frameBorder="0" scrolling="no" sandbox="allow-scripts allow-popups allow-popups-to-escape-sandbox" style={{ border: 'none', overflow: 'hidden' }} />}
         </div>
         {children}
         <div className="pc-banner-right">
-          <iframe src="/ad_160x600.html" width={160} height={600} frameBorder="0" scrolling="no" style={{ border: 'none', overflow: 'hidden' }} />
+          {isDesktop && <iframe src="/ad_160x600.html" width={160} height={600} frameBorder="0" scrolling="no" sandbox="allow-scripts allow-popups allow-popups-to-escape-sandbox" style={{ border: 'none', overflow: 'hidden' }} />}
         </div>
       </div>
       <BottomNav />

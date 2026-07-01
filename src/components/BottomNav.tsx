@@ -2,13 +2,29 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
+import { useEffect, useState } from 'react';
 import { Home, BookOpen, MessageCircle, User } from 'lucide-react';
 
 export default function BottomNav() {
   const pathname = usePathname();
+  const [isKeyboardOpen, setIsKeyboardOpen] = useState(false);
+
+  useEffect(() => {
+    if (window.visualViewport) {
+      const handleResize = () => {
+        // If the visual viewport is significantly smaller than the window innerHeight, keyboard is likely up
+        if (window.visualViewport) {
+          setIsKeyboardOpen(window.visualViewport.height < window.innerHeight - 100);
+        }
+      };
+      window.visualViewport.addEventListener('resize', handleResize);
+      handleResize();
+      return () => window.visualViewport?.removeEventListener('resize', handleResize);
+    }
+  }, []);
   
-  // Hide bottom nav on onboarding and specific pages
-  if (pathname === '/onboarding' || pathname.startsWith('/mypage/edit-pairname') || pathname.startsWith('/home-settings') || pathname.startsWith('/chat/') || pathname.startsWith('/admin') || pathname.startsWith('/mypage/edit-character') || pathname.startsWith('/mypage/edit-user')) return null;
+  // Hide bottom nav on onboarding, specific pages, or when keyboard is open
+  if (isKeyboardOpen || pathname === '/onboarding' || pathname.startsWith('/mypage/edit-pairname') || pathname.startsWith('/home-settings') || pathname.startsWith('/chat/') || pathname.startsWith('/admin') || pathname.startsWith('/mypage/edit-character') || pathname.startsWith('/mypage/edit-user')) return null;
 
   const navItems = [
     { name: '홈', path: '/', icon: Home },

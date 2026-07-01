@@ -1,6 +1,6 @@
 export const USER_ID_KEY = 'dreamary_user_id';
 
-function generateUUID() {
+export function generateUUID() {
   if (typeof crypto !== 'undefined' && crypto.randomUUID) {
     return crypto.randomUUID();
   }

@@ -14,7 +14,7 @@
   --gray-10:  #F7F7F7;
   --white:    #FFFFFF;
 
-  --background: #FFF9E6; /* Beige */
+  --background: #FFFFFF; /* White */
   --foreground: var(--gray-900); /* Dark text */
   --point-color: #8D67FF; /* Primary Purple */
   --point-color-dark: #7A52EB;
@@ -44,6 +44,7 @@ body {
   width: 100%;
   max-width: 480px;
   min-height: 100vh;
+  min-height: 100dvh;
   background-color: var(--card-bg);
   box-shadow: 0 0 20px rgba(0,0,0,0.05);
   position: relative;
