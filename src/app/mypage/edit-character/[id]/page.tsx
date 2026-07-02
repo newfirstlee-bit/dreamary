@@ -9,6 +9,34 @@ import { uploadImageToImgbb } from '@/lib/imgbb';
 import { Loader2, ChevronLeft, Camera, User } from 'lucide-react';
 import { trackEvent } from '@/lib/mixpanel';
 
+function GenderSelect({ value, onChange }: { value: string, onChange: (v: string) => void }) {
+  const options = ['남성', '여성', '그 외'];
+  return (
+    <div style={{ display: 'flex', gap: '10px', width: '100%' }}>
+      {options.map(opt => (
+        <div 
+          key={opt}
+          style={{
+            flex: 1,
+            padding: '12px 0',
+            textAlign: 'center',
+            border: '1px solid var(--border-color)',
+            borderRadius: '8px',
+            cursor: 'pointer',
+            fontWeight: value === opt ? 'bold' : '500',
+            backgroundColor: value === opt ? 'var(--point-color)' : 'transparent',
+            color: value === opt ? 'white' : 'var(--gray-600)',
+            transition: 'all 0.2s'
+          }}
+          onClick={() => onChange(opt)}
+        >
+          {opt}
+        </div>
+      ))}
+    </div>
+  );
+}
+
 export default function EditCharacterPage() {
   const router = useRouter();
   const params = useParams();
@@ -21,16 +49,20 @@ export default function EditCharacterPage() {
   const [showExitModal, setShowExitModal] = useState(false);
   
   const [name, setName] = useState('');
+  const [gender, setGender] = useState('');
   const [feeling, setFeeling] = useState('');
   const [title, setTitle] = useState('');
   const [exampleChat, setExampleChat] = useState('');
   const [negative, setNegative] = useState('');
+  const [worldview, setWorldview] = useState('');
   const [extra, setExtra] = useState('');
+  const [narrative, setNarrative] = useState('');
   
   const [imageUrl, setImageUrl] = useState('');
   const [imageFile, setImageFile] = useState<File | null>(null);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const narrativeRef = useRef<HTMLTextAreaElement>(null);
 
   useEffect(() => {
     const init = async () => {
@@ -44,11 +76,14 @@ export default function EditCharacterPage() {
 
         setInitialChar(char);
         setName(char.name || '');
+        setGender(char.gender || '');
         setFeeling(char.feeling || '');
         setTitle(char.title || '');
         setExampleChat(char.exampleChat || '');
         setNegative(char.negative || '');
+        setWorldview(char.worldview || '');
         setExtra(char.extra || '');
+        setNarrative(char.narrative || '');
         setImageUrl(char.image || '');
       } catch (err) {
         console.error(err);
@@ -71,13 +106,33 @@ export default function EditCharacterPage() {
     setExampleChat(prev => prev + '""');
   };
 
+  const insertVariable = (variable: string) => {
+    const textarea = narrativeRef.current;
+    if (!textarea) return;
+
+    const start = textarea.selectionStart;
+    const end = textarea.selectionEnd;
+    const currentVal = narrative;
+
+    const newVal = currentVal.substring(0, start) + variable + currentVal.substring(end);
+    setNarrative(newVal.slice(0, 700));
+
+    setTimeout(() => {
+      textarea.focus();
+      textarea.setSelectionRange(start + variable.length, start + variable.length);
+    }, 0);
+  };
+
   const hasChanges = initialChar !== null && (
     name !== (initialChar.name || '') ||
+    gender !== (initialChar.gender || '') ||
     feeling !== (initialChar.feeling || '') ||
     title !== (initialChar.title || '') ||
     exampleChat !== (initialChar.exampleChat || '') ||
     negative !== (initialChar.negative || '') ||
+    worldview !== (initialChar.worldview || '') ||
     extra !== (initialChar.extra || '') ||
+    narrative !== (initialChar.narrative || '') ||
     imageFile !== null
   );
 
@@ -100,22 +155,22 @@ export default function EditCharacterPage() {
       }
 
       const updatedChar: Character = {
+        ...initialChar,
         id: charId,
-        userId,
+        userId: userId,
         name: name.trim(),
+        gender: (gender as '남성' | '여성' | '그 외') || undefined,
         feeling: feeling.trim(),
         title: title.trim(),
         exampleChat: exampleChat.trim(),
         negative: negative.trim(),
+        worldview: worldview.trim(),
         extra: extra.trim(),
-        createdAt: initialChar.createdAt || Date.now()
+        narrative: narrative.trim(),
       };
       
       if (finalImgUrl) {
         updatedChar.image = finalImgUrl;
-        if (!initialChar.homeBackgroundImage && initialChar.image) {
-          updatedChar.homeBackgroundImage = initialChar.image;
-        }
       }
 
       await saveCharacter(updatedChar);
@@ -185,6 +240,13 @@ export default function EditCharacterPage() {
 
           <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <label style={{ fontSize: '1rem', fontWeight: 'bold' }}>캐릭터 성별</label>
+            </div>
+            <GenderSelect value={gender} onChange={setGender} />
+          </div>
+
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <label style={{ fontSize: '1rem', fontWeight: 'bold' }}>캐릭터가 나에게 느끼는 감정 (최대 300자)</label>
               <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>{feeling.length}/300</span>
             </div>
@@ -241,26 +303,66 @@ export default function EditCharacterPage() {
 
           <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <label style={{ fontSize: '1rem', fontWeight: 'bold' }}>추가 설정 (최대 300자)</label>
-              <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>{extra.length}/300</span>
+              <label style={{ fontSize: '1rem', fontWeight: 'bold' }}>세계관 (최대 500자)</label>
+              <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>{worldview.length}/500</span>
             </div>
             <textarea 
-              value={extra} onChange={e => setExtra(e.target.value.slice(0, 300))}
-              placeholder="캐릭터의 추가 설정이 있나요? (선택)"
+              value={worldview} onChange={e => setWorldview(e.target.value.slice(0, 500))}
+              placeholder="서양 근세 판타지, 에너지를 전투에 접목하여 사용한다."
               style={{ width: '100%', padding: '15px', borderRadius: '10px', border: '1px solid var(--border-color)', fontSize: '1rem', outline: 'none', resize: 'none', minHeight: '80px' }}
             />
           </div>
 
-        </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <label style={{ fontSize: '1rem', fontWeight: 'bold' }}>추가 설정 (최대 500자)</label>
+              <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>{extra.length}/500</span>
+            </div>
+            <textarea 
+              value={extra} onChange={e => setExtra(e.target.value.slice(0, 500))}
+              placeholder="성격, 말버릇, 직업, 성장과정 등 설정을 작성해주세요"
+              style={{ width: '100%', padding: '15px', borderRadius: '10px', border: '1px solid var(--border-color)', fontSize: '1rem', outline: 'none', resize: 'none', minHeight: '80px' }}
+            />
+          </div>
 
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <label style={{ fontSize: '1rem', fontWeight: 'bold' }}>드림주/나 와의 서사 (최대 700자)</label>
+              <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>{narrative.length}/700</span>
+            </div>
+            <div style={{ position: 'relative' }}>
+              <textarea 
+                ref={narrativeRef}
+                value={narrative} onChange={e => setNarrative(e.target.value.slice(0, 700))}
+                placeholder="첫만남: 길바닥에서 {캐릭터}가 {유저}에게 삥을 뜯었다"
+                style={{ width: '100%', padding: '15px', paddingBottom: '50px', borderRadius: '10px', border: '1px solid var(--border-color)', fontSize: '1rem', outline: 'none', resize: 'none', minHeight: '120px' }}
+              />
+              <div style={{ position: 'absolute', bottom: '15px', left: '15px', display: 'flex', gap: '8px' }}>
+                <button 
+                  onClick={() => insertVariable('{캐릭터}')}
+                  style={{ padding: '6px 12px', backgroundColor: 'var(--gray-200)', color: 'var(--gray-800)', border: 'none', borderRadius: '8px', cursor: 'pointer', fontSize: '0.8rem', fontWeight: 'bold' }}
+                >
+                  {'{캐릭터}'}
+                </button>
+                <button 
+                  onClick={() => insertVariable('{유저}')}
+                  style={{ padding: '6px 12px', backgroundColor: 'var(--gray-200)', color: 'var(--gray-800)', border: 'none', borderRadius: '8px', cursor: 'pointer', fontSize: '0.8rem', fontWeight: 'bold' }}
+                >
+                  {'{유저}'}
+                </button>
+              </div>
+            </div>
+          </div>
+
+        </div>
 
       </main>
 
-            {/* Pinned Bottom Button */}
+      {/* Pinned Bottom Button */}
       <div style={{ position: 'fixed', bottom: 0, left: '50%', transform: 'translateX(-50%)', width: '100%', maxWidth: '480px', padding: '5px 20px 15px', backgroundColor: 'white', borderTop: '1px solid var(--border-color)', zIndex: 100 }}>
         <button 
           onClick={handleSave}
-          disabled={!hasChanges || saving || !name.trim() || !feeling.trim() || !title.trim() || !exampleChat.trim() || !negative.trim()}
+          disabled={!hasChanges || saving || !name.trim() || !gender || !feeling.trim() || !title.trim() || !exampleChat.trim() || !negative.trim()}
           className="btn-primary"
           style={{ width: '100%', display: 'flex', justifyContent: 'center', alignItems: 'center' }}
         >

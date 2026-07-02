@@ -459,7 +459,7 @@ function DiaryContent() {
             >
               {saving ? (
                 <>
-                  <Loader2 className="animate-spin" size={20} />
+                  <Loader2 className="animate-spin" size={20} style={{ animation: 'spin 2s linear infinite' }} />
                   <span>{activeChar?.name}님이 일기를 쓰는 중...</span>
                 </>
               ) : (

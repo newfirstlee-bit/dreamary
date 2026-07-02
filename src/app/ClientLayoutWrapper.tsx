@@ -5,6 +5,7 @@ import { useEffect, useState } from 'react';
 import BottomNav from "@/components/BottomNav";
 import { getUserId } from '@/lib/auth';
 import { initMixpanel, identifyUser, trackEvent } from '@/lib/mixpanel';
+import AdBlockModal from '@/components/AdBlockModal';
 
 export default function ClientLayoutWrapper({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
@@ -41,6 +42,7 @@ export default function ClientLayoutWrapper({ children }: { children: React.Reac
 
   return (
     <>
+      <AdBlockModal />
       <div className="pc-banner-wrapper">
         <div className="pc-banner-left">
           {isDesktop && <iframe src="/ad_160x600.html" width={160} height={600} frameBorder="0" scrolling="no" sandbox="allow-scripts allow-popups allow-popups-to-escape-sandbox" style={{ border: 'none', overflow: 'hidden' }} />}

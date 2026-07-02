@@ -37,7 +37,7 @@ export default function HomeSettingsPage({ params }: { params: { id: string } })
       alert('배경화면이 변경되었습니다.');
     } catch (err) {
       console.error(err);
-      alert('배경화면 업로드에 실패했습니다.');
+      alert(`배경화면 업로드에 실패했습니다. (${err.message || err})`);
     } finally {
       setUploadingBg(false);
     }

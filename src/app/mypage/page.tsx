@@ -5,7 +5,7 @@ import Image from 'next/image';
 import { useRouter } from 'next/navigation';
 import { getUserId } from '@/lib/auth';
 import { getCharactersByUser, getUserProfile, Character, UserProfile, deleteCharacter } from '@/lib/db';
-import { Loader2, Settings, User, Plus, Heart, X } from 'lucide-react';
+import { Loader2, Settings, User, Plus, Heart, X, Copy } from 'lucide-react';
 import Link from 'next/link';
 
 export default function MyPage() {
@@ -167,8 +167,21 @@ export default function MyPage() {
           </div>
           <div style={{ backgroundColor: 'white', padding: '20px', borderRadius: '15px', border: '1px solid var(--border-color)' }}>
             <div style={{ marginBottom: '15px' }}>
-              <span style={{ fontSize: '0.85rem', color: 'var(--gray-500)', fontWeight: 'bold', display: 'block', marginBottom: '5px' }}>고유 식별자 (UUID)</span>
-              <span style={{ fontSize: '0.9rem', color: 'var(--foreground)', wordBreak: 'break-all' }}>{userId}</span>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                <span style={{ fontSize: '1rem', color: 'var(--gray-800)', fontWeight: 'bold' }}>고유 식별자 (UUID)</span>
+                <button 
+                  onClick={() => {
+                    navigator.clipboard.writeText(userId);
+                    alert('복사되었습니다.');
+                  }} 
+                  style={{ display: 'flex', alignItems: 'center', gap: '4px', background: 'var(--gray-100)', border: 'none', borderRadius: '6px', padding: '6px 10px', cursor: 'pointer', fontSize: '0.8rem', color: 'var(--gray-700)', fontWeight: 'bold' }}
+                >
+                  <Copy size={14} /> 복사
+                </button>
+              </div>
+              <div style={{ fontSize: '0.9rem', color: 'var(--gray-600)', wordBreak: 'break-all', fontFamily: 'monospace' }}>
+                {userId}
+              </div>
             </div>
             <p style={{ fontSize: '0.8rem', color: 'var(--gray-500)', lineHeight: '1.5' }}>
               현재 UUID 기반으로 데이터가 저장되고 있어, 다른 기기/브라우저로 접속하거나 쿠키를 삭제하시면 대화 데이터가 초기화될 수 있습니다. 추후 로그인 기능이 업데이트되면 데이터를 더 안전하게 보관하실 수 있습니다.

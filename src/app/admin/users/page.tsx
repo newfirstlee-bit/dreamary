@@ -4,6 +4,8 @@ import { useEffect, useState } from 'react';
 import { collection, getDocs, deleteDoc, doc, query, where } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { Loader2, Search, Trash2 } from 'lucide-react';
+import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 
 interface UserStat {
   userId: string;
@@ -13,6 +15,7 @@ interface UserStat {
 }
 
 export default function AdminUsers() {
+  const router = useRouter();
   const [users, setUsers] = useState<UserStat[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
@@ -136,16 +139,23 @@ export default function AdminUsers() {
           </thead>
           <tbody>
             {filteredUsers.map((u) => (
-              <tr key={u.userId} style={{ borderBottom: '1px solid #eee' }}>
-                <td style={{ padding: '15px', color: 'var(--gray-600)', fontFamily: 'monospace' }}>{u.userId}</td>
-                <td style={{ padding: '15px', fontWeight: 'bold', color: 'var(--point-color)' }}>{u.charactersCount}개</td>
-                <td style={{ padding: '15px', fontWeight: 'bold', color: 'var(--point-color)' }}>{u.diariesCount}개</td>
+              <tr 
+                key={u.userId} 
+                onClick={() => router.push(`/admin/users/${u.userId}`)}
+                style={{ borderBottom: '1px solid #eee', cursor: 'pointer' }}
+                className="hover-row"
+              >
+                <td style={{ padding: '15px', color: 'var(--gray-800)', fontFamily: 'monospace' }}>
+                  {u.userId}
+                </td>
+                <td style={{ padding: '15px', fontWeight: 'bold', color: 'var(--gray-800)' }}>{u.charactersCount}개</td>
+                <td style={{ padding: '15px', fontWeight: 'bold', color: 'var(--gray-800)' }}>{u.diariesCount}개</td>
                 <td style={{ padding: '15px', color: 'var(--gray-500)', fontSize: '0.9rem' }}>
                   {u.lastActivity > 0 ? new Date(u.lastActivity).toLocaleString() : '-'}
                 </td>
                 <td style={{ padding: '15px', textAlign: 'center' }}>
                   <button 
-                    onClick={() => handleDeleteUser(u.userId)}
+                    onClick={(e) => { e.stopPropagation(); handleDeleteUser(u.userId); }}
                     style={{ backgroundColor: '#FFF0F0', color: 'red', border: '1px solid #FFCDCD', padding: '8px 12px', borderRadius: '6px', cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: '5px', fontSize: '0.85rem', fontWeight: 'bold' }}
                   >
                     <Trash2 size={16} /> 전체 삭제

@@ -3,16 +3,20 @@ import { create } from 'zustand';
 export interface OnboardingState {
   // Character State
   charName: string;
+  charGender: '남성' | '여성' | '그 외' | '';
   charFeeling: string;
   charTitle: string;
   charExampleChat: string;
   charNegative: string;
+  charWorldview: string;
   charExtra: string;
+  charNarrative: string;
   charImage: string | null;
   charImageFile: File | null;
 
-  // User State (3~5번 제외된 스텝 구조)
+  // User State
   userName: string;
+  userGender: '남성' | '여성' | '그 외' | '';
   userFeeling: string;
   userExtra: string;
   userImage: string | null;
@@ -28,15 +32,19 @@ export interface OnboardingState {
 
 export const useOnboardingStore = create<OnboardingState>((set) => ({
   charName: '',
+  charGender: '',
   charFeeling: '',
   charTitle: '',
   charExampleChat: '',
   charNegative: '',
+  charWorldview: '',
   charExtra: '',
+  charNarrative: '',
   charImage: null,
   charImageFile: null,
 
   userName: '',
+  userGender: '',
   userFeeling: '',
   userExtra: '',
   userImage: null,
@@ -46,7 +54,7 @@ export const useOnboardingStore = create<OnboardingState>((set) => ({
   setUserField: (field, value) => set((state) => ({ ...state, [field]: value })),
   
   reset: () => set({
-    charName: '', charFeeling: '', charTitle: '', charExampleChat: '', charNegative: '', charExtra: '', charImage: null, charImageFile: null,
-    userName: '', userFeeling: '', userExtra: '', userImage: null, userImageFile: null
+    charName: '', charGender: '', charFeeling: '', charTitle: '', charExampleChat: '', charNegative: '', charWorldview: '', charExtra: '', charNarrative: '', charImage: null, charImageFile: null,
+    userName: '', userGender: '', userFeeling: '', userExtra: '', userImage: null, userImageFile: null
   })
 }));

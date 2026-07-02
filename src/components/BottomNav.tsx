@@ -49,6 +49,7 @@ export default function BottomNav() {
       justifyContent: 'space-around',
       alignItems: 'center',
       zIndex: 1000,
+      paddingBottom: 'env(safe-area-inset-bottom)',
       boxShadow: '0 -2px 10px rgba(0,0,0,0.02)'
     }}>
       {navItems.map((item) => {
@@ -57,7 +58,7 @@ export default function BottomNav() {
         const Icon = item.icon;
         
         return (
-          <Link key={item.path} href={item.path} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', textDecoration: 'none', color, width: '25%' }}>
+          <Link key={item.path} href={item.path} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%', textDecoration: 'none', color, width: '25%', touchAction: 'manipulation' }}>
             <Icon size={24} color={color} />
             <span style={{ fontSize: '0.7rem', marginTop: '4px', fontWeight: isActive ? 'bold' : 'normal' }}>
               {item.name}

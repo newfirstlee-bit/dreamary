@@ -24,15 +24,17 @@ function applyJosa(word: string, josaType: '이/가' | '을/를' | '은/는' | '
   return word + getJosa(word, josaType);
 }
 
-type Phase = 'character' | 'intermission' | 'user' | 'saving';
+type Phase = 'character' | 'narrative-prompt' | 'narrative' | 'user' | 'saving';
 
 export default function OnboardingPage() {
   const router = useRouter();
   const store = useOnboardingStore();
   const [phase, setPhase] = useState<Phase>('character');
   const [charStep, setCharStep] = useState(1);
+  const [narrativeStep, setNarrativeStep] = useState(1);
   const [userStep, setUserStep] = useState(1);
   const [viewportStyle, setViewportStyle] = useState({ height: '100dvh', top: 0 });
+  const [showUserModal, setShowUserModal] = useState(false);
 
   useEffect(() => {
     trackEvent('Onboarding_Started');
@@ -61,29 +63,46 @@ export default function OnboardingPage() {
     if (charStep < 7) {
       setCharStep(charStep + 1);
     } else {
-      setPhase('intermission');
+      setPhase('narrative-prompt');
+    }
+  };
+
+  const handleNextNarrativeStep = () => {
+    if (narrativeStep < 3) {
+      setNarrativeStep(narrativeStep + 1);
+    } else {
+      setShowUserModal(true);
     }
   };
 
   const handleNextUserStep = () => {
-    if (userStep === 1) setUserStep(2);
-    else if (userStep === 2) setUserStep(6);
-    else if (userStep === 6) setUserStep(7);
-    else if (userStep === 7) handleFinish();
+    if (userStep < 4) {
+      setUserStep(userStep + 1);
+    } else {
+      handleFinish();
+    }
   };
 
   const handleBack = () => {
+    if (showUserModal) {
+      setShowUserModal(false);
+      return;
+    }
     if (phase === 'character') {
       if (charStep > 1) setCharStep(charStep - 1);
       else router.push('/');
-    } else if (phase === 'intermission') {
+    } else if (phase === 'narrative-prompt') {
       setPhase('character');
       setCharStep(7);
+    } else if (phase === 'narrative') {
+      if (narrativeStep > 1) setNarrativeStep(narrativeStep - 1);
+      else setPhase('narrative-prompt');
     } else if (phase === 'user') {
-      if (userStep === 7) setUserStep(6);
-      else if (userStep === 6) setUserStep(2);
-      else if (userStep === 2) setUserStep(1);
-      else if (userStep === 1) setPhase('intermission');
+      if (userStep > 1) setUserStep(userStep - 1);
+      else {
+        setPhase('narrative-prompt');
+        setShowUserModal(true);
+      }
     }
   };
 
@@ -106,11 +125,14 @@ export default function OnboardingPage() {
         id: generateUUID(),
         userId,
         name: store.charName,
+        gender: store.charGender || undefined,
         feeling: store.charFeeling,
         title: store.charTitle,
         exampleChat: store.charExampleChat,
         negative: store.charNegative,
+        worldview: store.charWorldview,
         extra: store.charExtra,
+        narrative: store.charNarrative,
         createdAt: Date.now()
       };
       if (charImgUrl) {
@@ -124,15 +146,15 @@ export default function OnboardingPage() {
         const newUser: any = {
           id: newChar.id,
           name: store.userName,
+          gender: store.userGender || undefined,
           feeling: store.userFeeling,
-          extra: store.userExtra,
           createdAt: Date.now()
         };
         if (userImgUrl) newUser.image = userImgUrl;
         
         await saveUserProfile(newUser as UserProfile);
       } else {
-        // Save empty user profile to prevent inheriting global one
+        // Save empty user profile
         const emptyUser: any = {
           id: newChar.id,
           name: '유저',
@@ -151,7 +173,8 @@ export default function OnboardingPage() {
     } catch (err: any) {
       console.error(err);
       alert(`저장 중 오류가 발생했습니다.\n상세: ${err.message || err}`);
-      setPhase('intermission');
+      setPhase('narrative-prompt');
+      setShowUserModal(true);
     }
   };
 
@@ -159,12 +182,13 @@ export default function OnboardingPage() {
     let progress = 0;
     if (phase === 'character') {
       progress = (charStep / 7) * 100;
+    } else if (phase === 'narrative') {
+      progress = (narrativeStep / 3) * 100;
     } else if (phase === 'user') {
-      const stepIndex = [1, 2, 6, 7].indexOf(userStep) + 1;
-      progress = (stepIndex / 4) * 100;
+      progress = (userStep / 4) * 100;
     }
 
-    if (phase === 'intermission' || phase === 'saving') return null;
+    if (phase === 'narrative-prompt' || phase === 'saving') return null;
 
     return (
       <div style={{ width: '100%', height: '4px', backgroundColor: 'var(--border-color)' }}>
@@ -196,35 +220,32 @@ export default function OnboardingPage() {
 
       <main className="content" style={{ display: 'flex', flexDirection: 'column', padding: 0 }}>
         {phase === 'character' && <CharacterStep step={charStep} store={store} onNext={handleNextCharStep} />}
-        {phase === 'intermission' && (
-          <div style={{ flex: 1, display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', textAlign: 'center', padding: '0 20px' }}>
-            <h1 style={{ fontSize: '1.5rem', marginBottom: '20px' }}>캐릭터 생성이 완료되었습니다!</h1>
-            
-            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', marginBottom: '30px', gap: '10px' }}>
-              <div style={{ width: '100px', height: '100px', borderRadius: '25px', overflow: 'hidden', position: 'relative', backgroundColor: 'var(--gray-200)', boxShadow: '0 4px 10px rgba(0,0,0,0.05)' }}>
-                {store.charImage ? (
-                  <Image src={store.charImage} alt={store.charName} fill style={{ objectFit: 'cover' }} />
-                ) : (
-                  <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                    <User size={48} color="var(--gray-500)" />
-                  </div>
-                )}
-              </div>
-              <span style={{ fontWeight: 'bold', fontSize: '1.1rem' }}>{store.charName}</span>
+        
+        {phase === 'narrative-prompt' && (
+          <div style={{ flex: 1, display: 'flex', flexDirection: 'column', padding: '0 20px' }}>
+            <div style={{ flex: 1, display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', textAlign: 'center' }}>
+              <h1 style={{ fontSize: '1.5rem', marginBottom: '10px', lineHeight: '1.4' }}>캐릭터 생성 완료!<br/>서사를 추가로 입력할 수 있어요</h1>
+              <p style={{ color: 'var(--text-muted)', marginBottom: '0', lineHeight: '1.5', fontSize: '1rem' }}>세계관, 서사를 추가로 입력하면<br/>{store.charName} 캐릭터 해석에 큰 도움이 돼요.</p>
             </div>
-
-            <p style={{ color: 'var(--text-muted)', marginBottom: '40px', lineHeight: '1.5' }}>내 캐릭터(유저 프로필)도 설정할까요?<br/>설정해두면 더 자연스러운 교환일기가 가능합니다.</p>
-            <div style={{ display: 'flex', gap: '15px', width: '100%' }}>
-              <button onClick={() => handleFinish()} style={{ flex: 1, padding: '15px', borderRadius: '10px', border: '1px solid var(--border-color)', backgroundColor: 'transparent', color: 'var(--gray-600)', cursor: 'pointer', fontWeight: 'bold', fontSize: '16px' }}>
-                나중에
-              </button>
-              <button onClick={() => setPhase('user')} style={{ flex: 1, padding: '15px', borderRadius: '10px', border: 'none', backgroundColor: 'var(--point-color)', color: 'white', cursor: 'pointer', fontWeight: 'bold', fontSize: '16px' }}>
-                좋아요
-              </button>
+            
+            <div style={{ width: '100%', paddingBottom: '20px' }}>
+              <p style={{ color: 'var(--gray-500)', fontSize: '14px', marginBottom: '15px', textAlign: 'center' }}>설정은 마이페이지에서 언제든지 추가할 수 있어요</p>
+              <div style={{ display: 'flex', gap: '10px', width: '100%' }}>
+                <button onClick={() => setShowUserModal(true)} style={{ flex: 3, padding: '15px', borderRadius: '10px', border: 'none', backgroundColor: 'var(--gray-200)', color: 'var(--gray-800)', cursor: 'pointer', fontWeight: '500', fontSize: '16px' }}>
+                  나중에
+                </button>
+                <button onClick={() => setPhase('narrative')} style={{ flex: 7, padding: '15px', borderRadius: '10px', border: 'none', backgroundColor: 'var(--point-color)', color: 'white', cursor: 'pointer', fontWeight: 'bold', fontSize: '16px' }}>
+                  서사 입력하기
+                </button>
+              </div>
             </div>
           </div>
         )}
+
+        {phase === 'narrative' && <NarrativeStep step={narrativeStep} store={store} onNext={handleNextNarrativeStep} />}
+
         {phase === 'user' && <UserStep step={userStep} store={store} onNext={handleNextUserStep} />}
+        
         {phase === 'saving' && (
           <div style={{ flex: 1, display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', padding: '0 20px' }}>
             <Loader2 className="animate-spin" size={48} color="var(--point-color)" style={{ animation: 'spin 2s linear infinite' }} />
@@ -232,6 +253,24 @@ export default function OnboardingPage() {
           </div>
         )}
       </main>
+      
+      {showUserModal && (
+        <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.5)', zIndex: 1000, display: 'flex', justifyContent: 'center', alignItems: 'center', padding: '20px' }}>
+          <div style={{ backgroundColor: 'white', borderRadius: '15px', padding: '30px 20px', width: '100%', maxWidth: '340px', textAlign: 'center', display: 'flex', flexDirection: 'column', animation: 'fadeIn 0.2s ease' }}>
+            <h2 style={{ fontSize: '1.3rem', marginBottom: '15px', lineHeight: '1.4' }}>내 캐릭터도 설정할 수 있어요</h2>
+            <p style={{ color: 'var(--text-muted)', marginBottom: '30px', lineHeight: '1.5', fontSize: '0.95rem' }}>{applyJosa(store.charName || '캐릭터', '과/와')} 더 자연스러운<br/>대화를 할 수 있도록 도와줘요</p>
+            
+            <div style={{ display: 'flex', gap: '10px', width: '100%' }}>
+              <button onClick={() => { setShowUserModal(false); handleFinish(); }} style={{ flex: 1, padding: '15px', borderRadius: '10px', border: 'none', backgroundColor: 'var(--gray-200)', color: 'var(--gray-800)', cursor: 'pointer', fontWeight: '500', fontSize: '15px' }}>
+                나중에
+              </button>
+              <button onClick={() => { setShowUserModal(false); setPhase('user'); }} style={{ flex: 1, padding: '15px', borderRadius: '10px', border: 'none', backgroundColor: 'var(--point-color)', color: 'white', cursor: 'pointer', fontWeight: 'bold', fontSize: '15px' }}>
+                좋아요
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
       
       <style dangerouslySetInnerHTML={{__html: `
         @keyframes spin { 100% { transform: rotate(360deg); } }
@@ -252,6 +291,23 @@ export default function OnboardingPage() {
           min-height: 54px;
           resize: none;
           overflow: hidden;
+        }
+        .radio-btn {
+          flex: 1;
+          padding: 12px 0;
+          text-align: center;
+          border: 1px solid var(--border-color);
+          border-radius: 8px;
+          cursor: pointer;
+          font-weight: 500;
+          color: var(--gray-600);
+          transition: all 0.2s;
+        }
+        .radio-btn.selected {
+          border-color: var(--point-color);
+          background-color: var(--point-color);
+          color: white;
+          font-weight: bold;
         }
       `}} />
     </div>
@@ -318,6 +374,23 @@ function ImageUpload({ imagePreview, onFileSelect }: { imagePreview: string | nu
   );
 }
 
+function GenderSelect({ value, onChange }: { value: string, onChange: (v: string) => void }) {
+  const options = ['남성', '여성', '그 외'];
+  return (
+    <div style={{ display: 'flex', gap: '10px', width: '100%', marginBottom: '20px' }}>
+      {options.map(opt => (
+        <div 
+          key={opt}
+          className={`radio-btn ${value === opt ? 'selected' : ''}`}
+          onClick={() => onChange(opt)}
+        >
+          {opt}
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function CharacterStep({ step, store, onNext }: { step: number, store: any, onNext: () => void }) {
   const isLast = step === 7;
   const charNameText = store.charName ? applyJosa(store.charName, '이/가') : '캐릭터가';
@@ -343,37 +416,39 @@ function CharacterStep({ step, store, onNext }: { step: number, store: any, onNe
 
   const isNextDisabled = () => {
     if (step === 1 && !store.charName.trim()) return true;
-    if (step === 2 && !store.charFeeling.trim()) return true;
-    if (step === 3 && !store.charTitle.trim()) return true;
-    if (step === 4 && !store.charExampleChat.trim()) return true;
-    if (step === 5 && !store.charNegative.trim()) return true;
+    if (step === 2 && !store.charGender) return true;
+    if (step === 3 && !store.charFeeling.trim()) return true;
+    if (step === 4 && !store.charTitle.trim()) return true;
+    if (step === 5 && !store.charExampleChat.trim()) return true;
+    if (step === 6 && !store.charNegative.trim()) return true;
     return false;
   };
 
-  const showSubtitle = step === 4 || step === 5 || step === 7;
+  const showSubtitle = step === 5 || step === 6 || step === 7;
   
   return (
     <div style={{ flex: 1, display: 'flex', flexDirection: 'column', animation: 'fadeIn 0.3s ease', overflow: 'hidden' }}>
       <div style={{ flex: 1, overflowY: 'auto', padding: '0 20px 20px 20px' }}>
         <h2 style={{ fontSize: '1.5rem', marginBottom: '10px', lineHeight: '1.4' }}>
           {step === 1 && "캐릭터의 이름은 무엇인가요?"}
-          {step === 2 && `${charNameText} 나에게 느끼는 감정은?`}
-          {step === 3 && `${charNameText} 나를 부르는 호칭은?`}
-          {step === 4 && `${charNameStr}의 대화 예시를 알려주세요`}
-          {step === 5 && "절대 하면 안되는 말과 행동을 알려주세요"}
-          {step === 6 && "추가로 설정하고 싶은 내용이 있나요? (선택)"}
+          {step === 2 && `${charNameStr}의 성별은 무엇인가요?`}
+          {step === 3 && `${charNameText} 나에게 느끼는 감정은?`}
+          {step === 4 && `${charNameText} 나를 부르는 호칭은?`}
+          {step === 5 && `${charNameStr}의 대화 예시를 알려주세요`}
+          {step === 6 && "절대 하면 안되는 말과 행동을 알려주세요"}
           {step === 7 && `${charNameStr}의 사진이 있나요? (선택)`}
         </h2>
         <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem', marginBottom: showSubtitle ? '45px' : '25px', minHeight: showSubtitle ? '20px' : '0' }}>
-          {step === 4 && '캐입을 위해 최소 5문장 이상 작성해주세요. ""로 문장을 구분해주세요.'}
-          {step === 5 && "캐붕 방지를 위해 금지 사항을 작성해주세요."}
+          {step === 5 && '캐입을 위해 최소 5문장 이상 작성해주세요. ""로 문장을 구분해주세요.'}
+          {step === 6 && "캐붕 방지를 위해 금지 사항을 작성해주세요."}
           {step === 7 && "사진이 없으면 기본 아이콘이 표시됩니다."}
         </p>
 
         {step === 1 && <input className="input-field" autoFocus value={store.charName} onChange={e => store.setCharField('charName', e.target.value.slice(0, 10))} placeholder="예: 에스티니앙" />}
-        {step === 2 && <input className="input-field" autoFocus value={store.charFeeling} onChange={e => store.setCharField('charFeeling', e.target.value.slice(0, 300))} placeholder="은인이자 동료. 썸타는 것 같은데 안사귐" />}
-        {step === 3 && <input className="input-field" autoFocus value={store.charTitle} onChange={e => store.setCharField('charTitle', e.target.value.slice(0, 300))} placeholder="이름, 당신, 야, 등" />}
-        {step === 4 && (
+        {step === 2 && <GenderSelect value={store.charGender} onChange={v => store.setCharField('charGender', v)} />}
+        {step === 3 && <input className="input-field" autoFocus value={store.charFeeling} onChange={e => store.setCharField('charFeeling', e.target.value.slice(0, 300))} placeholder="은인이자 동료. 썸타는 것 같은데 안사귐" />}
+        {step === 4 && <input className="input-field" autoFocus value={store.charTitle} onChange={e => store.setCharField('charTitle', e.target.value.slice(0, 300))} placeholder="이름, 당신, 야, 등" />}
+        {step === 5 && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', marginBottom: '20px' }}>
             <AutoResizeTextarea 
               ref={charExampleChatRef}
@@ -389,26 +464,27 @@ function CharacterStep({ step, store, onNext }: { step: number, store: any, onNe
               style={{
                 alignSelf: 'flex-start',
                 padding: '6px 12px',
-                backgroundColor: 'var(--point-color)',
-                color: 'white',
+                backgroundColor: 'var(--gray-200)',
+                color: 'var(--gray-800)',
                 border: 'none',
                 borderRadius: '8px',
                 cursor: 'pointer',
                 fontSize: '0.8rem',
                 fontWeight: 'bold',
-                boxShadow: '0 2px 5px rgba(0,0,0,0.1)'
               }}
             >
               "" 추가
             </button>
           </div>
         )}
-        {step === 5 && <AutoResizeTextarea className="input-field" autoFocus value={store.charNegative} onChange={e => store.setCharField('charNegative', e.target.value.slice(0, 300))} placeholder="현대문물 언급, 밈 사용 금지. 반말 금지 등" />}
         {step === 6 && (
-          <div style={{ position: 'relative', marginBottom: '20px' }}>
-            <AutoResizeTextarea className="input-field" autoFocus value={store.charExtra} onChange={e => store.setCharField('charExtra', e.target.value.slice(0, 300))} placeholder="외모, 배경 스토리, 특별한 설정 등을 자유롭게 적어주세요." style={{ marginBottom: 0, paddingBottom: '30px' }} />
-            <span style={{ position: 'absolute', bottom: '15px', right: '15px', fontSize: '0.8rem', color: 'var(--text-muted)' }}>{store.charExtra.length}/300</span>
-          </div>
+          <AutoResizeTextarea 
+            className="input-field" 
+            autoFocus 
+            value={store.charNegative} 
+            onChange={e => store.setCharField('charNegative', e.target.value.slice(0, 300))} 
+            placeholder="현대문물 언급, 밈 사용 금지. 반말 금지 등" 
+          />
         )}
         {step === 7 && (
           <ImageUpload 
@@ -423,7 +499,7 @@ function CharacterStep({ step, store, onNext }: { step: number, store: any, onNe
 
       <div style={{ padding: '10px 20px 20px', backgroundColor: 'var(--card-bg)' }}>
         <button className="btn-primary" onClick={onNext} disabled={isNextDisabled()} style={{ marginTop: 0 }}>
-          {isLast ? "생성 완료" : "다음"}
+          {isLast ? "다음" : "다음"}
         </button>
       </div>
       <style dangerouslySetInnerHTML={{__html: `@keyframes fadeIn { from { opacity: 0; transform: translateX(10px); } to { opacity: 1; transform: translateX(0); } }`}} />
@@ -431,8 +507,97 @@ function CharacterStep({ step, store, onNext }: { step: number, store: any, onNe
   );
 }
 
+function NarrativeStep({ step, store, onNext }: { step: number, store: any, onNext: () => void }) {
+  const charNameStr = store.charName || '캐릭터';
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  const insertVariable = (variable: string) => {
+    const textarea = textareaRef.current;
+    if (!textarea) return;
+
+    const start = textarea.selectionStart;
+    const end = textarea.selectionEnd;
+    const currentVal = store.charNarrative;
+
+    const newVal = currentVal.substring(0, start) + variable + currentVal.substring(end);
+    store.setCharField('charNarrative', newVal.slice(0, 700));
+
+    setTimeout(() => {
+      textarea.focus();
+      textarea.setSelectionRange(start + variable.length, start + variable.length);
+    }, 0);
+  };
+
+  const showSubtitle = step === 1 || step === 3;
+
+  return (
+    <div style={{ flex: 1, display: 'flex', flexDirection: 'column', animation: 'fadeIn 0.3s ease', overflow: 'hidden' }}>
+      <div style={{ flex: 1, overflowY: 'auto', padding: '0 20px 20px 20px' }}>
+        <h2 style={{ fontSize: '1.5rem', marginBottom: '10px', lineHeight: '1.4' }}>
+          {step === 1 && "세계관을 알려주세요(선택)"}
+          {step === 2 && `${charNameStr}의 추가 설정이 있나요?(선택)`}
+          {step === 3 && <>드림주/나와의 서사를<br/>작성해주세요 (선택)</>}
+        </h2>
+        <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem', marginBottom: showSubtitle ? '20px' : '0px', minHeight: showSubtitle ? '20px' : '0' }}>
+          {step === 1 && "장르명이 아닌 장르의 세계관을 작성해주세요"}
+          {step === 3 && "캐릭터의 대사나 속마음을 포함하여 시간 흐름대로 작성해주시면 오류를 줄일 수 있어요"}
+        </p>
+
+        {step === 1 && (
+          <div style={{ marginBottom: '20px' }}>
+            <AutoResizeTextarea className="input-field" autoFocus value={store.charWorldview} onChange={e => store.setCharField('charWorldview', e.target.value.slice(0, 500))} placeholder="서양 근세 판타지, 에너지를 전투에 접목하여 사용한다." style={{ marginBottom: '4px' }} />
+            <div style={{ textAlign: 'right', fontSize: '0.8rem', color: 'var(--text-muted)' }}>{store.charWorldview.length}/500</div>
+          </div>
+        )}
+        {step === 2 && (
+          <div style={{ marginBottom: '20px', marginTop: '20px' }}>
+            <AutoResizeTextarea className="input-field" autoFocus value={store.charExtra} onChange={e => store.setCharField('charExtra', e.target.value.slice(0, 500))} placeholder={`성격, 말버릇, 직업, 성장과정 등 ${charNameStr}의 설정을 작성해주세요`} style={{ marginBottom: '4px' }} />
+            <div style={{ textAlign: 'right', fontSize: '0.8rem', color: 'var(--text-muted)' }}>{store.charExtra.length}/500</div>
+          </div>
+        )}
+        {step === 3 && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', marginBottom: '20px' }}>
+            <div>
+              <AutoResizeTextarea 
+                ref={textareaRef}
+                className="input-field" 
+                autoFocus 
+                value={store.charNarrative} 
+                onChange={e => store.setCharField('charNarrative', e.target.value.slice(0, 700))} 
+                placeholder="첫만남: 길바닥에서 {캐릭터}가 {유저}에게 삥을 뜯었다" 
+                style={{ marginBottom: '4px' }} 
+              />
+              <div style={{ textAlign: 'right', fontSize: '0.8rem', color: 'var(--text-muted)' }}>{store.charNarrative.length}/700</div>
+            </div>
+            <div style={{ display: 'flex', gap: '8px' }}>
+              <button 
+                onClick={() => insertVariable('{캐릭터}')}
+                style={{ padding: '6px 12px', backgroundColor: 'var(--gray-200)', color: 'var(--gray-800)', border: 'none', borderRadius: '8px', cursor: 'pointer', fontSize: '0.8rem', fontWeight: 'bold' }}
+              >
+                {'{캐릭터}'}
+              </button>
+              <button 
+                onClick={() => insertVariable('{유저}')}
+                style={{ padding: '6px 12px', backgroundColor: 'var(--gray-200)', color: 'var(--gray-800)', border: 'none', borderRadius: '8px', cursor: 'pointer', fontSize: '0.8rem', fontWeight: 'bold' }}
+              >
+                {'{유저}'}
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+
+      <div style={{ padding: '10px 20px 20px', backgroundColor: 'var(--card-bg)' }}>
+        <button className="btn-primary" onClick={onNext} style={{ marginTop: 0 }}>
+          다음
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function UserStep({ step, store, onNext }: { step: number, store: any, onNext: () => void }) {
-  const isLast = step === 7;
+  const isLast = step === 4;
   const userNameText = store.userName ? applyJosa(store.userName, '이/가') : '내가';
   const charNameText = store.charName ? store.charName : '캐릭터';
   const charNameJosaGa = store.charName ? applyJosa(store.charName, '이/가') : '캐릭터가';
@@ -440,35 +605,31 @@ function UserStep({ step, store, onNext }: { step: number, store: any, onNext: (
 
   const isNextDisabled = () => {
     if (step === 1 && !store.userName.trim()) return true;
-    if (step === 2 && !store.userFeeling.trim()) return true;
+    if (step === 2 && !store.userGender) return true;
+    if (step === 3 && !store.userFeeling.trim()) return true;
     return false;
   };
 
-  const showSubtitle = step === 1 || step === 7;
+  const showSubtitle = step === 1 || step === 4;
 
   return (
     <div style={{ flex: 1, display: 'flex', flexDirection: 'column', animation: 'fadeIn 0.3s ease', overflow: 'hidden' }}>
       <div style={{ flex: 1, overflowY: 'auto', padding: '0 20px 20px 20px' }}>
         <h2 style={{ fontSize: '1.5rem', marginBottom: '10px', lineHeight: '1.4' }}>
           {step === 1 && "내 이름/드림주 이름을 알려주세요"}
-          {step === 2 && `${userNameText} ${charNameText}에게 느끼는 감정은?`}
-          {step === 6 && `${userNameStr}의 추가 설정이 있나요? (선택)`}
-          {step === 7 && `${userNameStr}의 사진이 있나요? (선택)`}
+          {step === 2 && `${userNameStr}의 성별은 어떻게 되나요?`}
+          {step === 3 && `${userNameText} ${charNameText}에게 느끼는 감정은?`}
+          {step === 4 && `${userNameStr}의 사진이 있나요? (선택)`}
         </h2>
         <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem', marginBottom: showSubtitle ? '45px' : '25px', minHeight: showSubtitle ? '20px' : '0' }}>
           {step === 1 && `${charNameJosaGa} 나를 이 이름으로 불러줘요.`}
-          {step === 7 && "사진이 없으면 기본 아이콘이 표시됩니다."}
+          {step === 4 && "사진이 없으면 기본 아이콘이 표시됩니다."}
         </p>
 
         {step === 1 && <input className="input-field" autoFocus value={store.userName} onChange={e => store.setUserField('userName', e.target.value.slice(0, 10))} placeholder="예: 여주, 모험가" />}
-        {step === 2 && <input className="input-field" autoFocus value={store.userFeeling} onChange={e => store.setUserField('userFeeling', e.target.value.slice(0, 300))} placeholder="예: 드림캐를 짝사랑하며 부끄러움이 많다." />}
-        {step === 6 && (
-          <div style={{ position: 'relative', marginBottom: '20px' }}>
-            <AutoResizeTextarea className="input-field" autoFocus value={store.userExtra} onChange={e => store.setUserField('userExtra', e.target.value.slice(0, 300))} placeholder="외모, 직업, 두 사람의 관계 배경 등을 자유롭게 적어주세요." style={{ marginBottom: 0, paddingBottom: '30px' }} />
-            <span style={{ position: 'absolute', bottom: '15px', right: '15px', fontSize: '0.8rem', color: 'var(--text-muted)' }}>{store.userExtra.length}/300</span>
-          </div>
-        )}
-        {step === 7 && (
+        {step === 2 && <GenderSelect value={store.userGender} onChange={v => store.setUserField('userGender', v)} />}
+        {step === 3 && <input className="input-field" autoFocus value={store.userFeeling} onChange={e => store.setUserField('userFeeling', e.target.value.slice(0, 300))} placeholder="예: 드림캐를 짝사랑하며 부끄러움이 많다." />}
+        {step === 4 && (
           <ImageUpload 
             imagePreview={store.userImage} 
             onFileSelect={(file) => {

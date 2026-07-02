@@ -9,12 +9,41 @@ import { uploadImageToImgbb } from '@/lib/imgbb';
 import { Loader2, ChevronLeft, Camera, User } from 'lucide-react';
 import { trackEvent } from '@/lib/mixpanel';
 
+function GenderSelect({ value, onChange }: { value: string, onChange: (v: string) => void }) {
+  const options = ['남성', '여성', '그 외'];
+  return (
+    <div style={{ display: 'flex', gap: '10px', width: '100%' }}>
+      {options.map(opt => (
+        <div 
+          key={opt}
+          style={{
+            flex: 1,
+            padding: '12px 0',
+            textAlign: 'center',
+            border: '1px solid var(--border-color)',
+            borderRadius: '8px',
+            cursor: 'pointer',
+            fontWeight: value === opt ? 'bold' : '500',
+            backgroundColor: value === opt ? 'var(--point-color)' : 'transparent',
+            color: value === opt ? 'white' : 'var(--gray-600)',
+            transition: 'all 0.2s'
+          }}
+          onClick={() => onChange(opt)}
+        >
+          {opt}
+        </div>
+      ))}
+    </div>
+  );
+}
+
 export default function EditUserPage({ params }: { params: { id: string } }) {
   const router = useRouter();
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   
   const [name, setName] = useState('');
+  const [gender, setGender] = useState('');
   const [feeling, setFeeling] = useState('');
   const [extra, setExtra] = useState('');
   const [imageUrl, setImageUrl] = useState('');
@@ -29,6 +58,7 @@ export default function EditUserPage({ params }: { params: { id: string } }) {
         
         if (profile) {
           setName(profile.name || '');
+          setGender(profile.gender || '');
           setFeeling(profile.feeling || '');
           setExtra(profile.extra || '');
           setImageUrl(profile.image || '');
@@ -62,6 +92,7 @@ export default function EditUserPage({ params }: { params: { id: string } }) {
       const updatedUser: UserProfile = {
         id: params.id,
         name: name.trim() || '유저',
+        gender: (gender as '남성' | '여성' | '그 외') || undefined,
         feeling: feeling.trim(),
         extra: extra.trim(),
         createdAt: Date.now()
@@ -138,6 +169,13 @@ export default function EditUserPage({ params }: { params: { id: string } }) {
 
           <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <label style={{ fontSize: '1rem', fontWeight: 'bold' }}>성별</label>
+            </div>
+            <GenderSelect value={gender} onChange={setGender} />
+          </div>
+
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <label style={{ fontSize: '1rem', fontWeight: 'bold' }}>캐릭터에게 느끼는 감정 (최대 300자)</label>
               <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>{feeling.length}/300</span>
             </div>
@@ -162,14 +200,13 @@ export default function EditUserPage({ params }: { params: { id: string } }) {
 
         </div>
 
-
       </main>
 
-            {/* Pinned Bottom Button */}
+      {/* Pinned Bottom Button */}
       <div style={{ position: 'fixed', bottom: 0, left: '50%', transform: 'translateX(-50%)', width: '100%', maxWidth: '480px', padding: '5px 20px 15px', backgroundColor: 'white', borderTop: '1px solid var(--border-color)', zIndex: 100 }}>
         <button 
           onClick={handleSave}
-          disabled={saving || !name.trim() || !feeling.trim()}
+          disabled={saving || !name.trim() || !gender || !feeling.trim()}
           className="btn-primary"
           style={{ width: '100%', display: 'flex', justifyContent: 'center', alignItems: 'center' }}
         >

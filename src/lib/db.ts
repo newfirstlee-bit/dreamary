@@ -5,11 +5,14 @@ export interface Character {
   id: string;
   userId: string;
   name: string;
+  gender?: '남성' | '여성' | '그 외';
   feeling: string;
   title: string;
   exampleChat: string;
   negative: string;
+  worldview?: string;
   extra?: string;
+  narrative?: string;
   image?: string;
   pairName?: string;
   homeBackgroundImage?: string;
@@ -21,6 +24,7 @@ export interface Character {
 export interface UserProfile {
   id: string; // User's UUID
   name: string;
+  gender?: '남성' | '여성' | '그 외';
   feeling: string;
   extra?: string;
   image?: string;
