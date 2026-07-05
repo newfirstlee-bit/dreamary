@@ -21,12 +21,21 @@ export default function ChatDetail({ params }: { params: { id: string } }) {
   const [showSettings, setShowSettings] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  const isSendingRef = useRef(false);
 
   const [adModalOpen, setAdModalOpen] = useState(false);
   const [modalResolver, setModalResolver] = useState<(() => void) | null>(null);
 
   const confirmAd = () => {
     window.open('https://www.effectivecpmnetwork.com/rk8wuv0t?key=d9c3569d98ad59723168cace64459dd2', '_blank');
+    setAdModalOpen(false);
+    if (modalResolver) {
+      modalResolver();
+      setModalResolver(null);
+    }
+  };
+
+  const closeAdModal = () => {
     setAdModalOpen(false);
     if (modalResolver) {
       modalResolver();
@@ -112,7 +121,8 @@ export default function ChatDetail({ params }: { params: { id: string } }) {
   };
 
   const handleSend = async () => {
-    if (!inputMsg.trim() || !character) return;
+    if (!inputMsg.trim() || !character || isSendingRef.current) return;
+    isSendingRef.current = true;
 
     const userMsg: ChatMessage = {
       id: Date.now().toString(),
@@ -177,9 +187,11 @@ export default function ChatDetail({ params }: { params: { id: string } }) {
       }
     } catch (error) {
       console.error('Send failed:', error);
+      closeAdModal();
       alert('오류가 발생했습니다.');
     } finally {
       setIsTyping(false);
+      isSendingRef.current = false;
     }
   };
 
@@ -493,7 +505,7 @@ export default function ChatDetail({ params }: { params: { id: string } }) {
           </div>
         </>
       )}
-      <AdModal isOpen={adModalOpen} onConfirm={confirmAd} />
+      <AdModal isOpen={adModalOpen} onConfirm={confirmAd} onClose={closeAdModal} />
     </div>
   );
 }

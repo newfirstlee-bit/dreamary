@@ -6,9 +6,10 @@ import { trackEvent } from '@/lib/mixpanel';
 interface AdModalProps {
   isOpen: boolean;
   onConfirm: () => void;
+  onClose?: () => void;
 }
 
-export default function AdModal({ isOpen, onConfirm }: AdModalProps) {
+export default function AdModal({ isOpen, onConfirm, onClose }: AdModalProps) {
   const [mounted, setMounted] = useState(false);
   
   useEffect(() => {
@@ -78,6 +79,23 @@ export default function AdModal({ isOpen, onConfirm }: AdModalProps) {
         >
           확인
         </button>
+        
+        {onClose && (
+          <button
+            onClick={onClose}
+            style={{
+              marginTop: '10px',
+              padding: '10px',
+              backgroundColor: 'transparent',
+              color: 'var(--gray-500)',
+              border: 'none',
+              fontSize: '0.85rem',
+              cursor: 'pointer',
+            }}
+          >
+            건너뛰기
+          </button>
+        )}
       </div>
       
       <style>{`

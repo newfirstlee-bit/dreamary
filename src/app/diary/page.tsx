@@ -28,6 +28,14 @@ function DiaryContent() {
       setModalResolver(null);
     }
   };
+
+  const closeAdModal = () => {
+    setAdModalOpen(false);
+    if (modalResolver) {
+      modalResolver();
+      setModalResolver(null);
+    }
+  };
   
   const [characters, setCharacters] = useState<Character[]>([]);
   const [activeCharId, setActiveCharId] = useState<string>('');
@@ -239,6 +247,7 @@ function DiaryContent() {
 
     } catch (err) {
       console.error(err);
+      closeAdModal();
       alert('일기 전송 중 오류가 발생했습니다. ' + err);
     }
     setSaving(false);
@@ -492,7 +501,7 @@ function DiaryContent() {
           </div>
         )}
         
-        <AdModal isOpen={adModalOpen} onConfirm={confirmAd} />
+        <AdModal isOpen={adModalOpen} onConfirm={confirmAd} onClose={closeAdModal} />
       </main>
       
       <style dangerouslySetInnerHTML={{__html: `
