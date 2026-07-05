@@ -1,8 +1,10 @@
 const { initializeApp } = require('firebase/app');
 const { getFirestore, collection, query, where, getDocs, orderBy } = require('firebase/firestore');
 
+require('dotenv').config({ path: '.env.local' });
+
 const firebaseConfig = {
-  apiKey: "AIzaSyAyBvC5LKN8YW7z-Bz6cekWufjvLk0-fzI",
+  apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY || process.env.FIREBASE_API_KEY,
   authDomain: "dreamary-1a9af.firebaseapp.com",
   projectId: "dreamary-1a9af",
   storageBucket: "dreamary-1a9af.firebasestorage.app",
