@@ -8,16 +8,21 @@ import { getCharactersByUser, getUserProfile, getTopics, getDiariesByUserAndChar
 import { Loader2, Send, ChevronDown, User, Lock } from 'lucide-react';
 import Link from 'next/link';
 import AdModal from '@/components/AdModal';
+import ErrorModal from '@/components/ErrorModal';
 import { trackDiaryAndCheckAd } from '@/lib/adTracker';
 import { trackEvent } from '@/lib/mixpanel';
+import { saveDraft, loadDraft, clearDraft } from '@/lib/draftStorage';
+import { useRef } from 'react';
 
 function DiaryContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const draftLoaded = useRef(false);
   
   const [adModalOpen, setAdModalOpen] = useState(false);
+  const [errorModalOpen, setErrorModalOpen] = useState(false);
   const [modalResolver, setModalResolver] = useState<(() => void) | null>(null);
 
   const confirmAd = () => {
@@ -136,6 +141,12 @@ function DiaryContent() {
           } else {
             const nextIdx = diaries.length % topics.length;
             setTodayTopic(topics[nextIdx]);
+            
+            const draft = loadDraft(initialCharId);
+            if (draft) {
+              setUserEntry(draft);
+              draftLoaded.current = true;
+            }
           }
         }
 
@@ -185,6 +196,12 @@ function DiaryContent() {
       } else {
         const nextIdx = diaries.length % allTopics.length;
         setTodayTopic(allTopics[nextIdx] || allTopics[0]);
+        
+        const draft = loadDraft(charId);
+        if (draft) {
+          setUserEntry(draft);
+          draftLoaded.current = true;
+        }
       }
     } catch (err) {
       console.error(err);
@@ -212,27 +229,55 @@ function DiaryContent() {
         });
       }
 
-      const res = await fetch('/api/diary', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          character: char,
-          userProfile: activeProfile,
-          topic: todayTopic.content,
-          userEntry,
-          userId,
-          topicId: todayTopic.id,
-          dateString,
-          isAdTurn
-        })
-      });
+      const requestId = crypto.randomUUID();
+      
+      let success = false;
+      let savedId = '';
+      
+      for (let attempt = 1; attempt <= 3; attempt++) {
+        try {
+          if (typeof window !== 'undefined' && localStorage.getItem('dev_force_error') === 'true') {
+            throw new Error('Forced error for testing');
+          }
 
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error);
+          const res = await fetch('/api/diary', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              character: char,
+              userProfile: activeProfile,
+              topic: todayTopic.content,
+              userEntry,
+              userId,
+              topicId: todayTopic.id,
+              dateString,
+              isAdTurn,
+              requestId
+            })
+          });
+
+          const data = await res.json();
+          if (res.ok && !data.error) {
+            success = true;
+            savedId = data.savedId;
+            break;
+          }
+        } catch (e) {
+          console.error(`Attempt ${attempt} failed:`, e);
+        }
+
+        if (!success && attempt < 3) {
+          await new Promise(resolve => setTimeout(resolve, 2000));
+        }
+      }
+
+      if (!success) {
+        throw new Error('All 3 attempts failed');
+      }
 
       if (isAdTurn) {
         await adWaitPromise;
-        await unlockDiaryAd(data.savedId);
+        await unlockDiaryAd(savedId);
       }
 
       trackEvent('Diary_Written', {
@@ -243,12 +288,14 @@ function DiaryContent() {
       });
 
       setUserEntry('');
+      clearDraft(char!.id);
       await loadInitialData();
 
     } catch (err) {
       console.error(err);
       closeAdModal();
-      alert('일기 전송 중 오류가 발생했습니다. ' + err);
+      saveDraft(activeCharId, userEntry);
+      setErrorModalOpen(true);
     }
     setSaving(false);
   };
@@ -428,7 +475,13 @@ function DiaryContent() {
             <div style={{ position: 'relative', flex: 1, display: 'flex', flexDirection: 'column', marginBottom: '15px' }}>
               <textarea 
                 value={userEntry}
-                onChange={e => setUserEntry(e.target.value.slice(0, 500))}
+                onChange={e => {
+                  setUserEntry(e.target.value.slice(0, 500));
+                  if (draftLoaded.current) {
+                    clearDraft(activeCharId);
+                    draftLoaded.current = false;
+                  }
+                }}
                 placeholder="여기에 일기를 작성해주세요..."
                 style={{
                   flex: 1,
@@ -501,7 +554,8 @@ function DiaryContent() {
           </div>
         )}
         
-        <AdModal isOpen={adModalOpen} onConfirm={confirmAd} onClose={closeAdModal} />
+        <AdModal isOpen={adModalOpen} onConfirm={confirmAd} />
+        <ErrorModal isOpen={errorModalOpen} onConfirm={() => setErrorModalOpen(false)} />
       </main>
       
       <style dangerouslySetInnerHTML={{__html: `

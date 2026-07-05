@@ -1,12 +1,19 @@
 import { NextResponse } from 'next/server';
-import { saveDiary, Diary } from '@/lib/db';
+import { saveDiary, Diary, getDiaryByRequestId } from '@/lib/db';
 
 export async function POST(req: Request) {
   try {
-    const { character, userProfile, topic, userEntry, userId, topicId, dateString, isAdTurn } = await req.json();
+    const { character, userProfile, topic, userEntry, userId, topicId, dateString, isAdTurn, requestId } = await req.json();
 
     if (!character || !topic || !userEntry) {
       return NextResponse.json({ error: 'Missing required fields' }, { status: 400 });
+    }
+
+    if (requestId) {
+      const existing = await getDiaryByRequestId(requestId);
+      if (existing) {
+        return NextResponse.json({ reply: existing.charReply, savedId: existing.id });
+      }
     }
 
     const apiKey = process.env.OPENROUTER_API_KEY || process.env.NEXT_PUBLIC_OPENROUTER_API_KEY;
@@ -87,6 +94,7 @@ ${userEntry}
       dateString,
       createdAt: Date.now(),
       isAdLocked: isAdTurn === true,
+      requestId,
     };
     
     await saveDiary(newDiary);

@@ -39,6 +39,7 @@ export interface ChatMessage {
   content: string;
   createdAt: number;
   isAdLocked?: boolean;
+  requestId?: string;
 }
 
 // Characters CRUD
@@ -107,6 +108,7 @@ export interface Diary {
   dateString: string; // e.g. "YYYY-MM-DD"
   createdAt: number;
   isAdLocked?: boolean;
+  requestId?: string;
 }
 
 // Topics CRUD
@@ -143,6 +145,13 @@ export const getDiaryById = async (id: string): Promise<Diary | null> => {
   const snapshot = await getDoc(docRef);
   if (!snapshot.exists()) return null;
   return snapshot.data() as Diary;
+};
+
+export const getDiaryByRequestId = async (requestId: string): Promise<Diary | null> => {
+  const q = query(collection(db, 'diaries'), where('requestId', '==', requestId));
+  const snapshot = await getDocs(q);
+  if (snapshot.empty) return null;
+  return snapshot.docs[0].data() as Diary;
 };
 
 export async function updateCharacter(charId: string, data: Partial<Character>) {
@@ -187,4 +196,11 @@ export const deleteChatMessages = async (userId: string, characterId: string) =>
   const snapshot = await getDocs(q);
   const deletePromises = snapshot.docs.map(d => deleteDoc(d.ref));
   await Promise.all(deletePromises);
+};
+
+export const getMessageByRequestId = async (requestId: string): Promise<ChatMessage | null> => {
+  const q = query(collection(db, 'chatMessages'), where('requestId', '==', requestId));
+  const snapshot = await getDocs(q);
+  if (snapshot.empty) return null;
+  return snapshot.docs[0].data() as ChatMessage;
 };

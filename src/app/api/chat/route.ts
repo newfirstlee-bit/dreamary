@@ -1,12 +1,19 @@
 import { NextResponse } from 'next/server';
-import { saveChatMessage, ChatMessage } from '@/lib/db';
+import { saveChatMessage, ChatMessage, getMessageByRequestId } from '@/lib/db';
 
 export async function POST(req: Request) {
   try {
-    const { character, userProfile, messages, isFirstPing, userId, isAdTurn } = await req.json();
+    const { character, userProfile, messages, isFirstPing, userId, isAdTurn, requestId } = await req.json();
 
     if (!character || !messages) {
       return NextResponse.json({ error: 'Missing required fields' }, { status: 400 });
+    }
+
+    if (requestId) {
+      const existing = await getMessageByRequestId(requestId);
+      if (existing) {
+        return NextResponse.json({ reply: existing.content, savedId: existing.id });
+      }
     }
 
     const apiKey = process.env.OPENROUTER_API_KEY || process.env.NEXT_PUBLIC_OPENROUTER_API_KEY;
@@ -95,6 +102,7 @@ ${character.negative}
       content: charReply,
       createdAt: Date.now(),
       isAdLocked: isAdTurn === true,
+      requestId,
     };
     
     if (userId) {

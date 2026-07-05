@@ -1,25 +1,18 @@
 "use client";
 
 import { useEffect, useState } from 'react';
-import { trackEvent } from '@/lib/mixpanel';
 
-interface AdModalProps {
+interface ErrorModalProps {
   isOpen: boolean;
   onConfirm: () => void;
 }
 
-export default function AdModal({ isOpen, onConfirm }: AdModalProps) {
+export default function ErrorModal({ isOpen, onConfirm }: ErrorModalProps) {
   const [mounted, setMounted] = useState(false);
   
   useEffect(() => {
     setMounted(true);
   }, []);
-
-  useEffect(() => {
-    if (mounted && isOpen) {
-      trackEvent('Ad_Shown');
-    }
-  }, [isOpen, mounted]);
 
   if (!mounted || !isOpen) return null;
 
@@ -50,12 +43,12 @@ export default function AdModal({ isOpen, onConfirm }: AdModalProps) {
         animation: 'fadeInUp 0.3s ease-out'
       }}>
         
-        <h3 style={{ fontSize: '1.1rem', fontWeight: 'bold', color: 'var(--gray-900)', textAlign: 'center', marginBottom: '16px', lineHeight: '1.4' }}>
-          원활한 서비스 운영을 위해<br/>광고가 보일 수 있어요
+        <h3 style={{ fontSize: '1.1rem', fontWeight: 'bold', color: 'var(--gray-900)', textAlign: 'center', marginBottom: '10px', lineHeight: '1.4' }}>
+          잠시 후 다시 시도해주세요
         </h3>
         
-        <p style={{ fontSize: '0.95rem', color: 'var(--gray-600)', textAlign: 'center', marginBottom: '24px', lineHeight: '1.4' }}>
-          광고를 닫고 다시 앱으로 돌아와주세요
+        <p style={{ fontSize: '0.95rem', color: 'var(--gray-600)', textAlign: 'center', marginBottom: '24px', lineHeight: '1.4', wordBreak: 'keep-all' }}>
+          사용량이 많은 경우 오류가 발생할 수 있어요
         </p>
 
         <button
@@ -63,14 +56,14 @@ export default function AdModal({ isOpen, onConfirm }: AdModalProps) {
           style={{
             width: '100%',
             padding: '14px',
-            backgroundColor: 'var(--point-color)',
-            color: 'white',
+            backgroundColor: 'var(--gray-300)',
+            color: 'var(--gray-800)',
             border: 'none',
             borderRadius: '12px',
             fontSize: '1rem',
             fontWeight: 'bold',
             cursor: 'pointer',
-            transition: 'transform 0.1s, opacity 0.2s'
+            transition: 'transform 0.1s'
           }}
           onMouseDown={(e) => e.currentTarget.style.transform = 'scale(0.96)'}
           onMouseUp={(e) => e.currentTarget.style.transform = 'scale(1)'}

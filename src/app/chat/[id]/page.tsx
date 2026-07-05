@@ -7,8 +7,10 @@ import { getUserId } from '@/lib/auth';
 import { getCharacterById, Character, getUserProfile, UserProfile, getChatMessages, ChatMessage, saveChatMessage, deleteChatMessages, unlockMessageAd } from '@/lib/db';
 import { Loader2, ChevronLeft, MoreVertical, Send, User, MoreHorizontal, Lock } from 'lucide-react';
 import AdModal from '@/components/AdModal';
+import ErrorModal from '@/components/ErrorModal';
 import { trackEvent } from '@/lib/mixpanel';
 import { trackChatAndCheckAd } from '@/lib/adTracker';
+import { saveDraft, loadDraft, clearDraft } from '@/lib/draftStorage';
 
 export default function ChatDetail({ params }: { params: { id: string } }) {
   const router = useRouter();
@@ -22,8 +24,10 @@ export default function ChatDetail({ params }: { params: { id: string } }) {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const isSendingRef = useRef(false);
+  const draftLoaded = useRef(false);
 
   const [adModalOpen, setAdModalOpen] = useState(false);
+  const [errorModalOpen, setErrorModalOpen] = useState(false);
   const [modalResolver, setModalResolver] = useState<(() => void) | null>(null);
 
   const confirmAd = () => {
@@ -60,6 +64,12 @@ export default function ChatDetail({ params }: { params: { id: string } }) {
           return;
         }
         setCharacter(char);
+
+        const draft = loadDraft(char.id);
+        if (draft) {
+          setInputMsg(draft);
+          draftLoaded.current = true;
+        }
 
         const profile = await getUserProfile(char.id);
         setUserProfile(profile);
@@ -123,13 +133,15 @@ export default function ChatDetail({ params }: { params: { id: string } }) {
   const handleSend = async () => {
     if (!inputMsg.trim() || !character || isSendingRef.current) return;
     isSendingRef.current = true;
+    const userText = inputMsg.trim();
+    const requestId = crypto.randomUUID();
 
     const userMsg: ChatMessage = {
       id: Date.now().toString(),
       userId: getUserId(),
       characterId: character.id,
       role: 'user',
-      content: inputMsg,
+      content: userText,
       createdAt: Date.now()
     };
 
@@ -137,14 +149,15 @@ export default function ChatDetail({ params }: { params: { id: string } }) {
     setInputMsg("");
     trackEvent('Chat_Message_Sent', {
       character_id: character.id,
-      message_length: inputMsg.length
+      message_length: userText.length
     });
     if (inputRef.current) {
       inputRef.current.style.height = 'auto';
     }
-    await saveChatMessage(userMsg);
 
     setIsTyping(true);
+    let success = false;
+    let savedId = '';
     try {
       const isAdTurn = trackChatAndCheckAd();
       
@@ -158,37 +171,65 @@ export default function ChatDetail({ params }: { params: { id: string } }) {
 
       // Get recent 10 messages for context
       const contextMessages = [...messages, userMsg].slice(-10);
-      const res = await fetch('/api/chat', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          character,
-          userProfile,
-          messages: contextMessages,
-          isFirstPing: false,
-          userId: getUserId(),
-          isAdTurn
-        })
-      });
-      const data = await res.json();
+
+      for (let attempt = 1; attempt <= 3; attempt++) {
+        try {
+          if (typeof window !== 'undefined' && localStorage.getItem('dev_force_error') === 'true') {
+            throw new Error('Forced error for testing');
+          }
+
+          const res = await fetch('/api/chat', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              character,
+              userProfile,
+              messages: contextMessages,
+              isFirstPing: false,
+              userId: getUserId(),
+              isAdTurn,
+              requestId
+            })
+          });
+          const data = await res.json();
+          
+          if (res.ok && data.reply) {
+            success = true;
+            savedId = data.savedId;
+            break;
+          }
+        } catch (e) {
+          console.error(`Attempt ${attempt} failed:`, e);
+        }
+        
+        if (!success && attempt < 3) {
+          await new Promise(resolve => setTimeout(resolve, 2000));
+        }
+      }
       
-      if (res.ok && data.reply) {
+      if (success) {
+        await saveChatMessage(userMsg);
+        clearDraft(character.id);
+
         if (isAdTurn) {
           await adWaitPromise;
-          await unlockMessageAd(data.savedId);
+          await unlockMessageAd(savedId);
         }
         trackEvent('Chat_Response_Received', {
           character_id: character.id,
-          message_length: data.reply.length
         });
         await loadMessages(); // reload to get the saved message
       } else {
-        alert(data.error || '답장을 생성하지 못했습니다.');
+        throw new Error('All 3 attempts failed');
       }
     } catch (error) {
       console.error('Send failed:', error);
       closeAdModal();
-      alert('오류가 발생했습니다.');
+      
+      setMessages(prev => prev.filter(m => m.id !== userMsg.id));
+      setInputMsg(userText);
+      saveDraft(character.id, userText);
+      setErrorModalOpen(true);
     } finally {
       setIsTyping(false);
       isSendingRef.current = false;
@@ -439,6 +480,10 @@ export default function ChatDetail({ params }: { params: { id: string } }) {
             value={inputMsg}
             onChange={(e) => {
               setInputMsg(e.target.value);
+              if (draftLoaded.current) {
+                clearDraft(character?.id || '');
+                draftLoaded.current = false;
+              }
               e.target.style.height = 'auto';
               e.target.style.height = Math.min(e.target.scrollHeight, 120) + 'px';
             }}
@@ -505,7 +550,8 @@ export default function ChatDetail({ params }: { params: { id: string } }) {
           </div>
         </>
       )}
-      <AdModal isOpen={adModalOpen} onConfirm={confirmAd} onClose={closeAdModal} />
+      <AdModal isOpen={adModalOpen} onConfirm={confirmAd} />
+      <ErrorModal isOpen={errorModalOpen} onConfirm={() => setErrorModalOpen(false)} />
     </div>
   );
 }

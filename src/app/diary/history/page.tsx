@@ -3,7 +3,7 @@
 import { useEffect, useState, Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { getUserId } from '@/lib/auth';
-import { getCharactersByUser, getDiariesByUserAndChar, Character, Diary } from '@/lib/db';
+import { getCharactersByUser, getDiariesByUserAndChar, getTopics, Character, Diary, Topic } from '@/lib/db';
 import { Loader2, ChevronLeft, ChevronRight } from 'lucide-react';
 import Link from 'next/link';
 
@@ -15,6 +15,7 @@ function DiaryHistoryContent() {
   const [characters, setCharacters] = useState<Character[]>([]);
   const [activeCharId, setActiveCharId] = useState<string>('');
   const [diaries, setDiaries] = useState<Diary[]>([]);
+  const [topics, setTopics] = useState<Topic[]>([]);
 
   useEffect(() => {
     const init = async () => {
@@ -26,6 +27,9 @@ function DiaryHistoryContent() {
           router.replace('/onboarding');
           return;
         }
+
+        const t = await getTopics();
+        setTopics(t);
 
         setCharacters(chars);
         const queryCharId = searchParams.get('charId');
@@ -117,7 +121,7 @@ function DiaryHistoryContent() {
               }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px' }}>
                   <span style={{ color: 'var(--point-color)', fontSize: '0.8rem', fontWeight: 'bold' }}>
-                    {Number(diary.topicId.match(/\\d+/)?.[0] || 0) + 1}번째 질문
+                    {(topics.find(t => t.id === diary.topicId)?.order || 1)}번째 질문
                   </span>
                   <span style={{ color: 'var(--gray-500)', fontSize: '0.8rem', fontWeight: 500 }}>
                     {diary.dateString.replace(/-/g, '.')}

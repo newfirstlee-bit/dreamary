@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react';
 import Image from 'next/image';
 import { useRouter, useParams } from 'next/navigation';
 import { getUserId } from '@/lib/auth';
-import { getDiaryById, getCharacterById, getUserProfile, getDiariesByUserAndChar, Diary, Character, UserProfile } from '@/lib/db';
+import { getDiaryById, getCharacterById, getUserProfile, getDiariesByUserAndChar, getTopics, Diary, Character, UserProfile, Topic } from '@/lib/db';
 import { Loader2, ChevronLeft, ChevronRight } from 'lucide-react';
 
 export default function DiaryHistoryDetailPage() {
@@ -16,6 +16,7 @@ export default function DiaryHistoryDetailPage() {
   const [diary, setDiary] = useState<Diary | null>(null);
   const [character, setCharacter] = useState<Character | null>(null);
   const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
+  const [topic, setTopic] = useState<Topic | null>(null);
   
   const [prevDiaryId, setPrevDiaryId] = useState<string | null>(null);
   const [nextDiaryId, setNextDiaryId] = useState<string | null>(null);
@@ -31,15 +32,17 @@ export default function DiaryHistoryDetailPage() {
           return;
         }
 
-        const [profile, char, allDiaries] = await Promise.all([
+        const [profile, char, allDiaries, topics] = await Promise.all([
           getUserProfile(d.characterId),
           getCharacterById(d.characterId),
-          getDiariesByUserAndChar(userId, d.characterId)
+          getDiariesByUserAndChar(userId, d.characterId),
+          getTopics()
         ]);
 
         setDiary(d);
         setUserProfile(profile);
         setCharacter(char);
+        setTopic(topics.find(t => t.id === d.topicId) || null);
 
         // allDiaries are sorted newest first.
         // allDiaries are sorted newest first. 
@@ -82,7 +85,9 @@ export default function DiaryHistoryDetailPage() {
       <main className="content" style={{ display: 'flex', flexDirection: 'column' }}>
         {/* Topic Display */}
         <div style={{ backgroundColor: 'white', padding: '20px', borderRadius: '15px', border: '1px solid var(--border-color)', marginBottom: '20px', boxShadow: '0 4px 10px rgba(0,0,0,0.02)' }}>
-          <p style={{ color: 'var(--point-color)', fontSize: '0.85rem', fontWeight: 'bold', marginBottom: '8px' }}>질문</p>
+          <p style={{ color: 'var(--point-color)', fontSize: '0.85rem', fontWeight: 'bold', marginBottom: '8px' }}>
+            {topic ? `${topic.order}번째 질문` : '질문'}
+          </p>
           <h3 style={{ fontSize: '1.2rem', lineHeight: '1.4' }}>{diary.topicContent}</h3>
         </div>
 
