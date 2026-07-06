@@ -24,17 +24,18 @@ function applyJosa(word: string, josaType: '이/가' | '을/를' | '은/는' | '
   return word + getJosa(word, josaType);
 }
 
-type Phase = 'character' | 'narrative-prompt' | 'narrative' | 'user' | 'saving';
+type Phase = 'value-proposition' | 'character' | 'narrative-prompt' | 'narrative' | 'user' | 'saving';
 
 export default function OnboardingPage() {
   const router = useRouter();
   const store = useOnboardingStore();
-  const [phase, setPhase] = useState<Phase>('character');
+  const [phase, setPhase] = useState<Phase>('value-proposition');
   const [charStep, setCharStep] = useState(1);
   const [narrativeStep, setNarrativeStep] = useState(1);
   const [userStep, setUserStep] = useState(1);
   const [viewportStyle, setViewportStyle] = useState({ height: '100dvh', top: 0 });
   const [showUserModal, setShowUserModal] = useState(false);
+  const [isNextEnabled, setIsNextEnabled] = useState(false);
 
   useEffect(() => {
     trackEvent('Onboarding_Started');
@@ -58,6 +59,19 @@ export default function OnboardingPage() {
       };
     }
   }, []);
+
+  useEffect(() => {
+    if (phase === 'value-proposition') {
+      trackEvent('ValueProposition_Viewed');
+      setIsNextEnabled(false);
+      const timer = setTimeout(() => {
+        setIsNextEnabled(true);
+      }, 1600); // 1.2s delay + 0.6s anim = 1.8s. 버튼 CSS transition(0.3s) 고려하여 1.6s에 활성화 시작
+      return () => clearTimeout(timer);
+    } else if (phase === 'character' && charStep === 1) {
+      trackEvent('CharacterNameInput_Viewed');
+    }
+  }, [phase, charStep]);
 
   const handleNextCharStep = () => {
     if (charStep < 7) {
@@ -90,7 +104,7 @@ export default function OnboardingPage() {
     }
     if (phase === 'character') {
       if (charStep > 1) setCharStep(charStep - 1);
-      else router.push('/');
+      else setPhase('value-proposition');
     } else if (phase === 'narrative-prompt') {
       setPhase('character');
       setCharStep(7);
@@ -188,7 +202,7 @@ export default function OnboardingPage() {
       progress = (userStep / 4) * 100;
     }
 
-    if (phase === 'narrative-prompt' || phase === 'saving') return null;
+    if (phase === 'value-proposition' || phase === 'narrative-prompt' || phase === 'saving') return null;
 
     return (
       <div style={{ width: '100%', height: '4px', backgroundColor: 'var(--border-color)' }}>
@@ -198,7 +212,7 @@ export default function OnboardingPage() {
   };
 
   return (
-    <div className="app-container" style={{ 
+    <div className={`app-container ${phase === 'value-proposition' ? 'diary-bg' : ''}`} style={{ 
       minHeight: viewportStyle.height, 
       height: viewportStyle.height, 
       position: 'absolute', 
@@ -210,8 +224,8 @@ export default function OnboardingPage() {
     }}>
       {renderProgressBar()}
       
-      <header style={{ display: 'flex', alignItems: 'center', padding: '20px', paddingBottom: '10px' }}>
-        {phase !== 'saving' && (
+      <header style={{ display: 'flex', alignItems: 'center', padding: '20px', paddingBottom: '10px', minHeight: '68px' }}>
+        {phase !== 'saving' && phase !== 'value-proposition' && (
           <button onClick={handleBack} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '5px', display: 'flex', alignItems: 'center' }}>
             <ChevronLeft size={28} color="var(--gray-800)" />
           </button>
@@ -219,6 +233,49 @@ export default function OnboardingPage() {
       </header>
 
       <main className="content" style={{ display: 'flex', flexDirection: 'column', padding: 0 }}>
+        {phase === 'value-proposition' && (
+          <div style={{ flex: 1, display: 'flex', flexDirection: 'column', padding: '0 20px' }}>
+            <div style={{ display: 'flex', justifyContent: 'center', marginTop: '40px' }}>
+              <h1 style={{ fontSize: '1.5rem', lineHeight: '1.4', textAlign: 'center', fontWeight: 'bold' }}>
+                드림캐와 교환일기 작성하고<br/>매일 답장 받아보세요
+              </h1>
+            </div>
+            
+            <div style={{ flex: 1, display: 'flex', flexDirection: 'column', justifyContent: 'center', gap: '27px', padding: '0 10px', transform: 'translateY(-10px)' }}>
+              {/* User Message */}
+              <div style={{ display: 'flex', justifyContent: 'flex-end', opacity: 0, animation: 'fadeInUp 0.6s ease 0.5s forwards' }}>
+                <div className="post-it" style={{ maxWidth: '85%', lineHeight: '1.6', fontSize: '18px' }}>
+                  오늘부터 교환일기 시작해볼까?
+                </div>
+              </div>
+
+              {/* Character Message */}
+              <div style={{ display: 'flex', justifyContent: 'flex-start', opacity: 0, animation: 'fadeInUp 0.6s ease 1.2s forwards' }}>
+                <div className="notebook-paper" style={{ maxWidth: '85%', lineHeight: '1.6', fontSize: '18px' }}>
+                  네가 먼저 적으면 내가 답장할게.<br/>까먹지 마, 약속.
+                </div>
+              </div>
+            </div>
+            
+            <div style={{ paddingBottom: '20px' }}>
+              <button 
+                className="btn-primary" 
+                onClick={() => setPhase('character')}
+                disabled={!isNextEnabled}
+                style={{ 
+                  width: '100%', 
+                  marginTop: 0, 
+                  opacity: isNextEnabled ? 1 : 0.5, 
+                  transition: 'opacity 0.3s ease',
+                  cursor: isNextEnabled ? 'pointer' : 'not-allowed'
+                }}
+              >
+                교환일기 시작하기
+              </button>
+            </div>
+          </div>
+        )}
+        
         {phase === 'character' && <CharacterStep step={charStep} store={store} onNext={handleNextCharStep} />}
         
         {phase === 'narrative-prompt' && (
@@ -274,6 +331,10 @@ export default function OnboardingPage() {
       
       <style dangerouslySetInnerHTML={{__html: `
         @keyframes spin { 100% { transform: rotate(360deg); } }
+        @keyframes fadeInUp {
+          from { opacity: 0; transform: translateY(20px); }
+          to { opacity: 1; transform: translateY(0); }
+        }
         .input-field {
           width: 100%;
           padding: 15px;
@@ -430,7 +491,7 @@ function CharacterStep({ step, store, onNext }: { step: number, store: any, onNe
     <div style={{ flex: 1, display: 'flex', flexDirection: 'column', animation: 'fadeIn 0.3s ease', overflow: 'hidden' }}>
       <div style={{ flex: 1, overflowY: 'auto', padding: '0 20px 20px 20px' }}>
         <h2 style={{ fontSize: '1.5rem', marginBottom: '10px', lineHeight: '1.4' }}>
-          {step === 1 && "캐릭터의 이름은 무엇인가요?"}
+          {step === 1 && "일기를 같이 써줄 드림캐의 이름은?"}
           {step === 2 && `${charNameStr}의 성별은 무엇인가요?`}
           {step === 3 && `${charNameText} 나에게 느끼는 감정은?`}
           {step === 4 && `${charNameText} 나를 부르는 호칭은?`}

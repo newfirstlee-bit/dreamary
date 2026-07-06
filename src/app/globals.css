@@ -233,6 +233,7 @@ input[type="range"]::-moz-range-track {
 /* notebook style container */
 .notebook-paper {
   background-color: #FEF9E7;
+  border: 1px solid #EBE4CB;
   border-left: 2px solid #F1948A;
   padding: 15px 20px;
   position: relative;
