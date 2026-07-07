@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState, useRef } from 'react';
-import { getTopics, saveTopic, deleteTopic, Topic } from '@/lib/db';
+import { getTopics, saveTopic, deleteTopic, getTopicAnswerCount, Topic } from '@/lib/db';
 import { Loader2, Trash2, GripVertical, Edit2 } from 'lucide-react';
 
 export default function AdminTopics() {
@@ -9,6 +9,7 @@ export default function AdminTopics() {
   const [loading, setLoading] = useState(true);
   const [bulkInput, setBulkInput] = useState('');
   const [saving, setSaving] = useState(false);
+  const [answerCounts, setAnswerCounts] = useState<Record<string, number>>({});
   
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   
@@ -19,6 +20,15 @@ export default function AdminTopics() {
     setLoading(true);
     const data = await getTopics();
     setTopics(data);
+    
+    const counts: Record<string, number> = {};
+    await Promise.all(
+      data.map(async (t) => {
+        counts[t.id] = await getTopicAnswerCount(t.id);
+      })
+    );
+    setAnswerCounts(counts);
+    
     setLoading(false);
   };
 
@@ -175,7 +185,10 @@ export default function AdminTopics() {
                 />
                 <span style={{ flex: 1 }}>{t.content}</span>
               </div>
-              <div style={{ display: 'flex', gap: '10px' }}>
+              <div style={{ display: 'flex', gap: '15px', alignItems: 'center' }}>
+                <span style={{ fontSize: '0.9rem', color: 'var(--gray-500)', backgroundColor: '#eee', padding: '4px 8px', borderRadius: '4px' }}>
+                  답변 {answerCounts[t.id] || 0}개
+                </span>
                 <button onClick={() => handleEdit(t)} style={{ padding: '8px', color: 'var(--gray-500)', cursor: 'pointer', background: 'none', border: 'none' }}>
                   <Edit2 size={18} />
                 </button>

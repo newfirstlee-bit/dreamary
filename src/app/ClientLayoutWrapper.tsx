@@ -13,7 +13,12 @@ export default function ClientLayoutWrapper({ children }: { children: React.Reac
   const [isDesktop, setIsDesktop] = useState(false);
 
   useEffect(() => {
-    if (!isAdmin) {
+    if (typeof window !== 'undefined' && window.location.search.includes('block_analytics=true')) {
+      localStorage.setItem('block_analytics', 'true');
+      alert('분석 도구(믹스패널/클래리티) 추적이 영구적으로 차단되었습니다.');
+    }
+
+    if (!isAdmin && localStorage.getItem('block_analytics') !== 'true') {
       initMixpanel();
       const userId = getUserId();
       if (userId) {

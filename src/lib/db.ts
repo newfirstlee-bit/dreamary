@@ -1,5 +1,5 @@
 import { db } from './firebase';
-import { collection, doc, getDocs, setDoc, updateDoc, deleteDoc, getDoc, query, where, orderBy } from 'firebase/firestore';
+import { collection, doc, getDocs, setDoc, updateDoc, deleteDoc, getDoc, query, where, orderBy, getCountFromServer } from 'firebase/firestore';
 
 export interface Character {
   id: string;
@@ -123,6 +123,12 @@ export const saveTopic = async (topic: Topic) => {
 
 export const deleteTopic = async (topicId: string) => {
   await deleteDoc(doc(db, 'topics', topicId));
+};
+
+export const getTopicAnswerCount = async (topicId: string): Promise<number> => {
+  const q = query(collection(db, 'diaries'), where('topicId', '==', topicId));
+  const snapshot = await getCountFromServer(q);
+  return snapshot.data().count;
 };
 
 // Diaries CRUD

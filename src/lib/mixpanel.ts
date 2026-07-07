@@ -5,6 +5,8 @@ let isInitialized = false;
 
 export const initMixpanel = () => {
   if (typeof window !== 'undefined') {
+    if (window.localStorage.getItem('block_analytics') === 'true') return;
+    
     if (!MIXPANEL_TOKEN) {
       console.warn('Mixpanel Token is missing! Check .env.local and restart the server.');
       return;

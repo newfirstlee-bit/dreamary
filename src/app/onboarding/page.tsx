@@ -68,8 +68,16 @@ export default function OnboardingPage() {
         setIsNextEnabled(true);
       }, 1600); // 1.2s delay + 0.6s anim = 1.8s. 버튼 CSS transition(0.3s) 고려하여 1.6s에 활성화 시작
       return () => clearTimeout(timer);
-    } else if (phase === 'character' && charStep === 1) {
-      trackEvent('CharacterNameInput_Viewed');
+    } else if (phase === 'character') {
+      if (charStep === 1) trackEvent('CharacterNameInput_Viewed');
+      else if (charStep === 2) trackEvent('CharacterGenderInput_Viewed');
+      else if (charStep === 3) trackEvent('CharacterFeelingInput_Viewed');
+      else if (charStep === 4) trackEvent('CharacterTitleInput_Viewed');
+      else if (charStep === 5) trackEvent('CharacterExampleChatInput_Viewed');
+      else if (charStep === 6) trackEvent('CharacterNegativeInput_Viewed');
+      else if (charStep === 7) trackEvent('CharacterImageInput_Viewed');
+    } else if (phase === 'narrative-prompt') {
+      trackEvent('NarrativePrompt_Viewed');
     }
   }, [phase, charStep]);
 
