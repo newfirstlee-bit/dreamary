@@ -46,7 +46,7 @@ export default function Home() {
         // 데모 링크 처리 (?demo=true)
         const urlParams = new URLSearchParams(window.location.search);
         if (urlParams.get('demo') === 'true') {
-          userId = '3192e3a3-4d22-4901-8b31-88208ab3046f'; // 유저님이 직접 제공해주신 완성된 UUID
+          userId = '4b0b39a0-d691-4f5d-b562-0fc49a02e790'; // 유저님이 직접 제공해주신 완성된 UUID
           localStorage.setItem('dreamary_user_id', userId);
           // 쿠키도 함께 업데이트해줍니다
           document.cookie = "dreamary_user_id=" + userId + "; path=/; max-age=31536000";
