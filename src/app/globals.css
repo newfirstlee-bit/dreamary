@@ -164,6 +164,10 @@ body {
   opacity: 1; /* Firefox */
 }
 
+.placeholder-regular::placeholder {
+  font-weight: normal;
+}
+
 
 /* Touch-Friendly Custom Slider */
 input[type="range"] {

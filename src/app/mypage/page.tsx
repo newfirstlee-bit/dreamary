@@ -345,7 +345,7 @@ export default function MyPage() {
                 justifyContent: 'center',
                 alignItems: 'center',
                 gap: '8px',
-                marginTop: '5px'
+                marginTop: '-5px'
               }}
             >
               <Plus size={20} /> {t('mypage.newPair')}
@@ -411,7 +411,7 @@ export default function MyPage() {
             onClick={() => setShowMigrateModal(true)}
             style={{ width: '100%', padding: '15px', borderRadius: '12px', border: 'none', backgroundColor: 'var(--gray-200)', color: 'var(--gray-800)', fontWeight: 'bold', fontSize: '1rem', display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '8px', cursor: 'pointer', marginTop: '10px' }}
           >
-            <Key size={20} /> {t('mypage.enterBackupCode')}
+            {t('mypage.enterBackupCode')}
           </button>
         )}
 
@@ -597,6 +597,7 @@ export default function MyPage() {
               {t('mypage.migrateGuide')}
             </p>
             <input 
+              className="placeholder-regular"
               type="text"
               value={inputBackupCode}
               onChange={(e) => setInputBackupCode(e.target.value.toUpperCase())}
