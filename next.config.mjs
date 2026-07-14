@@ -9,7 +9,9 @@ const nextConfig = {
   typescript: {
     ignoreBuildErrors: true,
   },
-  serverExternalPackages: ["firebase-admin"],
+  experimental: {
+    serverComponentsExternalPackages: ["firebase-admin"],
+  },
 };
 
 export default nextConfig;
