@@ -407,16 +407,12 @@ export default function MyPage() {
         )}
 
         {user && (
-          <section style={{ marginTop: '10px' }}>
-            <div style={{ backgroundColor: 'white', padding: '20px', borderRadius: '15px', border: '1px solid var(--border-color)', display: 'flex', flexDirection: 'column', gap: '15px' }}>
-              <button 
-                onClick={() => setShowMigrateModal(true)}
-                style={{ width: '100%', padding: '15px', borderRadius: '12px', border: '1px solid var(--point-color)', backgroundColor: 'white', color: 'var(--point-color)', fontWeight: 'bold', fontSize: '1rem', display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '8px', cursor: 'pointer' }}
-              >
-                <Key size={20} /> {t('mypage.enterBackupCode')}
-              </button>
-            </div>
-          </section>
+          <button 
+            onClick={() => setShowMigrateModal(true)}
+            style={{ width: '100%', padding: '15px', borderRadius: '12px', border: 'none', backgroundColor: 'var(--gray-200)', color: 'var(--gray-800)', fontWeight: 'bold', fontSize: '1rem', display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '8px', cursor: 'pointer', marginTop: '10px' }}
+          >
+            <Key size={20} /> {t('mypage.enterBackupCode')}
+          </button>
         )}
 
         {user && (
