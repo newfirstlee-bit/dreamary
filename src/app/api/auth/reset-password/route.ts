@@ -19,11 +19,11 @@ export async function POST(req: Request) {
   try {
     const { id, email } = await req.json();
     if (!id || !email) {
-      return NextResponse.json({ error: '아이디와 이메일을 모두 입력해주세요.' }, { status: 400 });
+      return NextResponse.json({ error: 'auth.missingFields' }, { status: 400 });
     }
 
     if (!adminAuth) {
-      return NextResponse.json({ error: '서버 인증 설정이 완료되지 않았습니다. 관리자에게 문의하세요.' }, { status: 500 });
+      return NextResponse.json({ error: 'auth.serverConfigError' }, { status: 500 });
     }
 
     // 1. 해당 아이디와 이메일이 일치하는 계정 찾기
@@ -32,7 +32,7 @@ export async function POST(req: Request) {
     const snapshot = await getDocs(q);
 
     if (snapshot.empty) {
-      return NextResponse.json({ error: '입력하신 정보와 일치하는 계정이 없습니다.' }, { status: 404 });
+      return NextResponse.json({ error: 'auth.accountNotFound' }, { status: 404 });
     }
 
     const account = snapshot.docs[0].data();
@@ -44,8 +44,8 @@ export async function POST(req: Request) {
 
     // 3. 이메일 발송
     if (process.env.RESEND_API_KEY) {
-      await resend.emails.send({
-        from: 'Dreamary <noreply@dreamary.app>', // 도메인 인증 필요
+      const { data, error: resendError } = await resend.emails.send({
+        from: 'onboarding@resend.dev', // 테스트용 기본 발신자
         to: email,
         subject: '[Dreamary] 임시 비밀번호 발급 안내',
         html: `
@@ -56,6 +56,11 @@ export async function POST(req: Request) {
           </div>
         `
       });
+
+      if (resendError) {
+        console.error('Resend Error:', resendError);
+        return NextResponse.json({ error: `이메일 발송 실패: ${resendError.message}` }, { status: 500 });
+      }
     } else {
       console.warn('RESEND_API_KEY is not set. Temp password:', tempPassword);
     }
@@ -64,6 +69,6 @@ export async function POST(req: Request) {
 
   } catch (error) {
     console.error('Reset Password Error:', error);
-    return NextResponse.json({ error: '서버 오류가 발생했습니다.' }, { status: 500 });
+    return NextResponse.json({ error: 'auth.serverError' }, { status: 500 });
   }
 }

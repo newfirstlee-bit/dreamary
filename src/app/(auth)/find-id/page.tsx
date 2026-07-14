@@ -28,7 +28,7 @@ export default function FindIdPage() {
       const data = await res.json();
       
       if (!res.ok) {
-        throw new Error(data.error || t('auth.findIdFailed'));
+        throw new Error(data.error?.startsWith('auth.') ? t(data.error) : (data.error || t('auth.findIdFailed')));
       }
 
       setSuccess(true);

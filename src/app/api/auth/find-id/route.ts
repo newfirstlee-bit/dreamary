@@ -9,7 +9,7 @@ export async function POST(req: Request) {
   try {
     const { email } = await req.json();
     if (!email) {
-      return NextResponse.json({ error: '이메일을 입력해주세요.' }, { status: 400 });
+      return NextResponse.json({ error: 'auth.missingEmail' }, { status: 400 });
     }
 
     // 1. 해당 이메일로 가입된 계정 찾기
@@ -18,7 +18,7 @@ export async function POST(req: Request) {
     const snapshot = await getDocs(q);
 
     if (snapshot.empty) {
-      return NextResponse.json({ error: '해당 이메일로 가입된 계정이 없습니다.' }, { status: 404 });
+      return NextResponse.json({ error: 'auth.accountNotFound' }, { status: 404 });
     }
 
     const account = snapshot.docs[0].data();
@@ -26,8 +26,8 @@ export async function POST(req: Request) {
 
     // 2. 이메일 발송
     if (process.env.RESEND_API_KEY) {
-      await resend.emails.send({
-        from: 'Dreamary <noreply@dreamary.app>', // 도메인 인증 필요, 테스트 시 수정 필요
+      const { data, error } = await resend.emails.send({
+        from: 'onboarding@resend.dev', // 테스트용 기본 발신자
         to: email,
         subject: '[Dreamary] 아이디 찾기 안내',
         html: `
@@ -38,6 +38,11 @@ export async function POST(req: Request) {
           </div>
         `
       });
+
+      if (error) {
+        console.error('Resend Error:', error);
+        return NextResponse.json({ error: `이메일 발송 실패: ${error.message} (도메인 인증 문제일 수 있습니다)` }, { status: 500 });
+      }
     } else {
       console.warn('RESEND_API_KEY is not set. Email would be sent with ID:', userId);
       // 개발 환경이거나 키가 없을 때는 성공으로 처리하되 실제 발송은 안됨
@@ -47,6 +52,6 @@ export async function POST(req: Request) {
 
   } catch (error) {
     console.error('Find ID Error:', error);
-    return NextResponse.json({ error: '서버 오류가 발생했습니다.' }, { status: 500 });
+    return NextResponse.json({ error: 'auth.serverError' }, { status: 500 });
   }
 }

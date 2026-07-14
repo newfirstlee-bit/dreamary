@@ -29,7 +29,7 @@ export default function ResetPasswordPage() {
       const data = await res.json();
       
       if (!res.ok) {
-        throw new Error(data.error || t('auth.resetFailed'));
+        throw new Error(data.error?.startsWith('auth.') ? t(data.error) : (data.error || t('auth.resetFailed')));
       }
 
       setSuccess(true);
