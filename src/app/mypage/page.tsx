@@ -51,6 +51,29 @@ export default function MyPage() {
   const [editPasswordError, setEditPasswordError] = useState('');
   const [isSavingInfo, setIsSavingInfo] = useState(false);
 
+  const [viewportStyle, setViewportStyle] = useState({ height: '100dvh', top: 0 });
+
+  useEffect(() => {
+    if (window.visualViewport) {
+      const handleResizeOrScroll = () => {
+        if (!window.visualViewport) return;
+        setViewportStyle({
+          height: `${window.visualViewport.height}px`,
+          top: window.visualViewport.pageTop
+        });
+      };
+      
+      window.visualViewport.addEventListener('resize', handleResizeOrScroll);
+      window.visualViewport.addEventListener('scroll', handleResizeOrScroll);
+      handleResizeOrScroll();
+      
+      return () => {
+        window.visualViewport?.removeEventListener('resize', handleResizeOrScroll);
+        window.visualViewport?.removeEventListener('scroll', handleResizeOrScroll);
+      };
+    }
+  }, []);
+
   const truncate = (name: string) => name.length > 5 ? name.slice(0, 5) + '...' : name;
 
   const handleDeletePair = async () => {
@@ -272,7 +295,7 @@ export default function MyPage() {
                   onClick={() => setShowPasswordConfirmModal(true)}
                   style={{ padding: '8px 16px', backgroundColor: 'var(--gray-100)', border: 'none', borderRadius: '8px', color: 'var(--gray-700)', fontWeight: 'bold', cursor: 'pointer', fontSize: '0.9rem' }}
                 >
-                  수정
+                  {t('common.edit')}
                 </button>
               </div>
             </div>
@@ -634,18 +657,21 @@ export default function MyPage() {
       {/* 비밀번호 확인 모달 (풀스크린) */}
       {showPasswordConfirmModal && (
         <div style={{ 
-          position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, 
+          position: 'absolute', 
+          top: viewportStyle.top, 
+          height: viewportStyle.height,
+          left: 0, right: 0, 
           backgroundColor: 'white', zIndex: 4000,
           display: 'flex', flexDirection: 'column'
         }}>
-          <header style={{ display: 'flex', alignItems: 'center', padding: '20px', borderBottom: '1px solid var(--border-color)' }}>
+          <header style={{ display: 'flex', alignItems: 'center', padding: '20px', borderBottom: '1px solid var(--border-color)', flexShrink: 0 }}>
             <button onClick={() => setShowPasswordConfirmModal(false)} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '5px', display: 'flex', alignItems: 'center', marginLeft: '-5px' }}>
               <ChevronLeft size={28} color="var(--gray-800)" />
             </button>
             <h2 style={{ fontSize: '1.2rem', fontWeight: 'bold', marginLeft: '10px' }}>{t('mypage.verifyPasswordTitle')}</h2>
           </header>
           
-          <div style={{ padding: '30px 20px', flex: 1, display: 'flex', flexDirection: 'column' }}>
+          <div style={{ padding: '30px 20px', flex: 1, display: 'flex', flexDirection: 'column', overflowY: 'auto' }}>
             <p style={{ fontSize: '1rem', color: 'var(--gray-600)', marginBottom: '30px' }}>
               {t('mypage.verifyPasswordGuide')}
             </p>
@@ -658,9 +684,7 @@ export default function MyPage() {
                 style={{ width: '100%', padding: '16px', paddingRight: '45px', borderRadius: '12px', border: `1px solid ${verifyError ? 'red' : 'var(--border-color)'}`, fontSize: '1.1rem', outline: 'none' }}
               />
               <button
-                type="button"
-                onClick={() => setShowPassword(!showPassword)}
-                style={{ position: 'absolute', right: '15px', top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', padding: 0, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--gray-500)' }}
+              style={{ position: 'absolute', right: '15px', top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', padding: 0, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--gray-500)' }}
               >
                 {showPassword ? <EyeOff size={22} /> : <Eye size={22} />}
               </button>
@@ -672,23 +696,19 @@ export default function MyPage() {
                 setShowPasswordConfirmModal(false);
                 router.push('/find-id');
               }}
-              style={{ alignSelf: 'flex-end', background: 'none', border: 'none', color: 'var(--point-color)', fontSize: '0.9rem', cursor: 'pointer', marginBottom: '30px', fontWeight: '500' }}
+              style={{ alignSelf: 'flex-end', background: 'none', border: 'none', color: 'var(--point-color)', fontSize: '0.9rem', cursor: 'pointer', marginBottom: '10px', fontWeight: '500' }}
             >
               {t('mypage.findPassword')}
             </button>
+          </div>
 
+          <div style={{ padding: '15px 20px 20px 20px', backgroundColor: 'white', borderTop: '1px solid var(--border-color)', flexShrink: 0 }}>
             <button 
               onClick={handleVerifyPassword}
               disabled={isVerifying || !verifyPassword}
-              style={{ 
-                width: '100%', padding: '16px', 
-                backgroundColor: isVerifying || !verifyPassword ? 'var(--gray-300)' : 'var(--point-color)', 
-                color: 'white', border: 'none', borderRadius: '12px', fontSize: '1.1rem', fontWeight: 'bold', 
-                cursor: isVerifying || !verifyPassword ? 'not-allowed' : 'pointer',
-                marginTop: 'auto', marginBottom: '20px'
-              }}
+              style={{ width: '100%', padding: '16px', backgroundColor: isVerifying || !verifyPassword ? 'var(--gray-300)' : 'var(--point-color)', color: 'white', border: 'none', borderRadius: '12px', fontSize: '1.1rem', fontWeight: 'bold', cursor: isVerifying || !verifyPassword ? 'not-allowed' : 'pointer' }}
             >
-              {isVerifying ? '확인 중...' : '확인'}
+              {isVerifying ? t('common.verifying') : t('common.confirm')}
             </button>
           </div>
         </div>
@@ -697,19 +717,22 @@ export default function MyPage() {
       {/* 정보 수정 모달 (풀스크린) */}
       {showEditInfoModal && (
         <div style={{ 
-          position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, 
+          position: 'absolute', 
+          top: viewportStyle.top, 
+          height: viewportStyle.height,
+          left: 0, right: 0, 
           backgroundColor: 'white', zIndex: 4000,
-          display: 'flex', flexDirection: 'column', overflowY: 'auto'
+          display: 'flex', flexDirection: 'column'
         }}>
-          <header style={{ display: 'flex', alignItems: 'center', padding: '20px', borderBottom: '1px solid var(--border-color)' }}>
+          <header style={{ display: 'flex', alignItems: 'center', padding: '20px', borderBottom: '1px solid var(--border-color)', flexShrink: 0 }}>
             <button onClick={() => setShowEditInfoModal(false)} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '5px', display: 'flex', alignItems: 'center', marginLeft: '-5px' }}>
               <ChevronLeft size={28} color="var(--gray-800)" />
             </button>
             <h2 style={{ fontSize: '1.2rem', fontWeight: 'bold', marginLeft: '10px' }}>{t('mypage.editInfoTitle')}</h2>
           </header>
           
-          <div style={{ padding: '30px 20px', flex: 1, display: 'flex', flexDirection: 'column' }}>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '20px', marginBottom: '40px' }}>
+          <div style={{ padding: '30px 20px', flex: 1, display: 'flex', flexDirection: 'column', overflowY: 'auto' }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '20px', paddingBottom: '20px' }}>
               <div>
                 <label style={{ display: 'block', fontSize: '0.95rem', color: 'var(--gray-700)', marginBottom: '8px', fontWeight: 'bold' }}>{t('mypage.idLabel')}</label>
                 <input 
@@ -748,7 +771,7 @@ export default function MyPage() {
                   type="date" 
                   value={editBirthdate} 
                   onChange={(e) => setEditBirthdate(e.target.value)}
-                  style={{ width: '100%', padding: '16px', borderRadius: '12px', border: '1px solid var(--border-color)', fontSize: '1.05rem', outline: 'none', color: editBirthdate ? 'black' : 'var(--gray-400)', boxSizing: 'border-box', maxWidth: '100%' }}
+                  style={{ width: '100%', padding: '16px 14px', borderRadius: '12px', border: '1px solid var(--border-color)', fontSize: '1.05rem', outline: 'none', color: editBirthdate ? 'black' : 'var(--gray-400)', boxSizing: 'border-box', display: 'block', margin: 0, height: '54px', WebkitAppearance: 'none', appearance: 'none', backgroundColor: 'transparent' }}
                 />
               </div>
               <div>
@@ -772,7 +795,9 @@ export default function MyPage() {
                 {editPasswordError && <p style={{ color: 'red', fontSize: '0.85rem', marginTop: '6px' }}>{editPasswordError}</p>}
               </div>
             </div>
+          </div>
 
+          <div style={{ padding: '15px 20px 20px 20px', backgroundColor: 'white', borderTop: '1px solid var(--border-color)', flexShrink: 0 }}>
             <button 
               onClick={handleSaveInfo}
               disabled={isSavingInfo}
@@ -780,8 +805,7 @@ export default function MyPage() {
                 width: '100%', padding: '16px', 
                 backgroundColor: isSavingInfo ? 'var(--gray-300)' : 'var(--point-color)', 
                 color: 'white', border: 'none', borderRadius: '12px', fontSize: '1.1rem', fontWeight: 'bold', 
-                cursor: isSavingInfo ? 'not-allowed' : 'pointer',
-                marginTop: 'auto', marginBottom: '20px'
+                cursor: isSavingInfo ? 'not-allowed' : 'pointer'
               }}
             >
               {isSavingInfo ? t('common.saving') : t('common.save')}
