@@ -112,6 +112,7 @@
   "mypage.doMigrate": "移行する",
   "mypage.migrating": "処理中...",
   "mypage.migrateSuccess": "チャット履歴の移行に成功しました。",
+  "mypage.chatHistory": "チャット履歴",
   "mypage.pairTheme": "チャットルームテーマ",
   "mypage.pairLimit": "ペアは最大10個まで登録できます。",
   "mypage.uuid": "固有識別子 (UUID)",

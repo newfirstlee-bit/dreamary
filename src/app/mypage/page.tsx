@@ -407,12 +407,19 @@ export default function MyPage() {
         )}
 
         {user && (
-          <button 
-            onClick={() => setShowMigrateModal(true)}
-            style={{ width: '100%', padding: '15px', borderRadius: '12px', border: 'none', backgroundColor: 'var(--gray-200)', color: 'var(--gray-800)', fontWeight: 'bold', fontSize: '1rem', display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '8px', cursor: 'pointer', marginTop: '10px' }}
-          >
-            {t('mypage.enterBackupCode')}
-          </button>
+          <section style={{ marginTop: '30px' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '15px' }}>
+              <h2 style={{ fontSize: '1.2rem', fontWeight: 'bold' }}>
+                {t('mypage.chatHistory')}
+              </h2>
+            </div>
+            <button 
+              onClick={() => setShowMigrateModal(true)}
+              style={{ width: '100%', padding: '15px', borderRadius: '12px', border: 'none', backgroundColor: 'var(--gray-200)', color: 'var(--gray-800)', fontWeight: 'bold', fontSize: '1rem', display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '8px', cursor: 'pointer' }}
+            >
+              {t('mypage.enterBackupCode')}
+            </button>
+          </section>
         )}
 
         {user && (
