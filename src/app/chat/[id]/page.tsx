@@ -362,17 +362,18 @@ export default function ChatDetail({ params }: { params: { id: string } }) {
   }
 
   return (
-    <div className="app-container" style={{ display: 'flex', flexDirection: 'column', backgroundColor: 'var(--gray-50)', height: '100vh', overflow: 'hidden', position: 'relative' }}>
+    <div className="app-container" style={{ display: 'flex', flexDirection: 'column', backgroundColor: 'var(--gray-50)', height: '100dvh', overflow: 'hidden', position: 'relative' }}>
       {/* Header */}
       <header className="header" style={{ 
         backgroundColor: 'white', 
         borderBottom: '1px solid var(--border-color)', 
-        position: 'relative', 
+        position: 'sticky', 
+        top: 0,
         display: 'flex', 
         justifyContent: 'space-between', 
         alignItems: 'center',
         padding: '15px',
-        zIndex: 10
+        zIndex: 100
       }}>
         <button onClick={() => router.push('/chat')} style={{ background: 'none', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', color: 'var(--foreground)' }}>
           <ChevronLeft size={24} color="var(--gray-800)" />

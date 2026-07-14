@@ -642,19 +642,19 @@ export default function MyPage() {
             <button onClick={() => setShowPasswordConfirmModal(false)} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '5px', display: 'flex', alignItems: 'center', marginLeft: '-5px' }}>
               <ChevronLeft size={28} color="var(--gray-800)" />
             </button>
-            <h2 style={{ fontSize: '1.2rem', fontWeight: 'bold', marginLeft: '10px' }}>비밀번호 확인</h2>
+            <h2 style={{ fontSize: '1.2rem', fontWeight: 'bold', marginLeft: '10px' }}>{t('mypage.verifyPasswordTitle')}</h2>
           </header>
           
           <div style={{ padding: '30px 20px', flex: 1, display: 'flex', flexDirection: 'column' }}>
             <p style={{ fontSize: '1rem', color: 'var(--gray-600)', marginBottom: '30px' }}>
-              정보 수정을 위해 비밀번호를 입력해주세요.
+              {t('mypage.verifyPasswordGuide')}
             </p>
             <div style={{ width: '100%', position: 'relative', marginBottom: '5px' }}>
               <input 
                 type={showPassword ? 'text' : 'password'}
                 value={verifyPassword}
                 onChange={(e) => setVerifyPassword(e.target.value)}
-                placeholder="비밀번호"
+                placeholder={t('mypage.passwordPlaceholder')}
                 style={{ width: '100%', padding: '16px', paddingRight: '45px', borderRadius: '12px', border: `1px solid ${verifyError ? 'red' : 'var(--border-color)'}`, fontSize: '1.1rem', outline: 'none' }}
               />
               <button
@@ -674,7 +674,7 @@ export default function MyPage() {
               }}
               style={{ alignSelf: 'flex-end', background: 'none', border: 'none', color: 'var(--point-color)', fontSize: '0.9rem', cursor: 'pointer', marginBottom: '30px', fontWeight: '500' }}
             >
-              비밀번호 찾기
+              {t('mypage.findPassword')}
             </button>
 
             <button 
@@ -705,68 +705,68 @@ export default function MyPage() {
             <button onClick={() => setShowEditInfoModal(false)} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '5px', display: 'flex', alignItems: 'center', marginLeft: '-5px' }}>
               <ChevronLeft size={28} color="var(--gray-800)" />
             </button>
-            <h2 style={{ fontSize: '1.2rem', fontWeight: 'bold', marginLeft: '10px' }}>개인정보 수정</h2>
+            <h2 style={{ fontSize: '1.2rem', fontWeight: 'bold', marginLeft: '10px' }}>{t('mypage.editInfoTitle')}</h2>
           </header>
           
           <div style={{ padding: '30px 20px', flex: 1, display: 'flex', flexDirection: 'column' }}>
             <div style={{ display: 'flex', flexDirection: 'column', gap: '20px', marginBottom: '40px' }}>
               <div>
-                <label style={{ display: 'block', fontSize: '0.95rem', color: 'var(--gray-700)', marginBottom: '8px', fontWeight: 'bold' }}>아이디</label>
+                <label style={{ display: 'block', fontSize: '0.95rem', color: 'var(--gray-700)', marginBottom: '8px', fontWeight: 'bold' }}>{t('mypage.idLabel')}</label>
                 <input 
                   type="text" 
                   value={accountInfo?.id || ''} 
                   disabled 
-                  style={{ width: '100%', padding: '16px', borderRadius: '12px', border: '1px solid var(--border-color)', backgroundColor: 'var(--gray-100)', color: 'var(--gray-500)', fontSize: '1.05rem', outline: 'none' }}
+                  style={{ width: '100%', padding: '16px', borderRadius: '12px', border: '1px solid var(--border-color)', backgroundColor: 'var(--gray-100)', color: 'var(--gray-500)', fontSize: '1.05rem', outline: 'none', boxSizing: 'border-box', maxWidth: '100%' }}
                 />
               </div>
               <div>
-                <label style={{ display: 'block', fontSize: '0.95rem', color: 'var(--gray-700)', marginBottom: '8px', fontWeight: 'bold' }}>이메일</label>
+                <label style={{ display: 'block', fontSize: '0.95rem', color: 'var(--gray-700)', marginBottom: '8px', fontWeight: 'bold' }}>{t('mypage.emailLabel')}</label>
                 <input 
                   type="email" 
                   value={editEmail} 
                   onChange={(e) => setEditEmail(e.target.value)}
-                  style={{ width: '100%', padding: '16px', borderRadius: '12px', border: '1px solid var(--border-color)', fontSize: '1.05rem', outline: 'none' }}
+                  style={{ width: '100%', padding: '16px', borderRadius: '12px', border: '1px solid var(--border-color)', fontSize: '1.05rem', outline: 'none', boxSizing: 'border-box', maxWidth: '100%' }}
                 />
               </div>
               <div>
-                <label style={{ display: 'block', fontSize: '0.95rem', color: 'var(--gray-700)', marginBottom: '8px', fontWeight: 'bold' }}>성별</label>
+                <label style={{ display: 'block', fontSize: '0.95rem', color: 'var(--gray-700)', marginBottom: '8px', fontWeight: 'bold' }}>{t('mypage.genderLabel')}</label>
                 <div style={{ display: 'flex', gap: '10px' }}>
-                  {['남성', '여성', '선택안함'].map((g) => (
+                  {[{ key: '남성', label: t('mypage.male') }, { key: '여성', label: t('mypage.female') }, { key: '선택안함', label: t('mypage.noGender') }].map((g) => (
                     <button
-                      key={g}
-                      onClick={() => setEditGender(g)}
-                      style={{ flex: 1, padding: '14px', borderRadius: '10px', border: editGender === g ? 'none' : '1px solid var(--border-color)', backgroundColor: editGender === g ? 'var(--point-color)' : 'white', color: editGender === g ? 'white' : 'var(--gray-700)', fontWeight: editGender === g ? 'bold' : 'normal', cursor: 'pointer', fontSize: '1rem' }}
+                      key={g.key}
+                      onClick={() => setEditGender(g.key)}
+                      style={{ flex: 1, padding: '14px', borderRadius: '10px', border: editGender === g.key ? 'none' : '1px solid var(--border-color)', backgroundColor: editGender === g.key ? 'var(--point-color)' : 'white', color: editGender === g.key ? 'white' : 'var(--gray-700)', fontWeight: editGender === g.key ? 'bold' : 'normal', cursor: 'pointer', fontSize: '1rem', boxSizing: 'border-box' }}
                     >
-                      {g}
+                      {g.label}
                     </button>
                   ))}
                 </div>
               </div>
               <div>
-                <label style={{ display: 'block', fontSize: '0.95rem', color: 'var(--gray-700)', marginBottom: '8px', fontWeight: 'bold' }}>출생년월일</label>
+                <label style={{ display: 'block', fontSize: '0.95rem', color: 'var(--gray-700)', marginBottom: '8px', fontWeight: 'bold' }}>{t('mypage.birthdateLabel')}</label>
                 <input 
                   type="date" 
                   value={editBirthdate} 
                   onChange={(e) => setEditBirthdate(e.target.value)}
-                  style={{ width: '100%', padding: '16px', borderRadius: '12px', border: '1px solid var(--border-color)', fontSize: '1.05rem', outline: 'none', color: editBirthdate ? 'black' : 'var(--gray-400)' }}
+                  style={{ width: '100%', padding: '16px', borderRadius: '12px', border: '1px solid var(--border-color)', fontSize: '1.05rem', outline: 'none', color: editBirthdate ? 'black' : 'var(--gray-400)', boxSizing: 'border-box', maxWidth: '100%' }}
                 />
               </div>
               <div>
-                <label style={{ display: 'block', fontSize: '0.95rem', color: 'var(--gray-700)', marginBottom: '8px', fontWeight: 'bold' }}>비밀번호 변경 (선택)</label>
+                <label style={{ display: 'block', fontSize: '0.95rem', color: 'var(--gray-700)', marginBottom: '8px', fontWeight: 'bold' }}>{t('mypage.changePasswordOptional')}</label>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
                   <input 
                     type="password" 
                     value={editPassword} 
                     onChange={(e) => { setEditPassword(e.target.value); setEditPasswordError(''); }}
-                    placeholder="새 비밀번호 (6자리 이상)"
-                    style={{ width: '100%', padding: '16px', borderRadius: '12px', border: '1px solid var(--border-color)', fontSize: '1.05rem', outline: 'none' }}
+                    placeholder={t('mypage.newPasswordPlaceholder')}
+                    style={{ width: '100%', padding: '16px', borderRadius: '12px', border: '1px solid var(--border-color)', fontSize: '1.05rem', outline: 'none', boxSizing: 'border-box', maxWidth: '100%' }}
                   />
                   <input 
                     type="password" 
                     value={editPasswordConfirm} 
                     onChange={(e) => { setEditPasswordConfirm(e.target.value); setEditPasswordError(''); }}
-                    placeholder="새 비밀번호 확인"
-                    style={{ width: '100%', padding: '16px', borderRadius: '12px', border: `1px solid ${editPasswordError ? 'red' : 'var(--border-color)'}`, fontSize: '1.05rem', outline: 'none' }}
+                    placeholder={t('mypage.newPasswordConfirm')}
+                    style={{ width: '100%', padding: '16px', borderRadius: '12px', border: `1px solid ${editPasswordError ? 'red' : 'var(--border-color)'}`, fontSize: '1.05rem', outline: 'none', boxSizing: 'border-box', maxWidth: '100%' }}
                   />
                 </div>
                 {editPasswordError && <p style={{ color: 'red', fontSize: '0.85rem', marginTop: '6px' }}>{editPasswordError}</p>}
@@ -784,7 +784,7 @@ export default function MyPage() {
                 marginTop: 'auto', marginBottom: '20px'
               }}
             >
-              {isSavingInfo ? '저장 중...' : '저장'}
+              {isSavingInfo ? t('common.saving') : t('common.save')}
             </button>
           </div>
         </div>
