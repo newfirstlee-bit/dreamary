@@ -255,14 +255,12 @@ export default function MyPage() {
                   수정
                 </button>
               </div>
-              {localStorage.getItem('migration_completed') !== 'true' && (
-                <button 
-                  onClick={() => setShowMigrateModal(true)}
-                  style={{ width: '100%', padding: '15px', borderRadius: '12px', border: '1px solid var(--point-color)', backgroundColor: 'var(--point-color)', color: 'white', fontWeight: 'bold', fontSize: '1rem', display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '8px', cursor: 'pointer', marginTop: '10px' }}
-                >
-                  <Key size={20} /> 백업코드 입력하기
-                </button>
-              )}
+              <button 
+                onClick={() => setShowMigrateModal(true)}
+                style={{ width: '100%', padding: '15px', borderRadius: '12px', border: '1px solid var(--point-color)', backgroundColor: 'var(--point-color)', color: 'white', fontWeight: 'bold', fontSize: '1rem', display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '8px', cursor: 'pointer', marginTop: '10px' }}
+              >
+                <Key size={20} /> {t('mypage.enterBackupCode')}
+              </button>
             </div>
           </section>
         )}
