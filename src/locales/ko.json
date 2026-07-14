@@ -112,6 +112,7 @@
   "mypage.doMigrate": "옮길래요",
   "mypage.migrating": "처리중...",
   "mypage.migrateSuccess": "성공적으로 채팅 내역을 옮겼습니다.",
+  "mypage.logout": "로그아웃",
   "mypage.chatHistory": "채팅 내역",
   "mypage.pairTheme": "채팅방 테마",
   "mypage.pairLimit": "페어는 최대 10개까지만 등록할 수 있습니다.",

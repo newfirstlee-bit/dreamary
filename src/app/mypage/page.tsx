@@ -439,7 +439,7 @@ export default function MyPage() {
               textDecoration: 'underline'
             }}
           >
-            로그아웃
+            {t('mypage.logout')}
           </button>
         )}
 
