@@ -5,9 +5,11 @@ import { useRouter } from 'next/navigation';
 import { getCharacter, updateCharacter, Character } from '@/lib/db';
 import { uploadImageToImgbb } from '@/lib/imgbb';
 import { Loader2, ChevronLeft, Image as ImageIcon } from 'lucide-react';
+import { useLocale } from '@/lib/i18n';
 
 export default function HomeSettingsPage({ params }: { params: { id: string } }) {
   const router = useRouter();
+  const { t } = useLocale();
   const [loading, setLoading] = useState(true);
   const [character, setCharacter] = useState<Character | null>(null);
   const [uploadingBg, setUploadingBg] = useState(false);
@@ -34,10 +36,10 @@ export default function HomeSettingsPage({ params }: { params: { id: string } })
       const url = await uploadImageToImgbb(e.target.files[0]);
       await updateCharacter(character.id, { homeBackgroundImage: url });
       setCharacter({ ...character, homeBackgroundImage: url });
-      alert('배경화면이 변경되었습니다.');
-    } catch (err) {
+      alert(t('homeSettings.bgSuccess'));
+    } catch (err: any) {
       console.error(err);
-      alert(`배경화면 업로드에 실패했습니다. (${err.message || err})`);
+      alert(`${t('homeSettings.bgFail')} (${err.message || err})`);
     } finally {
       setUploadingBg(false);
     }
@@ -67,7 +69,7 @@ export default function HomeSettingsPage({ params }: { params: { id: string } })
   }
 
   if (!character) {
-    return <div className="app-container">캐릭터 정보를 불러올 수 없습니다.</div>;
+    return <div className="app-container">{t('homeSettings.loadFailed')}</div>;
   }
 
   return (
@@ -76,14 +78,14 @@ export default function HomeSettingsPage({ params }: { params: { id: string } })
         <button onClick={() => router.back()} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '0', display: 'flex' }}>
           <ChevronLeft size={28} color="var(--gray-800)" />
         </button>
-        홈화면 설정
+        {t('homeSettings.homeTitle')}
       </header>
       
       <div className="content" style={{ padding: '20px', display: 'flex', flexDirection: 'column', gap: '20px' }}>
         <div style={{ padding: '20px', backgroundColor: 'var(--gray-50)', borderRadius: '15px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
           <div>
-            <div style={{ fontWeight: 'bold', color: 'var(--foreground)', marginBottom: '5px' }}>배경화면 변경</div>
-            <div style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>새 이미지를 올리면 덮어쓰기 됩니다</div>
+            <div style={{ fontWeight: 'bold', color: 'var(--foreground)', marginBottom: '5px' }}>{t('homeSettings.bgChange')}</div>
+            <div style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>{t('homeSettings.bgHint')}</div>
           </div>
           <button 
             onClick={() => fileInputRef.current?.click()}
@@ -91,15 +93,15 @@ export default function HomeSettingsPage({ params }: { params: { id: string } })
             style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '8px 16px', backgroundColor: 'var(--point-color)', color: 'white', border: 'none', borderRadius: '10px', fontWeight: 'bold', cursor: 'pointer' }}
           >
             {uploadingBg ? <Loader2 size={16} className="animate-spin" /> : <ImageIcon size={16} />}
-            {uploadingBg ? '업로드 중...' : '업로드'}
+            {uploadingBg ? t('common.uploading') : t('common.upload')}
           </button>
           <input type="file" accept="image/*" ref={fileInputRef} onChange={handleBgUpload} style={{ display: 'none' }} />
         </div>
 
         <div style={{ padding: '20px', backgroundColor: 'var(--gray-50)', borderRadius: '15px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
           <div>
-            <div style={{ fontWeight: 'bold', color: 'var(--foreground)', marginBottom: '5px' }}>디데이 시작일 변경</div>
-            <div style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>{character.pairName || character.name} 페어의 1일</div>
+            <div style={{ fontWeight: 'bold', color: 'var(--foreground)', marginBottom: '5px' }}>{t('homeSettings.dDay')}</div>
+            <div style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>{t('homeSettings.dDayHint').replace('{name}', character.pairName || character.name)}</div>
           </div>
           <input 
             type="date" 
@@ -111,8 +113,8 @@ export default function HomeSettingsPage({ params }: { params: { id: string } })
 
         <div style={{ padding: '20px', backgroundColor: 'var(--gray-50)', borderRadius: '15px', display: 'flex', flexDirection: 'column', gap: '15px' }}>
           <div>
-            <div style={{ fontWeight: 'bold', color: 'var(--foreground)', marginBottom: '5px' }}>홈 화면 텍스트 테마</div>
-            <div style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>배경화면 밝기에 맞춰 글자색을 변경하세요</div>
+            <div style={{ fontWeight: 'bold', color: 'var(--foreground)', marginBottom: '5px' }}>{t('homeSettings.themeTitle')}</div>
+            <div style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>{t('homeSettings.themeHint')}</div>
           </div>
           <div style={{ display: 'flex', gap: '10px' }}>
             <button
@@ -124,7 +126,7 @@ export default function HomeSettingsPage({ params }: { params: { id: string } })
                 border: (character.homeTheme || 'dark') === 'dark' ? 'none' : '1px solid var(--border-color)'
               }}
             >
-              어두운 배경용 (기본)
+              {t('homeSettings.themeDark')}
             </button>
             <button
               onClick={() => handleThemeChange('light')}
@@ -135,7 +137,7 @@ export default function HomeSettingsPage({ params }: { params: { id: string } })
                 border: character.homeTheme === 'light' ? '2px solid var(--gray-900)' : '1px solid var(--border-color)'
               }}
             >
-              밝은 배경용
+              {t('homeSettings.themeLight')}
             </button>
           </div>
         </div>

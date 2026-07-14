@@ -1,5 +1,5 @@
 import { db } from './firebase';
-import { collection, doc, getDocs, setDoc, updateDoc, deleteDoc, getDoc, query, where, orderBy, getCountFromServer } from 'firebase/firestore';
+import { collection, doc, getDocs, setDoc, updateDoc, deleteDoc, getDoc, query, where, orderBy, getCountFromServer, onSnapshot } from 'firebase/firestore';
 
 export interface Character {
   id: string;
@@ -18,6 +18,7 @@ export interface Character {
   homeBackgroundImage?: string;
   homeTheme?: 'dark' | 'light';
   dDayStartDate?: number;
+  locale?: string;
   createdAt: number;
 }
 
@@ -94,6 +95,7 @@ export const saveUserProfile = async (user: UserProfile) => {
 export interface Topic {
   id: string;
   content: string;
+  contentJa?: string;
   order: number;
 }
 
@@ -136,6 +138,19 @@ export const getDiariesByUserAndChar = async (userId: string, characterId: strin
   const q = query(collection(db, 'diaries'), where('userId', '==', userId), where('characterId', '==', characterId));
   const snapshot = await getDocs(q);
   return snapshot.docs.map(doc => doc.data() as Diary).sort((a, b) => b.createdAt - a.createdAt);
+};
+
+export const subscribeDiaries = (userId: string, characterId: string, callback: (diaries: Diary[]) => void) => {
+  const q = query(
+    collection(db, 'diaries'),
+    where('userId', '==', userId),
+    where('characterId', '==', characterId)
+  );
+  return onSnapshot(q, (snapshot) => {
+    const d = snapshot.docs.map(doc => doc.data() as Diary);
+    d.sort((a, b) => b.createdAt - a.createdAt);
+    callback(d);
+  });
 };
 
 export const saveDiary = async (diary: Diary) => {
@@ -187,6 +202,19 @@ export const getChatMessages = async (userId: string, characterId: string): Prom
   const snapshot = await getDocs(q);
   const msgs = snapshot.docs.map(doc => doc.data() as ChatMessage);
   return msgs.sort((a: any, b: any) => (a.createdAt || a.timestamp || 0) - (b.createdAt || b.timestamp || 0));
+};
+
+export const subscribeChatMessages = (userId: string, characterId: string, callback: (msgs: ChatMessage[]) => void) => {
+  const q = query(
+    collection(db, 'chatMessages'),
+    where('userId', '==', userId),
+    where('characterId', '==', characterId)
+  );
+  return onSnapshot(q, (snapshot) => {
+    const msgs = snapshot.docs.map(doc => doc.data() as ChatMessage);
+    msgs.sort((a: any, b: any) => (a.createdAt || a.timestamp || 0) - (b.createdAt || b.timestamp || 0));
+    callback(msgs);
+  });
 };
 
 export const saveChatMessage = async (message: ChatMessage) => {

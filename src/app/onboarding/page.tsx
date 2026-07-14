@@ -9,6 +9,7 @@ import { saveCharacter, saveUserProfile, Character, UserProfile } from '@/lib/db
 import { uploadImageToImgbb } from '@/lib/imgbb';
 import { ChevronLeft, Camera, Loader2, User } from 'lucide-react';
 import { trackEvent } from '@/lib/mixpanel';
+import { useLocale } from '@/lib/i18n';
 
 function getJosa(word: string, josaType: '이/가' | '을/를' | '은/는' | '으로/로' | '과/와' | '아/야'): string {
   if (!word) return josaType.split('/')[0];
@@ -29,17 +30,26 @@ type Phase = 'value-proposition' | 'character' | 'narrative-prompt' | 'narrative
 export default function OnboardingPage() {
   const router = useRouter();
   const store = useOnboardingStore();
+  const { t, locale } = useLocale();
   const [phase, setPhase] = useState<Phase>('value-proposition');
   const [charStep, setCharStep] = useState(1);
   const [narrativeStep, setNarrativeStep] = useState(1);
   const [userStep, setUserStep] = useState(1);
   const [viewportStyle, setViewportStyle] = useState({ height: '100dvh', top: 0 });
   const [showUserModal, setShowUserModal] = useState(false);
+  const [showUserBackModal, setShowUserBackModal] = useState(false);
   const [isNextEnabled, setIsNextEnabled] = useState(false);
 
   useEffect(() => {
     trackEvent('Onboarding_Started');
     
+    if (typeof window !== 'undefined') {
+      const searchParams = new URLSearchParams(window.location.search);
+      if (searchParams.get('skip') === 'true') {
+        setPhase('character');
+      }
+    }
+
     // Handle mobile virtual keyboard to stay glued to the visual viewport
     if (window.visualViewport) {
       const handleResizeOrScroll = () => {
@@ -111,8 +121,16 @@ export default function OnboardingPage() {
       return;
     }
     if (phase === 'character') {
-      if (charStep > 1) setCharStep(charStep - 1);
-      else setPhase('value-proposition');
+      if (charStep > 1) {
+        setCharStep(charStep - 1);
+      } else {
+        const searchParams = new URLSearchParams(window.location.search);
+        if (searchParams.get('skip') === 'true') {
+          router.back();
+        } else {
+          setPhase('value-proposition');
+        }
+      }
     } else if (phase === 'narrative-prompt') {
       setPhase('character');
       setCharStep(7);
@@ -120,12 +138,24 @@ export default function OnboardingPage() {
       if (narrativeStep > 1) setNarrativeStep(narrativeStep - 1);
       else setPhase('narrative-prompt');
     } else if (phase === 'user') {
-      if (userStep > 1) setUserStep(userStep - 1);
-      else {
-        setPhase('narrative-prompt');
-        setShowUserModal(true);
+      if (userStep > 1) {
+        setUserStep(userStep - 1);
+      } else {
+        setShowUserBackModal(true);
       }
     }
+  };
+
+  const handleUserBackConfirm = () => {
+    store.setUserField('userName', '');
+    store.setUserField('userGender', null);
+    store.setUserField('userFeeling', '');
+    store.setUserField('userImage', undefined);
+    store.setUserField('userImageFile', undefined);
+    setShowUserBackModal(false);
+    setUserStep(1);
+    setPhase('narrative-prompt');
+    setShowUserModal(true);
   };
 
   const handleFinish = async () => {
@@ -155,7 +185,8 @@ export default function OnboardingPage() {
         worldview: store.charWorldview,
         extra: store.charExtra,
         narrative: store.charNarrative,
-        createdAt: Date.now()
+        createdAt: Date.now(),
+        locale: locale
       };
       if (charImgUrl) {
         newChar.image = charImgUrl;
@@ -163,6 +194,8 @@ export default function OnboardingPage() {
       }
 
       await saveCharacter(newChar as Character);
+
+      let activeUserProfile: UserProfile;
 
       if (store.userName.trim()) {
         const newUser: any = {
@@ -175,16 +208,33 @@ export default function OnboardingPage() {
         if (userImgUrl) newUser.image = userImgUrl;
         
         await saveUserProfile(newUser as UserProfile);
+        activeUserProfile = newUser as UserProfile;
       } else {
         // Save empty user profile
         const emptyUser: any = {
           id: newChar.id,
-          name: '유저',
+          name: locale === 'ja' ? t('common.user') : '유저',
           feeling: '',
           createdAt: Date.now()
         };
         await saveUserProfile(emptyUser as UserProfile);
+        activeUserProfile = emptyUser as UserProfile;
       }
+
+      // Trigger initial ping in the background
+      fetch('/api/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          character: newChar,
+          userProfile: activeUserProfile,
+          messages: [],
+          isFirstPing: true,
+          userId
+        })
+      }).catch(err => console.error('Background ping failed:', err));
+
+      localStorage.setItem(`hasPinged_${newChar.id}`, 'true');
 
       store.reset();
       trackEvent('Character_Created', {
@@ -223,10 +273,8 @@ export default function OnboardingPage() {
     <div className={`app-container ${phase === 'value-proposition' ? 'diary-bg' : ''}`} style={{ 
       minHeight: viewportStyle.height, 
       height: viewportStyle.height, 
-      position: 'absolute', 
+      position: 'relative', 
       top: viewportStyle.top, 
-      left: '50%', 
-      transform: 'translateX(-50%)',
       width: '100%',
       maxWidth: '480px'
     }}>
@@ -244,31 +292,30 @@ export default function OnboardingPage() {
         {phase === 'value-proposition' && (
           <div style={{ flex: 1, display: 'flex', flexDirection: 'column', padding: '0 20px' }}>
             <div style={{ display: 'flex', justifyContent: 'center', marginTop: '40px' }}>
-              <h1 style={{ fontSize: '1.5rem', lineHeight: '1.4', textAlign: 'center', fontWeight: 'bold' }}>
-                드림캐와 교환일기 작성하고<br/>매일 답장 받아보세요
-              </h1>
+              <h1 style={{ fontSize: '1.5rem', lineHeight: '1.4', textAlign: 'center', fontWeight: 'bold' }} dangerouslySetInnerHTML={{ __html: t('onboarding.valuePropTitle') }} />
             </div>
             
             <div style={{ flex: 1, display: 'flex', flexDirection: 'column', justifyContent: 'center', gap: '27px', padding: '0 10px', transform: 'translateY(-10px)' }}>
               {/* User Message */}
               <div style={{ display: 'flex', justifyContent: 'flex-end', opacity: 0, animation: 'fadeInUp 0.6s ease 0.5s forwards' }}>
                 <div className="post-it" style={{ maxWidth: '85%', lineHeight: '1.6', fontSize: '18px' }}>
-                  오늘부터 교환일기 시작해볼까?
+                  {t('onboarding.valuePropMsg1')}
                 </div>
               </div>
 
               {/* Character Message */}
               <div style={{ display: 'flex', justifyContent: 'flex-start', opacity: 0, animation: 'fadeInUp 0.6s ease 1.2s forwards' }}>
-                <div className="notebook-paper" style={{ maxWidth: '85%', lineHeight: '1.6', fontSize: '18px' }}>
-                  네가 먼저 적으면 내가 답장할게.<br/>까먹지 마, 약속.
-                </div>
+                <div className="notebook-paper" style={{ maxWidth: '85%', lineHeight: '1.6', fontSize: '18px' }} dangerouslySetInnerHTML={{ __html: t('onboarding.valuePropMsg2') }} />
               </div>
             </div>
             
             <div style={{ paddingBottom: '20px' }}>
               <button 
                 className="btn-primary" 
-                onClick={() => setPhase('character')}
+                onClick={() => {
+                  localStorage.setItem('has_seen_onboarding', 'true');
+                  router.push('/');
+                }}
                 disabled={!isNextEnabled}
                 style={{ 
                   width: '100%', 
@@ -278,7 +325,7 @@ export default function OnboardingPage() {
                   cursor: isNextEnabled ? 'pointer' : 'not-allowed'
                 }}
               >
-                교환일기 시작하기
+                {t('onboarding.startBtn')}
               </button>
             </div>
           </div>
@@ -289,18 +336,18 @@ export default function OnboardingPage() {
         {phase === 'narrative-prompt' && (
           <div style={{ flex: 1, display: 'flex', flexDirection: 'column', padding: '0 20px' }}>
             <div style={{ flex: 1, display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', textAlign: 'center' }}>
-              <h1 style={{ fontSize: '1.5rem', marginBottom: '10px', lineHeight: '1.4' }}>캐릭터 생성 완료!<br/>서사를 추가로 입력할 수 있어요</h1>
-              <p style={{ color: 'var(--text-muted)', marginBottom: '0', lineHeight: '1.5', fontSize: '1rem' }}>세계관, 서사를 추가로 입력하면<br/>{store.charName} 캐릭터 해석에 큰 도움이 돼요.</p>
+              <h1 style={{ fontSize: '1.5rem', marginBottom: '10px', lineHeight: '1.4' }} dangerouslySetInnerHTML={{ __html: t('onboarding.narrativePromptTitle') }} />
+              <p style={{ color: 'var(--text-muted)', marginBottom: '0', lineHeight: '1.5', fontSize: '1rem' }} dangerouslySetInnerHTML={{ __html: t('onboarding.narrativePromptDesc').replace('{name}', store.charName) }} />
             </div>
             
             <div style={{ width: '100%', paddingBottom: '20px' }}>
-              <p style={{ color: 'var(--gray-500)', fontSize: '14px', marginBottom: '15px', textAlign: 'center' }}>설정은 마이페이지에서 언제든지 추가할 수 있어요</p>
+              <p style={{ color: 'var(--gray-500)', fontSize: '14px', marginBottom: '15px', textAlign: 'center' }}>{t('onboarding.narrativePromptHint')}</p>
               <div style={{ display: 'flex', gap: '10px', width: '100%' }}>
                 <button onClick={() => setShowUserModal(true)} style={{ flex: 3, padding: '15px', borderRadius: '10px', border: 'none', backgroundColor: 'var(--gray-200)', color: 'var(--gray-800)', cursor: 'pointer', fontWeight: '500', fontSize: '16px' }}>
-                  나중에
+                  {t('onboarding.laterBtn')}
                 </button>
                 <button onClick={() => setPhase('narrative')} style={{ flex: 7, padding: '15px', borderRadius: '10px', border: 'none', backgroundColor: 'var(--point-color)', color: 'white', cursor: 'pointer', fontWeight: 'bold', fontSize: '16px' }}>
-                  서사 입력하기
+                  {t('onboarding.inputNarrativeBtn')}
                 </button>
               </div>
             </div>
@@ -314,7 +361,7 @@ export default function OnboardingPage() {
         {phase === 'saving' && (
           <div style={{ flex: 1, display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', padding: '0 20px' }}>
             <Loader2 className="animate-spin" size={48} color="var(--point-color)" style={{ animation: 'spin 2s linear infinite' }} />
-            <p style={{ fontWeight: 'bold', color: 'var(--point-color)', marginTop: '15px' }}>저장 중...</p>
+            <p style={{ fontWeight: 'bold', color: 'var(--point-color)', marginTop: '15px' }}>{t('onboarding.saving')}</p>
           </div>
         )}
       </main>
@@ -322,15 +369,32 @@ export default function OnboardingPage() {
       {showUserModal && (
         <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.5)', zIndex: 1000, display: 'flex', justifyContent: 'center', alignItems: 'center', padding: '20px' }}>
           <div style={{ backgroundColor: 'white', borderRadius: '15px', padding: '30px 20px', width: '100%', maxWidth: '340px', textAlign: 'center', display: 'flex', flexDirection: 'column', animation: 'fadeIn 0.2s ease' }}>
-            <h2 style={{ fontSize: '1.3rem', marginBottom: '15px', lineHeight: '1.4' }}>내 캐릭터도 설정할 수 있어요</h2>
-            <p style={{ color: 'var(--text-muted)', marginBottom: '30px', lineHeight: '1.5', fontSize: '0.95rem' }}>{applyJosa(store.charName || '캐릭터', '과/와')} 더 자연스러운<br/>대화를 할 수 있도록 도와줘요</p>
+            <h2 style={{ fontSize: '1.3rem', marginBottom: '15px', lineHeight: '1.4' }}>{t('onboarding.userModalTitle')}</h2>
+            <p style={{ color: 'var(--text-muted)', marginBottom: '30px', lineHeight: '1.5', fontSize: '0.95rem' }} dangerouslySetInnerHTML={{ __html: t('onboarding.userModalDesc').replace('{name}', locale === 'ja' ? (store.charName || t('common.character')) : applyJosa(store.charName || '캐릭터', '과/와')) }} />
             
             <div style={{ display: 'flex', gap: '10px', width: '100%' }}>
-              <button onClick={() => { setShowUserModal(false); handleFinish(); }} style={{ flex: 1, padding: '15px', borderRadius: '10px', border: 'none', backgroundColor: 'var(--gray-200)', color: 'var(--gray-800)', cursor: 'pointer', fontWeight: '500', fontSize: '15px' }}>
-                나중에
+              <button type="button" onClick={(e) => { e.preventDefault(); e.stopPropagation(); setShowUserModal(false); handleFinish(); }} style={{ flex: 1, padding: '15px', borderRadius: '10px', border: 'none', backgroundColor: 'var(--gray-200)', color: 'var(--gray-800)', cursor: 'pointer', fontWeight: '500', fontSize: '15px' }}>
+                {t('onboarding.laterBtn')}
               </button>
-              <button onClick={() => { setShowUserModal(false); setPhase('user'); }} style={{ flex: 1, padding: '15px', borderRadius: '10px', border: 'none', backgroundColor: 'var(--point-color)', color: 'white', cursor: 'pointer', fontWeight: 'bold', fontSize: '15px' }}>
-                좋아요
+              <button type="button" onClick={(e) => { e.preventDefault(); e.stopPropagation(); setShowUserModal(false); setPhase('user'); }} style={{ flex: 1, padding: '15px', borderRadius: '10px', border: 'none', backgroundColor: 'var(--point-color)', color: 'white', cursor: 'pointer', fontWeight: 'bold', fontSize: '15px' }}>
+                {t('onboarding.okBtn')}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      
+      {showUserBackModal && (
+        <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.5)', zIndex: 1000, display: 'flex', justifyContent: 'center', alignItems: 'center', padding: '20px' }}>
+          <div style={{ backgroundColor: 'white', borderRadius: '15px', padding: '30px 20px', width: '100%', maxWidth: '340px', textAlign: 'center', display: 'flex', flexDirection: 'column', animation: 'fadeIn 0.2s ease' }}>
+            <h2 style={{ fontSize: '1.3rem', marginBottom: '30px', lineHeight: '1.4', fontWeight: 'bold' }}>뒤로가면 작성한 내용이<br/>사라져요</h2>
+            
+            <div style={{ display: 'flex', gap: '10px', width: '100%' }}>
+              <button type="button" onClick={(e) => { e.preventDefault(); e.stopPropagation(); handleUserBackConfirm(); }} style={{ flex: 3, padding: '15px', borderRadius: '10px', border: 'none', backgroundColor: 'rgba(255, 59, 48, 0.1)', color: '#FF3B30', cursor: 'pointer', fontWeight: 'bold', fontSize: '15px' }}>
+                뒤로가기
+              </button>
+              <button type="button" onClick={(e) => { e.preventDefault(); e.stopPropagation(); setShowUserBackModal(false); }} style={{ flex: 7, padding: '15px', borderRadius: '10px', border: 'none', backgroundColor: 'var(--point-color)', color: 'white', cursor: 'pointer', fontWeight: 'bold', fontSize: '15px' }}>
+                계속하기
               </button>
             </div>
           </div>
@@ -413,6 +477,7 @@ const AutoResizeTextarea = forwardRef<HTMLTextAreaElement, React.TextareaHTMLAtt
 
 function ImageUpload({ imagePreview, onFileSelect }: { imagePreview: string | null, onFileSelect: (f: File) => void }) {
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const { t } = useLocale();
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files[0]) {
@@ -436,15 +501,16 @@ function ImageUpload({ imagePreview, onFileSelect }: { imagePreview: string | nu
           <Camera size={32} color="var(--gray-500)" />
         )}
       </div>
-      <p style={{ marginTop: '10px', fontSize: '16px', color: 'var(--text-muted)' }}>터치하여 사진 업로드</p>
-      <p style={{ marginTop: '4px', fontSize: '14px', color: '#ff4d4f', fontWeight: 'bold' }}>절대로 생성형 AI학습에 사용되지 않습니다</p>
+      <p style={{ marginTop: '10px', fontSize: '16px', color: 'var(--text-muted)' }}>{t('onboarding.imageUpload')}</p>
+      <p style={{ marginTop: '4px', fontSize: '14px', color: '#ff4d4f', fontWeight: 'bold' }}>{t('onboarding.imageWarning')}</p>
       <input type="file" accept="image/*" ref={fileInputRef} onChange={handleFileChange} style={{ display: 'none' }} />
     </div>
   );
 }
 
 function GenderSelect({ value, onChange }: { value: string, onChange: (v: string) => void }) {
-  const options = ['남성', '여성', '그 외'];
+  const { t } = useLocale();
+  const options = [t('onboarding.genderMale'), t('onboarding.genderFemale'), t('onboarding.genderOther')];
   return (
     <div style={{ display: 'flex', gap: '10px', width: '100%', marginBottom: '20px' }}>
       {options.map(opt => (
@@ -461,8 +527,9 @@ function GenderSelect({ value, onChange }: { value: string, onChange: (v: string
 }
 
 function CharacterStep({ step, store, onNext }: { step: number, store: any, onNext: () => void }) {
+  const { t, locale } = useLocale();
   const isLast = step === 7;
-  const charNameText = store.charName ? applyJosa(store.charName, '이/가') : '캐릭터가';
+  const charNameText = locale === 'ja' ? (store.charName || t('common.character')) : (store.charName ? applyJosa(store.charName, '이/가') : '캐릭터가');
   const charNameStr = store.charName || '캐릭터';
   const charExampleChatRef = useRef<HTMLTextAreaElement>(null);
 
@@ -499,24 +566,24 @@ function CharacterStep({ step, store, onNext }: { step: number, store: any, onNe
     <div style={{ flex: 1, display: 'flex', flexDirection: 'column', animation: 'fadeIn 0.3s ease', overflow: 'hidden' }}>
       <div style={{ flex: 1, overflowY: 'auto', padding: '0 20px 20px 20px' }}>
         <h2 style={{ fontSize: '1.5rem', marginBottom: '10px', lineHeight: '1.4' }}>
-          {step === 1 && "일기를 같이 써줄 드림캐의 이름은?"}
-          {step === 2 && `${charNameStr}의 성별은 무엇인가요?`}
-          {step === 3 && `${charNameText} 나에게 느끼는 감정은?`}
-          {step === 4 && `${charNameText} 나를 부르는 호칭은?`}
-          {step === 5 && `${charNameStr}의 대화 예시를 알려주세요`}
-          {step === 6 && "절대 하면 안되는 말과 행동을 알려주세요"}
-          {step === 7 && `${charNameStr}의 사진이 있나요? (선택)`}
+          {step === 1 && t('onboarding.charStep1Title')}
+          {step === 2 && t('onboarding.charStep2Title').replace('{name}', charNameStr)}
+          {step === 3 && t('onboarding.charStep3Title').replace('{name}', charNameText)}
+          {step === 4 && t('onboarding.charStep4Title').replace('{name}', charNameText)}
+          {step === 5 && t('onboarding.charStep5Title').replace('{name}', charNameStr)}
+          {step === 6 && t('onboarding.charStep6Title')}
+          {step === 7 && t('onboarding.charStep7Title').replace('{name}', charNameStr)}
         </h2>
         <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem', marginBottom: showSubtitle ? '45px' : '25px', minHeight: showSubtitle ? '20px' : '0' }}>
-          {step === 5 && '캐입을 위해 최소 5문장 이상 작성해주세요. ""로 문장을 구분해주세요.'}
-          {step === 6 && "캐붕 방지를 위해 금지 사항을 작성해주세요."}
-          {step === 7 && "사진이 없으면 기본 아이콘이 표시됩니다."}
+          {step === 5 && t('onboarding.charStep5Subtitle')}
+          {step === 6 && t('onboarding.charStep6Subtitle')}
+          {step === 7 && t('onboarding.charStep7Subtitle')}
         </p>
 
-        {step === 1 && <input className="input-field" autoFocus value={store.charName} onChange={e => store.setCharField('charName', e.target.value.slice(0, 10))} placeholder="예: 에스티니앙" />}
+        {step === 1 && <input className="input-field" autoFocus value={store.charName} onChange={e => store.setCharField('charName', e.target.value.slice(0, 10))} placeholder={t('onboarding.charStep1Placeholder')} />}
         {step === 2 && <GenderSelect value={store.charGender} onChange={v => store.setCharField('charGender', v)} />}
-        {step === 3 && <input className="input-field" autoFocus value={store.charFeeling} onChange={e => store.setCharField('charFeeling', e.target.value.slice(0, 300))} placeholder="은인이자 동료. 썸타는 것 같은데 안사귐" />}
-        {step === 4 && <input className="input-field" autoFocus value={store.charTitle} onChange={e => store.setCharField('charTitle', e.target.value.slice(0, 300))} placeholder="이름, 당신, 야, 등" />}
+        {step === 3 && <input className="input-field" autoFocus value={store.charFeeling} onChange={e => store.setCharField('charFeeling', e.target.value.slice(0, 300))} placeholder={t('onboarding.charStep3Placeholder')} />}
+        {step === 4 && <input className="input-field" autoFocus value={store.charTitle} onChange={e => store.setCharField('charTitle', e.target.value.slice(0, 300))} placeholder={t('onboarding.charStep4Placeholder')} />}
         {step === 5 && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', marginBottom: '20px' }}>
             <AutoResizeTextarea 
@@ -525,7 +592,7 @@ function CharacterStep({ step, store, onNext }: { step: number, store: any, onNe
               autoFocus 
               value={store.charExampleChat} 
               onChange={e => store.setCharField('charExampleChat', e.target.value.slice(0, 300))} 
-              placeholder="오다 주웠다. 오늘 뭐시기 데이? 라던데." 
+              placeholder={t('onboarding.charStep5Placeholder')} 
               style={{ marginBottom: 0 }}
             />
             <button 
@@ -542,7 +609,7 @@ function CharacterStep({ step, store, onNext }: { step: number, store: any, onNe
                 fontWeight: 'bold',
               }}
             >
-              "" 추가
+              {t('onboarding.addQuoteBtn')}
             </button>
           </div>
         )}
@@ -552,7 +619,7 @@ function CharacterStep({ step, store, onNext }: { step: number, store: any, onNe
             autoFocus 
             value={store.charNegative} 
             onChange={e => store.setCharField('charNegative', e.target.value.slice(0, 300))} 
-            placeholder="현대문물 언급, 밈 사용 금지. 반말 금지 등" 
+            placeholder={t('onboarding.charStep6Placeholder')} 
           />
         )}
         {step === 7 && (
@@ -568,7 +635,7 @@ function CharacterStep({ step, store, onNext }: { step: number, store: any, onNe
 
       <div style={{ padding: '10px 20px 20px', backgroundColor: 'var(--card-bg)' }}>
         <button className="btn-primary" onClick={onNext} disabled={isNextDisabled()} style={{ marginTop: 0 }}>
-          {isLast ? "다음" : "다음"}
+          {isLast ? t('onboarding.nextBtn') : t('onboarding.nextBtn')}
         </button>
       </div>
       <style dangerouslySetInnerHTML={{__html: `@keyframes fadeIn { from { opacity: 0; transform: translateX(10px); } to { opacity: 1; transform: translateX(0); } }`}} />
@@ -577,6 +644,7 @@ function CharacterStep({ step, store, onNext }: { step: number, store: any, onNe
 }
 
 function NarrativeStep({ step, store, onNext }: { step: number, store: any, onNext: () => void }) {
+  const { t } = useLocale();
   const charNameStr = store.charName || '캐릭터';
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
@@ -603,24 +671,24 @@ function NarrativeStep({ step, store, onNext }: { step: number, store: any, onNe
     <div style={{ flex: 1, display: 'flex', flexDirection: 'column', animation: 'fadeIn 0.3s ease', overflow: 'hidden' }}>
       <div style={{ flex: 1, overflowY: 'auto', padding: '0 20px 20px 20px' }}>
         <h2 style={{ fontSize: '1.5rem', marginBottom: '10px', lineHeight: '1.4' }}>
-          {step === 1 && "세계관을 알려주세요(선택)"}
-          {step === 2 && `${charNameStr}의 추가 설정이 있나요?(선택)`}
-          {step === 3 && <>드림주/나와의 서사를<br/>작성해주세요 (선택)</>}
+          {step === 1 && t('onboarding.narrativeStep1Title')}
+          {step === 2 && t('onboarding.narrativeStep2Title').replace('{name}', charNameStr)}
+          {step === 3 && <span dangerouslySetInnerHTML={{ __html: t('onboarding.narrativeStep3Title') }} />}
         </h2>
         <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem', marginBottom: showSubtitle ? '20px' : '0px', minHeight: showSubtitle ? '20px' : '0' }}>
-          {step === 1 && "장르명이 아닌 장르의 세계관을 작성해주세요"}
-          {step === 3 && "캐릭터의 대사나 속마음을 포함하여 시간 흐름대로 작성해주시면 오류를 줄일 수 있어요"}
+          {step === 1 && t('onboarding.narrativeStep1Subtitle')}
+          {step === 3 && t('onboarding.narrativeStep3Subtitle')}
         </p>
 
         {step === 1 && (
           <div style={{ marginBottom: '20px' }}>
-            <AutoResizeTextarea className="input-field" autoFocus value={store.charWorldview} onChange={e => store.setCharField('charWorldview', e.target.value.slice(0, 500))} placeholder="서양 근세 판타지, 에너지를 전투에 접목하여 사용한다." style={{ marginBottom: '4px' }} />
+            <AutoResizeTextarea className="input-field" autoFocus value={store.charWorldview} onChange={e => store.setCharField('charWorldview', e.target.value.slice(0, 500))} placeholder={t('onboarding.narrativeStep1Placeholder')} style={{ marginBottom: '4px' }} />
             <div style={{ textAlign: 'right', fontSize: '0.8rem', color: 'var(--text-muted)' }}>{store.charWorldview.length}/500</div>
           </div>
         )}
         {step === 2 && (
           <div style={{ marginBottom: '20px', marginTop: '20px' }}>
-            <AutoResizeTextarea className="input-field" autoFocus value={store.charExtra} onChange={e => store.setCharField('charExtra', e.target.value.slice(0, 500))} placeholder={`성격, 말버릇, 직업, 성장과정 등 ${charNameStr}의 설정을 작성해주세요`} style={{ marginBottom: '4px' }} />
+            <AutoResizeTextarea className="input-field" autoFocus value={store.charExtra} onChange={e => store.setCharField('charExtra', e.target.value.slice(0, 500))} placeholder={t('onboarding.narrativeStep2Placeholder').replace('{name}', charNameStr)} style={{ marginBottom: '4px' }} />
             <div style={{ textAlign: 'right', fontSize: '0.8rem', color: 'var(--text-muted)' }}>{store.charExtra.length}/500</div>
           </div>
         )}
@@ -633,7 +701,7 @@ function NarrativeStep({ step, store, onNext }: { step: number, store: any, onNe
                 autoFocus 
                 value={store.charNarrative} 
                 onChange={e => store.setCharField('charNarrative', e.target.value.slice(0, 700))} 
-                placeholder="첫만남: 길바닥에서 {캐릭터}가 {유저}에게 삥을 뜯었다" 
+                placeholder={t('onboarding.narrativeStep3Placeholder')} 
                 style={{ marginBottom: '4px' }} 
               />
               <div style={{ textAlign: 'right', fontSize: '0.8rem', color: 'var(--text-muted)' }}>{store.charNarrative.length}/700</div>
@@ -658,7 +726,7 @@ function NarrativeStep({ step, store, onNext }: { step: number, store: any, onNe
 
       <div style={{ padding: '10px 20px 20px', backgroundColor: 'var(--card-bg)' }}>
         <button className="btn-primary" onClick={onNext} style={{ marginTop: 0 }}>
-          다음
+          {t('onboarding.nextBtn')}
         </button>
       </div>
     </div>
@@ -666,10 +734,11 @@ function NarrativeStep({ step, store, onNext }: { step: number, store: any, onNe
 }
 
 function UserStep({ step, store, onNext }: { step: number, store: any, onNext: () => void }) {
+  const { t, locale } = useLocale();
   const isLast = step === 4;
-  const userNameText = store.userName ? applyJosa(store.userName, '이/가') : '내가';
-  const charNameText = store.charName ? store.charName : '캐릭터';
-  const charNameJosaGa = store.charName ? applyJosa(store.charName, '이/가') : '캐릭터가';
+  const userNameText = locale === 'ja' ? (store.userName || '私') : (store.userName ? applyJosa(store.userName, '이/가') : '내가');
+  const charNameText = store.charName ? store.charName : (locale === 'ja' ? t('common.character') : '캐릭터');
+  const charNameJosaGa = locale === 'ja' ? (store.charName || t('common.character')) : (store.charName ? applyJosa(store.charName, '이/가') : '캐릭터가');
   const userNameStr = store.userName || '나';
 
   const isNextDisabled = () => {
@@ -685,19 +754,19 @@ function UserStep({ step, store, onNext }: { step: number, store: any, onNext: (
     <div style={{ flex: 1, display: 'flex', flexDirection: 'column', animation: 'fadeIn 0.3s ease', overflow: 'hidden' }}>
       <div style={{ flex: 1, overflowY: 'auto', padding: '0 20px 20px 20px' }}>
         <h2 style={{ fontSize: '1.5rem', marginBottom: '10px', lineHeight: '1.4' }}>
-          {step === 1 && "내 이름/드림주 이름을 알려주세요"}
-          {step === 2 && `${userNameStr}의 성별은 어떻게 되나요?`}
-          {step === 3 && `${userNameText} ${charNameText}에게 느끼는 감정은?`}
-          {step === 4 && `${userNameStr}의 사진이 있나요? (선택)`}
+          {step === 1 && t('onboarding.userStep1Title')}
+          {step === 2 && t('onboarding.userStep2Title').replace('{name}', userNameStr)}
+          {step === 3 && t('onboarding.userStep3Title').replace('{name}', userNameText).replace('{charName}', charNameText)}
+          {step === 4 && t('onboarding.userStep4Title').replace('{name}', userNameStr)}
         </h2>
         <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem', marginBottom: showSubtitle ? '45px' : '25px', minHeight: showSubtitle ? '20px' : '0' }}>
-          {step === 1 && `${charNameJosaGa} 나를 이 이름으로 불러줘요.`}
-          {step === 4 && "사진이 없으면 기본 아이콘이 표시됩니다."}
+          {step === 1 && t('onboarding.userStep1Subtitle').replace('{charName}', charNameJosaGa)}
+          {step === 4 && t('onboarding.userStep4Subtitle')}
         </p>
 
-        {step === 1 && <input className="input-field" autoFocus value={store.userName} onChange={e => store.setUserField('userName', e.target.value.slice(0, 10))} placeholder="예: 여주, 모험가" />}
+        {step === 1 && <input className="input-field" autoFocus value={store.userName} onChange={e => store.setUserField('userName', e.target.value.slice(0, 10))} placeholder={t('onboarding.userStep1Placeholder')} />}
         {step === 2 && <GenderSelect value={store.userGender} onChange={v => store.setUserField('userGender', v)} />}
-        {step === 3 && <input className="input-field" autoFocus value={store.userFeeling} onChange={e => store.setUserField('userFeeling', e.target.value.slice(0, 300))} placeholder="예: 드림캐를 짝사랑하며 부끄러움이 많다." />}
+        {step === 3 && <input className="input-field" autoFocus value={store.userFeeling} onChange={e => store.setUserField('userFeeling', e.target.value.slice(0, 300))} placeholder={t('onboarding.userStep3Placeholder')} />}
         {step === 4 && (
           <ImageUpload 
             imagePreview={store.userImage} 
@@ -711,7 +780,7 @@ function UserStep({ step, store, onNext }: { step: number, store: any, onNext: (
 
       <div style={{ padding: '10px 20px 20px', backgroundColor: 'var(--card-bg)' }}>
         <button className="btn-primary" onClick={onNext} disabled={isNextDisabled()} style={{ marginTop: 0 }}>
-          {isLast ? "모두 완료" : "다음"}
+          {isLast ? t('onboarding.finishBtn') : t('onboarding.nextBtn')}
         </button>
       </div>
     </div>

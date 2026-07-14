@@ -6,10 +6,12 @@ import { getUserId } from '@/lib/auth';
 import { getCharactersByUser, getDiariesByUserAndChar, getTopics, Character, Diary, Topic } from '@/lib/db';
 import { Loader2, ChevronLeft, ChevronRight } from 'lucide-react';
 import Link from 'next/link';
+import { useLocale } from '@/lib/i18n';
 
 function DiaryHistoryContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
+  const { t, locale } = useLocale();
   const [loading, setLoading] = useState(true);
   
   const [characters, setCharacters] = useState<Character[]>([]);
@@ -74,7 +76,7 @@ function DiaryHistoryContent() {
         <button onClick={() => router.push('/diary')} style={{ position: 'absolute', left: '20px', background: 'none', border: 'none', color: 'white', cursor: 'pointer', display: 'flex', alignItems: 'center' }}>
           <ChevronLeft size={28} color="var(--gray-800)" />
         </button>
-        <span>일기 모아보기</span>
+        <span>{t('diary.viewAll')}</span>
       </header>
 
       {/* Character Selector */}
@@ -104,7 +106,7 @@ function DiaryHistoryContent() {
       <main className="content" style={{ display: 'flex', flexDirection: 'column', gap: '15px' }}>
         {diaries.length === 0 ? (
           <div style={{ textAlign: 'center', marginTop: '50px', color: 'var(--text-muted)' }}>
-            <p>아직 작성된 일기가 없습니다.</p>
+            <p>{t('diary.noDiaries')}</p>
           </div>
         ) : (
           diaries.map(diary => (
@@ -121,14 +123,17 @@ function DiaryHistoryContent() {
               }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px' }}>
                   <span style={{ color: 'var(--point-color)', fontSize: '0.8rem', fontWeight: 'bold' }}>
-                    {(topics.find(t => t.id === diary.topicId)?.order || 1)}번째 질문
+                    {(topics.find(t => t.id === diary.topicId)?.order || 1)}{t('common.nthQuestion')}
                   </span>
                   <span style={{ color: 'var(--gray-500)', fontSize: '0.8rem', fontWeight: 500 }}>
                     {diary.dateString.replace(/-/g, '.')}
                   </span>
                 </div>
                 <h3 style={{ fontSize: '1.05rem', lineHeight: '1.4', overflow: 'hidden', textOverflow: 'ellipsis', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' }}>
-                  {diary.topicContent}
+                  {(() => {
+                    const matchedTopic = topics.find(t => t.id === diary.topicId);
+                    return (locale === 'ja' && matchedTopic?.contentJa) ? matchedTopic.contentJa : diary.topicContent;
+                  })()}
                 </h3>
               </div>
             </Link>

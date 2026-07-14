@@ -6,12 +6,16 @@ import { useRouter } from 'next/navigation';
 import { getUserId } from '@/lib/auth';
 import { getCharactersByUser, Character, getChatMessages, ChatMessage } from '@/lib/db';
 import { Loader2, User } from 'lucide-react';
+import { useLocale } from '@/lib/i18n';
+import EmptyCharacterModal from '@/components/EmptyCharacterModal';
 
 export default function ChatList() {
   const router = useRouter();
+  const { t, locale } = useLocale();
   const [loading, setLoading] = useState(true);
   const [characters, setCharacters] = useState<Character[]>([]);
   const [lastMessages, setLastMessages] = useState<Record<string, ChatMessage | null>>({});
+  const [showEmptyModal, setShowEmptyModal] = useState(false);
 
   useEffect(() => {
     const init = async () => {
@@ -20,7 +24,30 @@ export default function ChatList() {
         const chars = await getCharactersByUser(userId);
         
         if (chars.length === 0) {
-          router.replace('/onboarding');
+          const dummyChar: Character = {
+            id: 'dummy',
+            userId: userId,
+            name: t('dummy.charName') || '드림캐',
+            feeling: '',
+            title: '',
+            exampleChat: '',
+            negative: '',
+            createdAt: Date.now(),
+            dDayStartDate: Date.now()
+          };
+          setCharacters([dummyChar]);
+          setLastMessages({
+            'dummy': {
+              id: 'dummy_chat',
+              userId: 'dummy',
+              characterId: 'dummy',
+              role: 'assistant',
+              content: t('dummy.chatMsg') || '지금 바빠? 하고싶은 말이 있어.',
+              createdAt: Date.now(),
+              locale: 'ko'
+            } as ChatMessage
+          });
+          setLoading(false);
           return;
         }
 
@@ -60,13 +87,13 @@ export default function ChatList() {
   return (
     <div className="app-container diary-bg" style={{ paddingBottom: '65px' }}>
       <header className="header" style={{ borderBottom: '1px solid rgba(0,0,0,0.15)', position: 'relative', display: 'flex', justifyContent: 'flex-start', alignItems: 'center' }}>
-        <span>채팅</span>
+        <span>{t('nav.chat')}</span>
       </header>
 
       <div style={{ display: 'flex', flexDirection: 'column' }}>
         {characters.map(char => {
           const lastMsg = lastMessages[char.id];
-          const subtitle = lastMsg ? lastMsg.content : "새로운 메시지가 있어요";
+          const subtitle = lastMsg ? lastMsg.content : t('chat.newMessage');
           
           let showN = false;
           if (typeof window !== 'undefined') {
@@ -83,9 +110,9 @@ export default function ChatList() {
             const d = new Date(lastMsg.timestamp || lastMsg.createdAt);
             const today = new Date();
             if (d.toDateString() === today.toDateString()) {
-              timeString = d.toLocaleTimeString('ko-KR', { hour: 'numeric', minute: '2-digit' });
+              timeString = d.toLocaleTimeString(locale === 'ja' ? 'ja-JP' : 'ko-KR', { hour: 'numeric', minute: '2-digit' });
             } else {
-              timeString = `${d.getMonth() + 1}월 ${d.getDate()}일`;
+              timeString = d.toLocaleDateString(locale === 'ja' ? 'ja-JP' : 'ko-KR', { month: 'long', day: 'numeric' });
             }
           }
 
@@ -93,6 +120,10 @@ export default function ChatList() {
             <div 
               key={char.id} 
               onClick={() => {
+                if (char.id === 'dummy') {
+                  setShowEmptyModal(true);
+                  return;
+                }
                 // Update recent history
                 const userId = getUserId();
                 const history: string[] = JSON.parse(localStorage.getItem(`recentChars_${userId}`) || '[]');
@@ -145,6 +176,8 @@ export default function ChatList() {
           );
         })}
       </div>
+
+      <EmptyCharacterModal isOpen={showEmptyModal} onClose={() => setShowEmptyModal(false)} />
     </div>
   );
 }

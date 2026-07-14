@@ -4,10 +4,13 @@ import React, { useEffect, useState, useRef } from 'react';
 import Image from 'next/image';
 import { useRouter } from 'next/navigation';
 import { getUserId } from '@/lib/auth';
+import { useAuth } from '@/components/AuthContext';
+import { useLocale } from '@/lib/i18n';
 import { getCharactersByUser, Character, updateCharacter, getDiariesByUserAndChar, getTopics, Topic, getUserProfile, UserProfile, getChatMessages, ChatMessage } from '@/lib/db';
 import { uploadImageToImgbb } from '@/lib/imgbb';
 import { Loader2, User, Settings, Camera, Image as ImageIcon, ChevronRight } from 'lucide-react';
 import { trackEvent } from '@/lib/mixpanel';
+import EmptyCharacterModal from '@/components/EmptyCharacterModal';
 
 
 class ErrorBoundary extends React.Component {
@@ -28,6 +31,8 @@ class ErrorBoundary extends React.Component {
 
 export default function Home() {
   const router = useRouter();
+  const { t, locale } = useLocale();
+  const { loading: authLoading } = useAuth();
   const [loading, setLoading] = useState(true);
   const [characters, setCharacters] = useState<Character[]>([]);
   const [selectedCharId, setSelectedCharId] = useState<string | null>(null);
@@ -35,8 +40,11 @@ export default function Home() {
   const [charTopics, setCharTopics] = useState<Record<string, Topic | null>>({});
   const [userProfiles, setUserProfiles] = useState<Record<string, UserProfile | null>>({});
   const [latestChat, setLatestChat] = useState<ChatMessage | null>(null);
+  const [showEmptyModal, setShowEmptyModal] = useState(false);
 
   useEffect(() => {
+    if (authLoading) return;
+
     trackEvent('Home_Viewed');
     
     const init = async () => {
@@ -55,7 +63,39 @@ export default function Home() {
         const chars = await getCharactersByUser(userId);
         
         if (chars.length === 0) {
-          router.replace('/onboarding');
+          if (localStorage.getItem('has_seen_onboarding') !== 'true') {
+            router.replace('/onboarding');
+            return;
+          } else {
+            const dummyChar: Character = {
+              id: 'dummy',
+              userId: userId,
+              name: t('dummy.charName') || '드림캐',
+              feeling: '',
+              title: '',
+              exampleChat: '',
+              negative: '',
+              createdAt: Date.now(),
+              dDayStartDate: Date.now()
+            };
+            setCharacters([dummyChar]);
+            setSelectedCharId('dummy');
+            setUnwrittenChars(new Set(['dummy']));
+            
+            let topics: Topic[] = [];
+            try {
+              topics = await getTopics();
+            } catch (err) {
+              console.error("Failed to fetch topics for dummy:", err);
+            }
+            if (topics.length > 0) {
+              setCharTopics({ dummy: topics[0] });
+            } else {
+              setCharTopics({ dummy: { id: 'dummy', order: 1, content: t('dummy.firstTopic') || '오늘 하루는 어땠어?' } as Topic });
+            }
+            
+            setLoading(false);
+          }
         } else {
           setCharacters(chars);
           
@@ -112,11 +152,24 @@ export default function Home() {
     };
     
     init();
-  }, [router]);
+  }, [router, authLoading]);
 
   
   useEffect(() => {
     if (selectedCharId) {
+      if (selectedCharId === 'dummy') {
+        setLatestChat({
+          id: 'dummy_chat',
+          userId: 'dummy',
+          characterId: 'dummy',
+          role: 'assistant',
+          content: t('dummy.chatMsg') || '지금 바빠? 하고싶은 말이 있어.',
+          createdAt: Date.now(),
+          locale: locale
+        } as ChatMessage);
+        return;
+      }
+
       const fetchLatestChat = async () => {
         try {
           const msgs = await getChatMessages(getUserId(), selectedCharId);
@@ -194,10 +247,10 @@ export default function Home() {
       const todayTopic = charTopics[selectedCharId] || null;
   const userProfile = selectedCharId ? userProfiles[selectedCharId] : null;
 
-  let formattedContent = todayTopic?.content || '';
+  let formattedContent = (locale === 'ja' && todayTopic?.contentJa) ? todayTopic.contentJa : (todayTopic?.content || '');
   if (formattedContent && selectedChar) {
     formattedContent = formattedContent
-      .replace(/{유저}/g, userProfile?.name || '유저')
+      .replace(/{유저}/g, userProfile?.name || (locale === 'ja' ? t('common.user') : '유저'))
       .replace(/{캐릭터}/g, selectedChar.name);
   }
 
@@ -228,8 +281,7 @@ export default function Home() {
 
       <div style={{ position: 'relative', zIndex: 10, display: 'flex', flexDirection: 'column', height: '100%' }}>
         {/* Character Selector (Horizontal Scroll) */}
-        {characters.length > 0 && (
-          <div style={{ display: 'flex', gap: '15px', overflowX: 'auto', padding: '25px', scrollbarWidth: 'none' }}>
+        <div style={{ display: 'flex', gap: '15px', overflowX: 'auto', padding: '25px', scrollbarWidth: 'none' }}>
             {[...characters].sort((a, b) => {
               const userId = getUserId();
               const history: string[] = JSON.parse(localStorage.getItem(`recentChars_${userId}`) || '[]');
@@ -288,7 +340,6 @@ export default function Home() {
               );
             })}
           </div>
-        )}
 
                 {/* Main Content Area */}
         <main className="content" style={{ display: 'flex', flexDirection: 'column', gap: '14px', padding: '0 25px 25px 25px' }}>
@@ -299,7 +350,13 @@ export default function Home() {
                   {selectedChar?.pairName || selectedChar?.name}
                 </span>
                 <button 
-                  onClick={() => router.push(`/home-settings/${selectedChar.id}`)}
+                  onClick={() => {
+                    if (selectedChar?.id === 'dummy') {
+                      setShowEmptyModal(true);
+                    } else {
+                      router.push(`/home-settings/${selectedChar.id}`);
+                    }
+                  }}
                   style={{ 
                     display: 'flex', alignItems: 'center', justifyContent: 'center', 
                     width: '36px', height: '36px', padding: 0,
@@ -322,19 +379,26 @@ export default function Home() {
             </div>
             
             <h2 style={{ fontSize: '3rem', fontWeight: '600', color: textColor, textShadow, letterSpacing: '-1px', lineHeight: 1, textAlign: 'right' }}>
-              {Math.abs(dDay)}일
+              {Math.abs(dDay)}{t('common.daysUnit')}
             </h2>
           </div>
           
           <div style={{ marginTop: 'auto', display: 'flex', flexDirection: 'column', gap: '14px' }}>
             {latestChat && (
               <div 
-                onClick={() => router.push('/chat/' + selectedCharId)}
+                onClick={() => {
+                  if (selectedChar?.id === 'dummy') {
+                    setShowEmptyModal(true);
+                  } else {
+                    router.push('/chat/' + selectedCharId);
+                  }
+                }}
                 style={{ 
+                  order: selectedCharId === 'dummy' ? 2 : 1,
                   padding: '12px', 
                   borderRadius: '15px', 
-                  backgroundColor: hasBg ? (isLightMode ? 'rgba(255, 255, 255, 0.3)' : 'rgba(255, 255, 255, 0.15)') : 'white', 
-                  border: hasBg ? (isLightMode ? '1px solid rgba(0, 0, 0, 0.1)' : '1px solid rgba(255, 255, 255, 0.5)') : '1px solid var(--border-color)', 
+                  backgroundColor: selectedCharId === 'dummy' ? '#F5F0FF' : (hasBg ? (isLightMode ? 'rgba(255, 255, 255, 0.3)' : 'rgba(255, 255, 255, 0.15)') : 'white'), 
+                  border: selectedCharId === 'dummy' ? '1px solid #D8C4FF' : (hasBg ? (isLightMode ? '1px solid rgba(0, 0, 0, 0.1)' : '1px solid rgba(255, 255, 255, 0.5)') : '1px solid var(--border-color)'), 
                   boxShadow: hasBg ? '0 4px 15px rgba(0,0,0,0.1)' : '0 4px 10px rgba(0,0,0,0.02)',
                   backdropFilter: hasBg ? 'blur(10px)' : 'none',
                   cursor: 'pointer',
@@ -344,12 +408,12 @@ export default function Home() {
                   gap: '12px'
                 }}
               >
-                <div style={{ width: '42px', height: '42px', borderRadius: '50%', overflow: 'hidden', backgroundColor: 'var(--gray-200)', flexShrink: 0, position: 'relative' }}>
+                <div style={{ width: '42px', height: '42px', borderRadius: '50%', overflow: 'hidden', backgroundColor: selectedCharId === 'dummy' ? 'white' : 'var(--gray-200)', flexShrink: 0, position: 'relative' }}>
                   {latestChat.role === 'assistant' ? (
                     selectedChar?.image ? (
                       <Image src={selectedChar.image} alt={selectedChar.name} fill style={{ objectFit: 'cover' }} />
                     ) : (
-                      <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}><User size={20} color="var(--gray-500)" /></div>
+                      <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}><User size={20} color={selectedCharId === 'dummy' ? 'var(--gray-400)' : 'var(--gray-500)'} /></div>
                     )
                   ) : (
                     userProfiles[selectedCharId || '']?.image ? (
@@ -371,8 +435,8 @@ export default function Home() {
                         </div>
                       )}
                     </div>
-                    <span style={{ fontSize: '0.75rem', color: hasBg ? (isLightMode ? 'var(--gray-600)' : 'rgba(255,255,255,0.7)') : 'var(--gray-400)' }}>
-                      {new Date((latestChat as any).createdAt || (latestChat as any).timestamp || Date.now()).toLocaleTimeString('ko-KR', { hour: 'numeric', minute: '2-digit' })}
+                    <span style={{ fontSize: '0.75rem', color: selectedCharId === 'dummy' ? 'var(--gray-600)' : (hasBg ? (isLightMode ? 'var(--gray-600)' : 'rgba(255,255,255,0.7)') : 'var(--gray-400)') }}>
+                      {new Date((latestChat as any).createdAt || (latestChat as any).timestamp || Date.now()).toLocaleTimeString(locale === 'ja' ? 'ja-JP' : 'ko-KR', { hour: 'numeric', minute: '2-digit' })}
                     </span>
                   </div>
                   <p style={{ color: hasBg ? (isLightMode ? 'var(--gray-800)' : 'rgba(255,255,255,0.9)') : 'var(--gray-600)', fontSize: '0.85rem', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
@@ -386,10 +450,11 @@ export default function Home() {
               <div 
                 onClick={() => router.push('/diary?charId=' + selectedCharId)}
                 style={{ 
+                  order: selectedCharId === 'dummy' ? 1 : 2,
                   padding: '14px', 
                   borderRadius: '15px', 
-                  backgroundColor: hasBg ? (isLightMode ? 'rgba(255, 255, 255, 0.3)' : 'rgba(255, 255, 255, 0.15)') : 'white', 
-                  border: hasBg ? (isLightMode ? '1px solid rgba(0, 0, 0, 0.1)' : '1px solid rgba(255, 255, 255, 0.5)') : '1px solid var(--border-color)', 
+                  backgroundColor: selectedCharId === 'dummy' ? '#F5F0FF' : (hasBg ? (isLightMode ? 'rgba(255, 255, 255, 0.3)' : 'rgba(255, 255, 255, 0.15)') : 'white'), 
+                  border: selectedCharId === 'dummy' ? '1px solid #D8C4FF' : (hasBg ? (isLightMode ? '1px solid rgba(0, 0, 0, 0.1)' : '1px solid rgba(255, 255, 255, 0.5)') : '1px solid var(--border-color)'), 
                   boxShadow: hasBg ? '0 4px 15px rgba(0,0,0,0.1)' : '0 4px 10px rgba(0,0,0,0.02)',
                   backdropFilter: hasBg ? 'blur(10px)' : 'none',
                   cursor: 'pointer',
@@ -401,7 +466,7 @@ export default function Home() {
               >
                 <div style={{ flex: 1, paddingRight: '10px' }}>
                   <p style={{ color: hasBg ? (isLightMode ? '#000000' : 'rgba(255,255,255,0.9)') : 'var(--point-color)', fontSize: '0.85rem', fontWeight: 'bold', marginBottom: '8px' }}>
-                    {todayTopic.order}번째 질문
+                    {todayTopic.order}{t('common.nthQuestion')}
                   </p>
                   <h3 style={{ fontSize: '1.2rem', lineHeight: '1.4', color: hasBg ? (isLightMode ? 'var(--gray-700)' : 'white') : 'var(--foreground)' }}>
                     {formattedContent}
@@ -412,8 +477,9 @@ export default function Home() {
             ) : null}
           </div>
         </main>
-
       </div>
+
+      <EmptyCharacterModal isOpen={showEmptyModal} onClose={() => setShowEmptyModal(false)} />
     </div>
     </ErrorBoundary>
   );

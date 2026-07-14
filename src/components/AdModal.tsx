@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { trackEvent } from '@/lib/mixpanel';
+import { useLocale } from '@/lib/i18n';
 
 interface AdModalProps {
   isOpen: boolean;
@@ -10,6 +11,7 @@ interface AdModalProps {
 
 export default function AdModal({ isOpen, onConfirm }: AdModalProps) {
   const [mounted, setMounted] = useState(false);
+  const { t } = useLocale();
   
   useEffect(() => {
     setMounted(true);
@@ -50,12 +52,12 @@ export default function AdModal({ isOpen, onConfirm }: AdModalProps) {
         animation: 'fadeInUp 0.3s ease-out'
       }}>
         
-        <h3 style={{ fontSize: '1.1rem', fontWeight: 'bold', color: 'var(--gray-900)', textAlign: 'center', marginBottom: '16px', lineHeight: '1.4' }}>
-          원활한 서비스 운영을 위해<br/>광고가 보일 수 있어요
+        <h3 style={{ fontSize: '1.1rem', fontWeight: 'bold', color: 'var(--gray-900)', textAlign: 'center', marginBottom: '16px', lineHeight: '1.4', whiteSpace: 'pre-line' }}>
+          {t('ad.title')}
         </h3>
         
         <p style={{ fontSize: '0.95rem', color: 'var(--gray-600)', textAlign: 'center', marginBottom: '24px', lineHeight: '1.4' }}>
-          광고를 닫고 다시 앱으로 돌아와주세요
+          {t('ad.desc')}
         </p>
 
         <button
@@ -76,7 +78,7 @@ export default function AdModal({ isOpen, onConfirm }: AdModalProps) {
           onMouseUp={(e) => e.currentTarget.style.transform = 'scale(1)'}
           onMouseLeave={(e) => e.currentTarget.style.transform = 'scale(1)'}
         >
-          확인
+          {t('common.confirm')}
         </button>
       </div>
       

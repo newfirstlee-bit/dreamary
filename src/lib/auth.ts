@@ -31,8 +31,14 @@ function getCookie(name: string) {
   return null;
 }
 
+import { auth } from './firebase';
+
 export function getUserId(): string {
   if (typeof window === 'undefined') return ''; // SSR 대응
+
+  if (auth.currentUser) {
+    return auth.currentUser.uid;
+  }
 
   let userId = localStorage.getItem(USER_ID_KEY);
   let cookieUserId = getCookie(USER_ID_KEY);

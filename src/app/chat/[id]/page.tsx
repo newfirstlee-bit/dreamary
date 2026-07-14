@@ -4,16 +4,18 @@ import { useEffect, useState, useRef, ReactNode } from 'react';
 import Image from 'next/image';
 import { useRouter } from 'next/navigation';
 import { getUserId } from '@/lib/auth';
-import { getCharacterById, Character, getUserProfile, UserProfile, getChatMessages, ChatMessage, saveChatMessage, deleteChatMessages, unlockMessageAd } from '@/lib/db';
+import { getCharacterById, Character, getUserProfile, UserProfile, getChatMessages, subscribeChatMessages, ChatMessage, saveChatMessage, deleteChatMessages, unlockMessageAd } from '@/lib/db';
 import { Loader2, ChevronLeft, MoreVertical, Send, User, MoreHorizontal, Lock } from 'lucide-react';
 import AdModal from '@/components/AdModal';
 import ErrorModal from '@/components/ErrorModal';
 import { trackEvent } from '@/lib/mixpanel';
 import { trackChatAndCheckAd } from '@/lib/adTracker';
 import { saveDraft, loadDraft, clearDraft } from '@/lib/draftStorage';
+import { useLocale } from '@/lib/i18n';
 
 export default function ChatDetail({ params }: { params: { id: string } }) {
   const router = useRouter();
+  const { t } = useLocale();
   const [loading, setLoading] = useState(true);
   const [character, setCharacter] = useState<Character | null>(null);
   const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
@@ -21,6 +23,7 @@ export default function ChatDetail({ params }: { params: { id: string } }) {
   const [inputMsg, setInputMsg] = useState("");
   const [isTyping, setIsTyping] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const isSendingRef = useRef(false);
@@ -75,18 +78,27 @@ export default function ChatDetail({ params }: { params: { id: string } }) {
         setUserProfile(profile);
 
         const history = await getChatMessages(userId, char.id);
-        setMessages(history);
-
         if (history.length === 0 && !localStorage.getItem(`hasPinged_${char.id}`)) {
           triggerInitialPing(char, profile);
         }
+
+        const unsubscribe = subscribeChatMessages(userId, char.id, (msgs) => {
+          setMessages(msgs);
+        });
+
+        return () => unsubscribe();
       } catch (error) {
         console.error('Failed to load chat:', error);
       } finally {
         setLoading(false);
       }
     };
-    init();
+    
+    let unsub: (() => void) | void;
+    init().then(res => { unsub = res; });
+    return () => {
+      if (unsub) unsub();
+    };
   }, [params.id, router]);
 
   useEffect(() => {
@@ -107,21 +119,14 @@ export default function ChatDetail({ params }: { params: { id: string } }) {
           character: char,
           userProfile: profile,
           messages: [],
-          isFirstPing: true
+          isFirstPing: true,
+          userId: getUserId()
         })
       });
       const data = await res.json();
       if (res.ok && data.reply) {
-        const newMsg: ChatMessage = {
-          id: Date.now().toString(),
-          userId: getUserId(),
-          characterId: char.id,
-          role: 'assistant',
-          content: data.reply,
-          createdAt: Date.now()
-        };
-        await saveChatMessage(newMsg);
-        setMessages([newMsg]);
+        // The message is already saved by the server now, but to be safe we just let the subscription handle it.
+        // Or if we still want local optimism, the subscription will merge it.
       }
     } catch (error) {
       console.error('Initial ping failed:', error);
@@ -145,7 +150,17 @@ export default function ChatDetail({ params }: { params: { id: string } }) {
       createdAt: Date.now()
     };
 
-    setMessages(prev => [...prev, userMsg]);
+    // Save immediately before fetch so it isn't lost if user leaves
+    await saveChatMessage(userMsg);
+    // Note: Since we have subscribeChatMessages, it will automatically update 'messages' state
+    // But for instant UI feedback we can also append locally
+    setMessages(prev => {
+      if (!prev.find(m => m.id === userMsg.id)) {
+        return [...prev, userMsg];
+      }
+      return prev;
+    });
+    
     setInputMsg("");
     trackEvent('Chat_Message_Sent', {
       character_id: character.id,
@@ -208,7 +223,6 @@ export default function ChatDetail({ params }: { params: { id: string } }) {
       }
       
       if (success) {
-        await saveChatMessage(userMsg);
         clearDraft(character.id);
 
         if (isAdTurn) {
@@ -218,7 +232,7 @@ export default function ChatDetail({ params }: { params: { id: string } }) {
         trackEvent('Chat_Response_Received', {
           character_id: character.id,
         });
-        await loadMessages(); // reload to get the saved message
+        // loadMessages() is no longer needed due to subscription
       } else {
         throw new Error('All 3 attempts failed');
       }
@@ -237,15 +251,14 @@ export default function ChatDetail({ params }: { params: { id: string } }) {
   };
 
   const handleDeleteChat = async () => {
-    if (confirm("정말 이 대화방의 모든 채팅 내역을 삭제하시겠습니까?\n이 작업은 되돌릴 수 없습니다.")) {
-      try {
-        await deleteChatMessages(getUserId(), params.id);
-        setMessages([]);
-        setShowSettings(false);
-        if (character) triggerInitialPing(character, userProfile);
-      } catch (error) {
-        alert('삭제 실패했습니다.');
-      }
+    try {
+      await deleteChatMessages(getUserId(), params.id);
+      setMessages([]);
+      setShowSettings(false);
+      setShowDeleteConfirm(false);
+      if (character) triggerInitialPing(character, userProfile);
+    } catch (error) {
+      alert(t('chat.deleteFailed'));
     }
   };
 
@@ -413,7 +426,7 @@ export default function ChatDetail({ params }: { params: { id: string } }) {
                         }}
                       >
                         <Lock size={14} />
-                        <span style={{ fontSize: '0.85rem' }}>답변 보기 (AD)</span>
+                        <span style={{ fontSize: '0.85rem' }}>{t('chat.viewReply')}</span>
                       </button>
                     </div>
                   ) : (
@@ -458,7 +471,7 @@ export default function ChatDetail({ params }: { params: { id: string } }) {
           </div>
         )}
         <p style={{ fontSize: '0.75rem', color: 'var(--gray-600)', textAlign: 'center', marginTop: '10px', marginBottom: '20px', wordBreak: 'keep-all', lineHeight: '1.4' }}>
-          캐붕이 생긴다면 <span onClick={() => router.push(`/mypage/edit-character/${character.id}`)} style={{ textDecoration: 'underline', cursor: 'pointer', color: 'var(--point-color)' }}>[캐릭터 수정]</span> &gt; <span onClick={() => setShowSettings(true)} style={{ textDecoration: 'underline', cursor: 'pointer', color: 'var(--gray-800)' }}>[채팅방 삭제]</span> 후 새로 대화를 시작해주세요.
+          {t('chat.breakHintPre')}<span onClick={() => router.push(`/mypage/edit-character/${character.id}`)} style={{ textDecoration: 'underline', cursor: 'pointer', color: 'var(--point-color)' }}>{t('common.edit')}</span>] &gt; <span onClick={() => setShowSettings(true)} style={{ textDecoration: 'underline', cursor: 'pointer', color: 'var(--gray-800)' }}>[{t('chat.deleteAll')}</span>{t('chat.breakHintPost')}
         </p>
         <div ref={messagesEndRef} />
       </div>
@@ -470,7 +483,7 @@ export default function ChatDetail({ params }: { params: { id: string } }) {
             onClick={insertActionBracket}
             style={{ padding: '8px 16px', borderRadius: '20px', backgroundColor: 'var(--point-color)', color: 'white', border: 'none', fontSize: '0.9rem', fontWeight: 'bold', cursor: 'pointer', boxShadow: '0 2px 8px rgba(0,0,0,0.15)' }}
           >
-            (행동지문)
+            {t('chat.actionBracket')}
           </button>
         </div>
         <div style={{ display: 'flex', gap: '10px', alignItems: 'center', marginTop: '5px' }}>
@@ -493,7 +506,7 @@ export default function ChatDetail({ params }: { params: { id: string } }) {
                 handleSend();
               }
             }}
-            placeholder="메시지를 입력하세요..."
+            placeholder={t('chat.placeholder')}
             style={{ 
               flex: 1, 
               padding: '12px 16px', 
@@ -524,32 +537,68 @@ export default function ChatDetail({ params }: { params: { id: string } }) {
         <>
           <div onClick={() => setShowSettings(false)} style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.5)', zIndex: 100 }} />
           <div style={{ position: 'absolute', bottom: 0, left: 0, right: 0, backgroundColor: 'white', borderTopLeftRadius: '20px', borderTopRightRadius: '20px', padding: '25px', zIndex: 101, display: 'flex', flexDirection: 'column', gap: '15px' }}>
-            <h3 style={{ fontSize: '1.2rem', fontWeight: 'bold', marginBottom: '10px' }}>채팅방 설정</h3>
+            <h3 style={{ fontSize: '1.2rem', fontWeight: 'bold', marginBottom: '10px' }}>{t('chat.settings')}</h3>
             
             <button 
               onClick={() => router.push(`/mypage/edit-user/${character.id}`)}
               style={{ padding: '15px', borderRadius: '12px', backgroundColor: 'var(--gray-50)', border: '1px solid var(--border-color)', color: 'var(--gray-800)', textAlign: 'left', fontSize: '1rem', fontWeight: 'bold', cursor: 'pointer' }}
             >
-              내 프로필 수정
+              {t('chat.editProfile')}
             </button>
             <button 
               onClick={() => router.push(`/mypage/edit-character/${character.id}`)}
               style={{ padding: '15px', borderRadius: '12px', backgroundColor: 'var(--gray-50)', border: '1px solid var(--border-color)', color: 'var(--gray-800)', textAlign: 'left', fontSize: '1rem', fontWeight: 'bold', cursor: 'pointer' }}
             >
-              캐릭터 프로필 수정
+              {t('chat.editCharProfile')}
             </button>
             
             <div style={{ height: '1px', backgroundColor: 'var(--border-color)', margin: '10px 0' }} />
             
             <button 
-              onClick={handleDeleteChat}
+              onClick={() => { setShowDeleteConfirm(true); setShowSettings(false); }}
               style={{ padding: '15px', borderRadius: '12px', backgroundColor: '#FFF0F0', border: '1px solid #FFCDCD', color: 'red', textAlign: 'left', fontSize: '1rem', fontWeight: 'bold', cursor: 'pointer' }}
             >
-              채팅방 내역 모두 삭제
+              {t('chat.deleteAll')}
             </button>
           </div>
         </>
       )}
+      {/* Custom Delete Confirm Modal */}
+      {showDeleteConfirm && (
+        <>
+          <div 
+            onClick={() => setShowDeleteConfirm(false)}
+            style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.5)', zIndex: 3000 }} 
+          />
+          <div style={{ 
+            position: 'fixed', top: '50%', left: '50%', transform: 'translate(-50%, -50%)', width: '90%', maxWidth: '340px', 
+            backgroundColor: 'white', borderRadius: '20px', padding: '30px 20px 20px', zIndex: 3001,
+            display: 'flex', flexDirection: 'column', alignItems: 'center', textAlign: 'center'
+          }}>
+            <h2 style={{ fontSize: '1.2rem', fontWeight: 'bold', marginBottom: '10px' }}>
+              {t('chat.deleteAll')}
+            </h2>
+            <p style={{ fontSize: '0.9rem', color: 'var(--gray-500)', marginBottom: '25px', whiteSpace: 'pre-line' }}>
+              {t('chat.deleteConfirm')}
+            </p>
+            <div style={{ display: 'flex', gap: '10px', width: '100%' }}>
+              <button 
+                onClick={handleDeleteChat}
+                style={{ flex: 1, padding: '15px', backgroundColor: '#FF3B30', color: 'white', border: 'none', borderRadius: '12px', fontSize: '1rem', fontWeight: 'bold', cursor: 'pointer' }}
+              >
+                {t('common.delete')}
+              </button>
+              <button 
+                onClick={() => setShowDeleteConfirm(false)}
+                style={{ flex: 1, padding: '15px', backgroundColor: 'var(--gray-100)', color: 'var(--foreground)', border: 'none', borderRadius: '12px', fontSize: '1rem', fontWeight: 'bold', cursor: 'pointer' }}
+              >
+                {t('common.cancel')}
+              </button>
+            </div>
+          </div>
+        </>
+      )}
+
       <AdModal isOpen={adModalOpen} onConfirm={confirmAd} />
       <ErrorModal isOpen={errorModalOpen} onConfirm={() => setErrorModalOpen(false)} />
     </div>

@@ -1,25 +1,24 @@
 "use client";
 
 import { useEffect, useState } from 'react';
+import { useLocale } from '@/lib/i18n';
 
 export default function AdBlockModal() {
   const [isAdBlockEnabled, setIsAdBlockEnabled] = useState(false);
   const [mounted, setMounted] = useState(false);
+  const { t } = useLocale();
 
   useEffect(() => {
     setMounted(true);
     
     const checkAdBlock = async () => {
       try {
-        // Try fetching a common ad script
-        // Adblockers usually block this at the network level and cause fetch to throw
         await fetch('https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js', {
           method: 'HEAD',
           mode: 'no-cors',
           cache: 'no-store'
         });
         
-        // Also check via DOM manipulation as a fallback
         const adTest = document.createElement('div');
         adTest.innerHTML = '&nbsp;';
         adTest.className = 'adsbox';
@@ -28,7 +27,6 @@ export default function AdBlockModal() {
         adTest.style.height = '10px';
         document.body.appendChild(adTest);
         
-        // Give adblockers a moment to apply their CSS/hiding logic
         setTimeout(() => {
           if (adTest.offsetHeight === 0 || adTest.style.display === 'none') {
             setIsAdBlockEnabled(true);
@@ -37,7 +35,6 @@ export default function AdBlockModal() {
         }, 100);
 
       } catch (e) {
-        // Fetch failed due to network block (AdBlock)
         setIsAdBlockEnabled(true);
       }
     };
@@ -58,7 +55,7 @@ export default function AdBlockModal() {
       display: 'flex',
       alignItems: 'center',
       justifyContent: 'center',
-      zIndex: 99999, // Highest z-index
+      zIndex: 99999,
       backdropFilter: 'blur(5px)',
     }}>
       <div style={{
@@ -75,11 +72,11 @@ export default function AdBlockModal() {
       }}>
         
         <h3 style={{ fontSize: '1.2rem', fontWeight: 'bold', color: 'var(--gray-900)', textAlign: 'center', marginBottom: '16px', lineHeight: '1.4' }}>
-          광고 차단을 해제해주세요
+          {t('adblock.title')}
         </h3>
         
         <p style={{ fontSize: '0.95rem', color: 'var(--gray-600)', textAlign: 'center', marginBottom: '24px', lineHeight: '1.5', wordBreak: 'keep-all' }}>
-          애드블록 등 광고 차단 프로그램의 설정을 해제한 후 새로고침 해주세요.
+          {t('adblock.desc')}
         </p>
 
         <button
@@ -100,7 +97,7 @@ export default function AdBlockModal() {
           onMouseUp={(e) => e.currentTarget.style.transform = 'scale(1)'}
           onMouseLeave={(e) => e.currentTarget.style.transform = 'scale(1)'}
         >
-          새로고침
+          {t('common.refresh')}
         </button>
       </div>
       

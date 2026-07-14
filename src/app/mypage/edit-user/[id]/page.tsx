@@ -8,9 +8,11 @@ import { getUserProfile, saveUserProfile, UserProfile } from '@/lib/db';
 import { uploadImageToImgbb } from '@/lib/imgbb';
 import { Loader2, ChevronLeft, Camera, User } from 'lucide-react';
 import { trackEvent } from '@/lib/mixpanel';
+import { useLocale } from '@/lib/i18n';
 
 function GenderSelect({ value, onChange }: { value: string, onChange: (v: string) => void }) {
-  const options = ['남성', '여성', '그 외'];
+  const { t } = useLocale();
+  const options = [t('gender.male'), t('gender.female'), t('gender.other')];
   return (
     <div style={{ display: 'flex', gap: '10px', width: '100%' }}>
       {options.map(opt => (
@@ -39,6 +41,7 @@ function GenderSelect({ value, onChange }: { value: string, onChange: (v: string
 
 export default function EditUserPage({ params }: { params: { id: string } }) {
   const router = useRouter();
+  const { t } = useLocale();
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   
@@ -91,8 +94,8 @@ export default function EditUserPage({ params }: { params: { id: string } }) {
 
       const updatedUser: UserProfile = {
         id: params.id,
-        name: name.trim() || '유저',
-        gender: (gender as '남성' | '여성' | '그 외') || undefined,
+        name: name.trim() || t('common.user'),
+        gender: gender || undefined,
         feeling: feeling.trim(),
         extra: extra.trim(),
         createdAt: Date.now()
@@ -107,7 +110,7 @@ export default function EditUserPage({ params }: { params: { id: string } }) {
       router.push('/mypage');
     } catch (err) {
       console.error(err);
-      alert('저장 중 오류가 발생했습니다.');
+      alert(t('editChar.saveFailed'));
       setSaving(false);
     }
   };
@@ -126,7 +129,7 @@ export default function EditUserPage({ params }: { params: { id: string } }) {
         <button onClick={() => router.back()} style={{ position: 'absolute', left: '20px', background: 'none', border: 'none', color: 'var(--foreground)', cursor: 'pointer', display: 'flex', alignItems: 'center' }}>
           <ChevronLeft size={28} color="var(--gray-800)" />
         </button>
-        <span style={{ fontSize: '1.2rem', fontWeight: 'bold' }}>유저 프로필 수정</span>
+        <span style={{ fontSize: '1.2rem', fontWeight: 'bold' }}>{t('editUser.header')}</span>
       </header>
 
       <main className="content" style={{ display: 'flex', flexDirection: 'column', gap: '30px' }}>
@@ -147,8 +150,8 @@ export default function EditUserPage({ params }: { params: { id: string } }) {
               <Camera size={32} color="var(--gray-500)" />
             )}
           </div>
-          <p style={{ marginTop: '10px', fontSize: '16px', color: 'var(--text-muted)' }}>터치하여 사진 업로드</p>
-          <p style={{ marginTop: '4px', fontSize: '14px', color: '#ff4d4f', fontWeight: 'bold' }}>절대로 생성형 AI학습에 사용되지 않습니다</p>
+          <p style={{ marginTop: '10px', fontSize: '16px', color: 'var(--text-muted)' }}>{t('image.touchUpload')}</p>
+          <p style={{ marginTop: '4px', fontSize: '14px', color: '#ff4d4f', fontWeight: 'bold' }}>{t('image.noAI')}</p>
           <input type="file" accept="image/*" ref={fileInputRef} onChange={handleImageChange} style={{ display: 'none' }} />
         </div>
 
@@ -157,43 +160,43 @@ export default function EditUserPage({ params }: { params: { id: string } }) {
           
           <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <label style={{ fontSize: '1rem', fontWeight: 'bold' }}>이름 (최대 10자)</label>
+              <label style={{ fontSize: '1rem', fontWeight: 'bold' }}>{t('editUser.name')}</label>
               <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>{name.length}/10</span>
             </div>
             <input 
               type="text" value={name} onChange={e => setName(e.target.value.slice(0, 10))}
-              placeholder="내 이름/드림주 이름을 알려주세요"
+              placeholder={t('editUser.namePh')}
               style={{ width: '100%', padding: '15px', borderRadius: '10px', border: '1px solid var(--border-color)', fontSize: '1.05rem', outline: 'none' }}
             />
           </div>
 
           <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <label style={{ fontSize: '1rem', fontWeight: 'bold' }}>성별</label>
+              <label style={{ fontSize: '1rem', fontWeight: 'bold' }}>{t('editUser.gender')}</label>
             </div>
             <GenderSelect value={gender} onChange={setGender} />
           </div>
 
           <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <label style={{ fontSize: '1rem', fontWeight: 'bold' }}>캐릭터에게 느끼는 감정 (최대 300자)</label>
+              <label style={{ fontSize: '1rem', fontWeight: 'bold' }}>{t('editUser.feeling')}</label>
               <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>{feeling.length}/300</span>
             </div>
             <textarea 
               value={feeling} onChange={e => setFeeling(e.target.value.slice(0, 300))}
-              placeholder="예: 은인이자 동료. 썸타는 것 같은데 안사귐"
+              placeholder={t('editUser.feelingPh')}
               style={{ width: '100%', padding: '15px', borderRadius: '10px', border: '1px solid var(--border-color)', fontSize: '1rem', outline: 'none', resize: 'none', minHeight: '100px' }}
             />
           </div>
 
           <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <label style={{ fontSize: '1rem', fontWeight: 'bold' }}>추가 설정 (최대 300자)</label>
+              <label style={{ fontSize: '1rem', fontWeight: 'bold' }}>{t('editUser.extra')}</label>
               <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>{extra.length}/300</span>
             </div>
             <textarea 
               value={extra} onChange={e => setExtra(e.target.value.slice(0, 300))}
-              placeholder="유저의 추가 설정이 있나요? (선택)"
+              placeholder={t('editUser.extraPh')}
               style={{ width: '100%', padding: '15px', borderRadius: '10px', border: '1px solid var(--border-color)', fontSize: '1rem', outline: 'none', resize: 'none', minHeight: '100px' }}
             />
           </div>
@@ -210,7 +213,7 @@ export default function EditUserPage({ params }: { params: { id: string } }) {
           className="btn-primary"
           style={{ width: '100%', display: 'flex', justifyContent: 'center', alignItems: 'center' }}
         >
-          {saving ? <Loader2 className="animate-spin" size={24} /> : '저장하기'}
+          {saving ? <Loader2 className="animate-spin" size={24} /> : t('common.save')}
         </button>
       </div>
       <style dangerouslySetInnerHTML={{__html: `

@@ -24,8 +24,40 @@ export async function POST(req: Request) {
     const userName = userProfile?.name || '나';
     const userFeeling = userProfile?.feeling || '특별한 감정 표현 없음';
     const userExtra = userProfile?.extra || '없음';
+    const locale = character.locale || 'ko';
 
-    const systemPrompt = `
+    let systemPrompt = '';
+
+    if (locale === 'ja') {
+      systemPrompt = `
+あなたは以下の設定に完璧に従ってロールプレイするキャラクターです。絶対にAIやアシスタントのように振る舞わないでください。
+キャラクター名: ${character.name}
+${userName}に感じている気持ち: ${character.feeling}
+${userName}を呼ぶ呼び方: ${character.title}
+会話例（口調の参考）:
+${character.exampleChat}
+絶対にしてはいけない言動（ネガティブプロンプト）:
+${character.negative}
+追加設定: ${character.extra || 'なし'}
+
+相手（ユーザー）の設定:
+名前: ${userName}
+私（キャラクター）への気持ち: ${userFeeling}
+相手の追加設定: ${userExtra}
+
+[状況説明]
+今はお互いに交換日記を書いている状況です。
+今日の交換日記のテーマ: "${topic}"
+
+[リクエスト]
+先ほど${userName}が日記を書いてあなたに渡しました。
+以下に提示される${userName}の日記を読んで、キャラクターの性格と口調を完璧に反映して交換日記の返事（次の番の日記）を書いてください。
+返事はあまり長くなく3～5文程度で、絶対に空白含め500文字を超えないように書いてください。
+不要なシステムメッセージ、補足説明なしで日記の内容だけを出力してください。
+`;
+    } else {
+      // Korean (default)
+      systemPrompt = `
 당신은 다음 설정에 따라 완벽하게 롤플레잉하는 캐릭터입니다. 절대 AI나 어시스턴트처럼 행동하지 마세요.
 캐릭터 이름: ${character.name}
 ${userName}에게 느끼는 감정: ${character.feeling}
@@ -51,9 +83,11 @@ ${character.negative}
 답장은 너무 길지 않게 3~5문장 내외로, 절대 공백 포함 500자를 넘지 않게 작성해주세요.
 불필요한 시스템 메시지, 부연 설명 없이 오직 일기 내용만 출력하세요.
 `;
+    }
 
+    const userLabel = locale === 'ja' ? `${userName}の日記内容` : `${userName}의 일기 내용`;
     const userMessage = `
-[${userName}의 일기 내용]
+[${userLabel}]
 ${userEntry}
 `;
 
@@ -64,7 +98,7 @@ ${userEntry}
         "Content-Type": "application/json"
       },
       body: JSON.stringify({
-        model: "google/gemma-4-31b-it", // Gemma 4 31B model
+        model: "google/gemma-4-31b-it",
         messages: [
           { role: "system", content: systemPrompt },
           { role: "user", content: userMessage }

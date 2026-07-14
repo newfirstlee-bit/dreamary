@@ -39,3 +39,11 @@ export const trackEvent = (eventName: string, properties?: Record<string, any>) 
     console.warn(`Failed to track ${eventName}: Mixpanel not initialized.`);
   }
 };
+
+export const registerLanguage = (language: string) => {
+  initMixpanel();
+  if (isInitialized) {
+    mixpanel.register({ language });
+    mixpanel.people.set({ language });
+  }
+};

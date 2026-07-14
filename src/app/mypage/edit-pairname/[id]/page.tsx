@@ -4,11 +4,13 @@ import { useState, useEffect } from 'react';
 import { useRouter, useParams } from 'next/navigation';
 import { getCharacterById, updatePairName, Character } from '@/lib/db';
 import { ChevronLeft, Loader2 } from 'lucide-react';
+import { useLocale } from '@/lib/i18n';
 
 export default function EditPairName() {
   const router = useRouter();
   const params = useParams();
   const id = params.id as string;
+  const { t } = useLocale();
 
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -56,15 +58,15 @@ export default function EditPairName() {
       <main className="content" style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '30px' }}>
         <div style={{ marginTop: '20px' }}>
           <h2 style={{ fontSize: '1.4rem', fontWeight: 'bold', marginBottom: '10px', color: 'var(--foreground)' }}>
-            페어명을 알려주세요
+            {t('editPair.title')}
           </h2>
           <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem', marginBottom: '20px' }}>
-            최대 10자까지 입력할 수 있습니다.
+            {t('editPair.hint')}
           </p>
 
           <input 
             type="text" 
-            placeholder="페어명 입력 (예: 얀네와 오렌지)" 
+            placeholder={t('editPair.placeholder')} 
             value={pairName}
             onChange={(e) => setPairName(e.target.value.slice(0, 10))}
             className="input-field"
@@ -81,7 +83,7 @@ export default function EditPairName() {
           className="btn-primary"
           style={{ width: '100%', padding: '16px', fontSize: '1.1rem', marginTop: 'auto', marginBottom: '20px', borderRadius: '15px' }}
         >
-          {saving ? '저장 중...' : '저장하기'}
+          {saving ? t('common.saving') : t('common.save')}
         </button>
       </main>
 

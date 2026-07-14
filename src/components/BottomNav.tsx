@@ -4,10 +4,12 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import { Home, BookOpen, MessageCircle, User } from 'lucide-react';
+import { useLocale } from '@/lib/i18n';
 
 export default function BottomNav() {
   const pathname = usePathname();
   const [isKeyboardOpen, setIsKeyboardOpen] = useState(false);
+  const { t } = useLocale();
 
   useEffect(() => {
     if (window.visualViewport) {
@@ -27,10 +29,10 @@ export default function BottomNav() {
   if (isKeyboardOpen || pathname === '/onboarding' || pathname.startsWith('/mypage/edit-pairname') || pathname.startsWith('/home-settings') || pathname.startsWith('/chat/') || pathname.startsWith('/admin') || pathname.startsWith('/mypage/edit-character') || pathname.startsWith('/mypage/edit-user')) return null;
 
   const navItems = [
-    { name: '홈', path: '/', icon: Home },
-    { name: '일기', path: '/diary', icon: BookOpen },
-    { name: '채팅', path: '/chat', icon: MessageCircle },
-    { name: '마이페이지', path: '/mypage', icon: User },
+    { name: t('nav.home'), path: '/', icon: Home },
+    { name: t('nav.diary'), path: '/diary', icon: BookOpen },
+    { name: t('nav.chat'), path: '/chat', icon: MessageCircle },
+    { name: t('nav.mypage'), path: '/mypage', icon: User },
   ];
 
   return (
@@ -41,7 +43,7 @@ export default function BottomNav() {
       transform: 'translateX(-50%)',
       width: '100%',
       maxWidth: '480px',
-      height: '65px',
+      height: 'calc(65px + env(safe-area-inset-bottom))',
       backgroundColor: 'rgba(255, 255, 255, 0.75)',
       backdropFilter: 'blur(15px)',
       borderTop: '1px solid rgba(255, 255, 255, 0.4)',

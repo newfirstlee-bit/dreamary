@@ -8,9 +8,11 @@ import { getCharacterById, saveCharacter, Character } from '@/lib/db';
 import { uploadImageToImgbb } from '@/lib/imgbb';
 import { Loader2, ChevronLeft, Camera, User } from 'lucide-react';
 import { trackEvent } from '@/lib/mixpanel';
+import { useLocale } from '@/lib/i18n';
 
 function GenderSelect({ value, onChange }: { value: string, onChange: (v: string) => void }) {
-  const options = ['남성', '여성', '그 외'];
+  const { t } = useLocale();
+  const options = [t('gender.male'), t('gender.female'), t('gender.other')];
   return (
     <div style={{ display: 'flex', gap: '10px', width: '100%' }}>
       {options.map(opt => (
@@ -41,6 +43,7 @@ export default function EditCharacterPage() {
   const router = useRouter();
   const params = useParams();
   const charId = params.id as string;
+  const { t } = useLocale();
 
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -159,7 +162,7 @@ export default function EditCharacterPage() {
         id: charId,
         userId: userId,
         name: name.trim(),
-        gender: (gender as '남성' | '여성' | '그 외') || undefined,
+        gender: gender || undefined,
         feeling: feeling.trim(),
         title: title.trim(),
         exampleChat: exampleChat.trim(),
@@ -178,7 +181,7 @@ export default function EditCharacterPage() {
       router.push('/mypage');
     } catch (err) {
       console.error(err);
-      alert('저장 중 오류가 발생했습니다.');
+      alert(t('editChar.saveFailed'));
       setSaving(false);
     }
   };
@@ -197,7 +200,7 @@ export default function EditCharacterPage() {
         <button onClick={handleBack} style={{ position: 'absolute', left: '20px', background: 'none', border: 'none', color: 'var(--foreground)', cursor: 'pointer', display: 'flex', alignItems: 'center' }}>
           <ChevronLeft size={28} color="var(--gray-800)" />
         </button>
-        <span style={{ fontSize: '1.2rem', fontWeight: 'bold' }}>캐릭터 수정</span>
+        <span style={{ fontSize: '1.2rem', fontWeight: 'bold' }}>{t('editChar.header')}</span>
       </header>
 
       <main className="content" style={{ display: 'flex', flexDirection: 'column', gap: '30px' }}>
@@ -218,8 +221,8 @@ export default function EditCharacterPage() {
               <Camera size={32} color="var(--gray-500)" />
             )}
           </div>
-          <p style={{ marginTop: '10px', fontSize: '16px', color: 'var(--text-muted)' }}>터치하여 사진 업로드</p>
-          <p style={{ marginTop: '4px', fontSize: '14px', color: '#ff4d4f', fontWeight: 'bold' }}>절대로 생성형 AI학습에 사용되지 않습니다</p>
+          <p style={{ marginTop: '10px', fontSize: '16px', color: 'var(--text-muted)' }}>{t('image.touchUpload')}</p>
+          <p style={{ marginTop: '4px', fontSize: '14px', color: '#ff4d4f', fontWeight: 'bold' }}>{t('image.noAI')}</p>
           <input type="file" accept="image/*" ref={fileInputRef} onChange={handleImageChange} style={{ display: 'none' }} />
         </div>
 
@@ -228,113 +231,113 @@ export default function EditCharacterPage() {
           
           <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <label style={{ fontSize: '1rem', fontWeight: 'bold' }}>캐릭터 이름 (최대 10자)</label>
+              <label style={{ fontSize: '1rem', fontWeight: 'bold' }}>{t('editChar.name')}</label>
               <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>{name.length}/10</span>
             </div>
             <input 
               type="text" value={name} onChange={e => setName(e.target.value.slice(0, 10))}
-              placeholder="이름을 입력해주세요"
+              placeholder={t('editChar.namePh')}
               style={{ width: '100%', padding: '15px', borderRadius: '10px', border: '1px solid var(--border-color)', fontSize: '1.05rem', outline: 'none' }}
             />
           </div>
 
           <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <label style={{ fontSize: '1rem', fontWeight: 'bold' }}>캐릭터 성별</label>
+              <label style={{ fontSize: '1rem', fontWeight: 'bold' }}>{t('editChar.gender')}</label>
             </div>
             <GenderSelect value={gender} onChange={setGender} />
           </div>
 
           <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <label style={{ fontSize: '1rem', fontWeight: 'bold' }}>캐릭터가 나에게 느끼는 감정 (최대 300자)</label>
+              <label style={{ fontSize: '1rem', fontWeight: 'bold' }}>{t('editChar.feeling')}</label>
               <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>{feeling.length}/300</span>
             </div>
             <textarea 
               value={feeling} onChange={e => setFeeling(e.target.value.slice(0, 300))}
-              placeholder="예: 은인이자 동료. 썸타는 것 같은데 안사귐"
+              placeholder={t('editChar.feelingPh')}
               style={{ width: '100%', padding: '15px', borderRadius: '10px', border: '1px solid var(--border-color)', fontSize: '1rem', outline: 'none', resize: 'none', minHeight: '80px' }}
             />
           </div>
 
           <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <label style={{ fontSize: '1rem', fontWeight: 'bold' }}>캐릭터가 나를 부르는 호칭 (최대 300자)</label>
+              <label style={{ fontSize: '1rem', fontWeight: 'bold' }}>{t('editChar.title')}</label>
               <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>{title.length}/300</span>
             </div>
             <textarea 
               value={title} onChange={e => setTitle(e.target.value.slice(0, 300))}
-              placeholder="이름, 당신, 야, 등"
+              placeholder={t('editChar.titlePh')}
               style={{ width: '100%', padding: '15px', borderRadius: '10px', border: '1px solid var(--border-color)', fontSize: '1rem', outline: 'none', resize: 'none', minHeight: '80px' }}
             />
           </div>
 
           <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <label style={{ fontSize: '1rem', fontWeight: 'bold' }}>캐릭터 대화 예시 (최대 300자)</label>
+              <label style={{ fontSize: '1rem', fontWeight: 'bold' }}>{t('editChar.example')}</label>
               <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>{exampleChat.length}/300</span>
             </div>
             <div style={{ position: 'relative' }}>
               <textarea 
                 value={exampleChat} onChange={e => setExampleChat(e.target.value.slice(0, 300))}
-                placeholder={'최소 5문장 이상 작성해주세요.\n""로 문장을 구분해주세요.'}
+                placeholder={t('editChar.examplePh')}
                 style={{ width: '100%', padding: '15px', borderRadius: '10px', border: '1px solid var(--border-color)', fontSize: '1rem', outline: 'none', resize: 'none', minHeight: '120px' }}
               />
               <button 
                 onClick={insertQuotes}
                 style={{ position: 'absolute', bottom: '15px', left: '15px', padding: '6px 12px', backgroundColor: 'var(--gray-100)', border: '1px solid var(--border-color)', borderRadius: '8px', fontSize: '0.85rem', fontWeight: 'bold', color: 'var(--foreground)', cursor: 'pointer' }}
               >
-                "" 추가
+                {t('onboarding.char.addQuotes')}
               </button>
             </div>
           </div>
 
           <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <label style={{ fontSize: '1rem', fontWeight: 'bold' }}>하지 말아야 할 행동 (네거티브) (최대 300자)</label>
+              <label style={{ fontSize: '1rem', fontWeight: 'bold' }}>{t('editChar.negative')}</label>
               <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>{negative.length}/300</span>
             </div>
             <textarea 
               value={negative} onChange={e => setNegative(e.target.value.slice(0, 300))}
-              placeholder="절대 하면 안 되는 말이나 행동"
+              placeholder={t('editChar.negativePh')}
               style={{ width: '100%', padding: '15px', borderRadius: '10px', border: '1px solid var(--border-color)', fontSize: '1rem', outline: 'none', resize: 'none', minHeight: '80px' }}
             />
           </div>
 
           <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <label style={{ fontSize: '1rem', fontWeight: 'bold' }}>세계관 (최대 500자)</label>
+              <label style={{ fontSize: '1rem', fontWeight: 'bold' }}>{t('editChar.worldview')}</label>
               <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>{worldview.length}/500</span>
             </div>
             <textarea 
               value={worldview} onChange={e => setWorldview(e.target.value.slice(0, 500))}
-              placeholder="서양 근세 판타지, 에너지를 전투에 접목하여 사용한다."
+              placeholder={t('editChar.worldviewPh')}
               style={{ width: '100%', padding: '15px', borderRadius: '10px', border: '1px solid var(--border-color)', fontSize: '1rem', outline: 'none', resize: 'none', minHeight: '80px' }}
             />
           </div>
 
           <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <label style={{ fontSize: '1rem', fontWeight: 'bold' }}>추가 설정 (최대 500자)</label>
+              <label style={{ fontSize: '1rem', fontWeight: 'bold' }}>{t('editChar.extra')}</label>
               <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>{extra.length}/500</span>
             </div>
             <textarea 
               value={extra} onChange={e => setExtra(e.target.value.slice(0, 500))}
-              placeholder="성격, 말버릇, 직업, 성장과정 등 설정을 작성해주세요"
+              placeholder={t('editChar.extraPh')}
               style={{ width: '100%', padding: '15px', borderRadius: '10px', border: '1px solid var(--border-color)', fontSize: '1rem', outline: 'none', resize: 'none', minHeight: '80px' }}
             />
           </div>
 
           <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <label style={{ fontSize: '1rem', fontWeight: 'bold' }}>드림주/나 와의 서사 (최대 700자)</label>
+              <label style={{ fontSize: '1rem', fontWeight: 'bold' }}>{t('editChar.narrative')}</label>
               <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>{narrative.length}/700</span>
             </div>
             <div style={{ position: 'relative' }}>
               <textarea 
                 ref={narrativeRef}
                 value={narrative} onChange={e => setNarrative(e.target.value.slice(0, 700))}
-                placeholder="첫만남: 길바닥에서 {캐릭터}가 {유저}에게 삥을 뜯었다"
+                placeholder={t('editChar.narrativePh')}
                 style={{ width: '100%', padding: '15px', paddingBottom: '50px', borderRadius: '10px', border: '1px solid var(--border-color)', fontSize: '1rem', outline: 'none', resize: 'none', minHeight: '120px' }}
               />
               <div style={{ position: 'absolute', bottom: '15px', left: '15px', display: 'flex', gap: '8px' }}>
@@ -342,13 +345,13 @@ export default function EditCharacterPage() {
                   onClick={() => insertVariable('{캐릭터}')}
                   style={{ padding: '6px 12px', backgroundColor: 'var(--gray-200)', color: 'var(--gray-800)', border: 'none', borderRadius: '8px', cursor: 'pointer', fontSize: '0.8rem', fontWeight: 'bold' }}
                 >
-                  {'{캐릭터}'}
+                  {t('onboarding.narrative.charVar')}
                 </button>
                 <button 
                   onClick={() => insertVariable('{유저}')}
                   style={{ padding: '6px 12px', backgroundColor: 'var(--gray-200)', color: 'var(--gray-800)', border: 'none', borderRadius: '8px', cursor: 'pointer', fontSize: '0.8rem', fontWeight: 'bold' }}
                 >
-                  {'{유저}'}
+                  {t('onboarding.narrative.userVar')}
                 </button>
               </div>
             </div>
@@ -366,19 +369,19 @@ export default function EditCharacterPage() {
           className="btn-primary"
           style={{ width: '100%', display: 'flex', justifyContent: 'center', alignItems: 'center' }}
         >
-          {saving ? <Loader2 className="animate-spin" size={24} /> : '저장하기'}
+          {saving ? <Loader2 className="animate-spin" size={24} /> : t('common.save')}
         </button>
       </div>
       {showExitModal && (
         <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.5)', zIndex: 1000, display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
           <div style={{ backgroundColor: 'white', padding: '25px', borderRadius: '15px', width: '80%', maxWidth: '320px', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '20px' }}>
-            <p style={{ fontSize: '1.1rem', fontWeight: 'bold', textAlign: 'center', margin: 0, lineHeight: 1.4 }}>변경한 내용을 저장할까요?</p>
+            <p style={{ fontSize: '1.1rem', fontWeight: 'bold', textAlign: 'center', margin: 0, lineHeight: 1.4 }}>{t('editChar.exitConfirm')}</p>
             <div style={{ display: 'flex', gap: '10px', width: '100%' }}>
               <button 
                 onClick={() => router.back()} 
                 style={{ flex: 1, padding: '12px', borderRadius: '10px', border: 'none', backgroundColor: 'var(--gray-300)', color: 'var(--gray-800)', fontWeight: 'bold', cursor: 'pointer' }}
               >
-                아니오
+                {t('editChar.exitNo')}
               </button>
               <button 
                 onClick={() => {
@@ -387,7 +390,7 @@ export default function EditCharacterPage() {
                 }} 
                 style={{ flex: 1, padding: '12px', borderRadius: '10px', border: 'none', backgroundColor: 'var(--point-color)', color: 'white', fontWeight: 'bold', cursor: 'pointer' }}
               >
-                저장하기
+                {t('common.save')}
               </button>
             </div>
           </div>

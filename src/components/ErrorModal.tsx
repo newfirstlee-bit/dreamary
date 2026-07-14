@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from 'react';
+import { useLocale } from '@/lib/i18n';
 
 interface ErrorModalProps {
   isOpen: boolean;
@@ -9,6 +10,7 @@ interface ErrorModalProps {
 
 export default function ErrorModal({ isOpen, onConfirm }: ErrorModalProps) {
   const [mounted, setMounted] = useState(false);
+  const { t } = useLocale();
   
   useEffect(() => {
     setMounted(true);
@@ -44,11 +46,11 @@ export default function ErrorModal({ isOpen, onConfirm }: ErrorModalProps) {
       }}>
         
         <h3 style={{ fontSize: '1.1rem', fontWeight: 'bold', color: 'var(--gray-900)', textAlign: 'center', marginBottom: '10px', lineHeight: '1.4' }}>
-          잠시 후 다시 시도해주세요
+          {t('error.title')}
         </h3>
         
         <p style={{ fontSize: '0.95rem', color: 'var(--gray-600)', textAlign: 'center', marginBottom: '24px', lineHeight: '1.4', wordBreak: 'keep-all' }}>
-          사용량이 많은 경우 오류가 발생할 수 있어요
+          {t('error.desc')}
         </p>
 
         <button
@@ -69,7 +71,7 @@ export default function ErrorModal({ isOpen, onConfirm }: ErrorModalProps) {
           onMouseUp={(e) => e.currentTarget.style.transform = 'scale(1)'}
           onMouseLeave={(e) => e.currentTarget.style.transform = 'scale(1)'}
         >
-          확인
+          {t('common.confirm')}
         </button>
       </div>
       

@@ -59,12 +59,33 @@ export default function AdminTopics() {
   };
 
   const handleEdit = async (t: Topic) => {
-    const newContent = prompt('질문을 수정하세요:', t.content);
-    if (newContent && newContent.trim() !== '' && newContent !== t.content) {
-      await saveTopic({ ...t, content: newContent.trim() });
+    const newContent = prompt('질문을 수정하세요 (한국어):', t.content);
+    if (newContent === null) return;
+    
+    const newContentJa = prompt('질문을 수정하세요 (일본어):', t.contentJa || '');
+    if (newContentJa === null) return;
+
+    if (newContent !== t.content || newContentJa !== t.contentJa) {
+      await saveTopic({ ...t, content: newContent.trim() || t.content, contentJa: newContentJa.trim() });
       await fetchTopics();
     }
   }
+
+  const handleTranslateAll = async () => {
+    if (!confirm('185개의 수동 번역본을 전체 적용하시겠습니까? (기존 번역 덮어쓰기)')) return;
+    setLoading(true);
+    
+    try {
+      const res = await fetch('/api/admin/translate-topics', { method: 'POST' });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to translate');
+      alert(`총 ${data.count}개의 항목이 성공적으로 번역되었습니다.`);
+    } catch (err: any) {
+      alert(`번역 중 오류가 발생했습니다: ${err.message}`);
+    }
+    
+    await fetchTopics();
+  };
 
   const handleDeleteSelected = async () => {
     if (selectedIds.size === 0) return;
@@ -120,7 +141,15 @@ export default function AdminTopics() {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '30px' }}>
-      <h2 style={{ fontSize: '1.5rem', fontWeight: 'bold' }}>일기 주제 관리</h2>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <h2 style={{ fontSize: '1.5rem', fontWeight: 'bold' }}>일기 주제 관리</h2>
+        <button
+          onClick={handleTranslateAll}
+          style={{ padding: '8px 16px', backgroundColor: '#34C759', color: 'white', border: 'none', borderRadius: '8px', fontWeight: 'bold', cursor: 'pointer' }}
+        >
+          전체 일본어 번역 적용
+        </button>
+      </div>
       
       <div style={{ backgroundColor: 'white', padding: '20px', borderRadius: '12px', border: '1px solid #ddd' }}>
         <h3 style={{ fontSize: '1.1rem', fontWeight: 'bold', marginBottom: '15px' }}>일괄 질문 추가</h3>
@@ -183,7 +212,13 @@ export default function AdminTopics() {
                   onChange={() => toggleSelect(t.id)}
                   style={{ width: '18px', height: '18px', cursor: 'pointer' }}
                 />
-                <span style={{ flex: 1 }}>{t.content}</span>
+                <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                  <span style={{ fontWeight: 'bold', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <span style={{ backgroundColor: 'var(--point-color)', color: 'white', padding: '2px 6px', borderRadius: '4px', fontSize: '0.8rem' }}>{t.order}</span>
+                    [KR] {t.content}
+                  </span>
+                  <span style={{ fontSize: '0.9rem', color: 'var(--gray-500)' }}>[JP] {t.contentJa || '번역 안됨'}</span>
+                </div>
               </div>
               <div style={{ display: 'flex', gap: '15px', alignItems: 'center' }}>
                 <span style={{ fontSize: '0.9rem', color: 'var(--gray-500)', backgroundColor: '#eee', padding: '4px 8px', borderRadius: '4px' }}>

@@ -4,25 +4,29 @@ import { useEffect, useState, Suspense } from 'react';
 import Image from 'next/image';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { getUserId } from '@/lib/auth';
-import { getCharactersByUser, getUserProfile, getTopics, getDiariesByUserAndChar, saveDiary, Character, UserProfile, Topic, Diary, unlockDiaryAd } from '@/lib/db';
+import { getCharactersByUser, getUserProfile, getTopics, getDiariesByUserAndChar, subscribeDiaries, saveDiary, Character, UserProfile, Topic, Diary, unlockDiaryAd } from '@/lib/db';
 import { Loader2, Send, ChevronDown, User, Lock } from 'lucide-react';
 import Link from 'next/link';
 import AdModal from '@/components/AdModal';
 import ErrorModal from '@/components/ErrorModal';
+import EmptyCharacterModal from '@/components/EmptyCharacterModal';
 import { trackDiaryAndCheckAd } from '@/lib/adTracker';
 import { trackEvent } from '@/lib/mixpanel';
 import { saveDraft, loadDraft, clearDraft } from '@/lib/draftStorage';
 import { useRef } from 'react';
+import { useLocale } from '@/lib/i18n';
 
 function DiaryContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
+  const { t, locale } = useLocale();
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const draftLoaded = useRef(false);
   
   const [adModalOpen, setAdModalOpen] = useState(false);
   const [errorModalOpen, setErrorModalOpen] = useState(false);
+  const [showEmptyModal, setShowEmptyModal] = useState(false);
   const [modalResolver, setModalResolver] = useState<(() => void) | null>(null);
 
   const confirmAd = () => {
@@ -71,9 +75,24 @@ function DiaryContent() {
     if (activeCharId) {
        const diaries = await getDiariesByUserAndChar(userId, activeCharId);
        const todayD = diaries.find(d => d.dateString === dateString);
-       setTodayDiary(todayD || null);
+       // We use subscribeDiaries in a separate useEffect for real-time updates.
+       // setTodayDiary(todayD || null); is handled by subscription now.
     }
   };
+
+  useEffect(() => {
+    if (!activeCharId) return;
+    const userId = getUserId();
+    const now = new Date();
+    const dateString = now.toISOString().split('T')[0];
+    
+    const unsubscribe = subscribeDiaries(userId, activeCharId, (diaries) => {
+      const todayD = diaries.find(d => d.dateString === dateString);
+      setTodayDiary(todayD || null);
+    });
+    
+    return () => unsubscribe();
+  }, [activeCharId]);
 
   useEffect(() => {
     const init = async () => {
@@ -85,7 +104,29 @@ function DiaryContent() {
         ]);
 
         if (chars.length === 0) {
-          router.replace('/onboarding');
+          const dummyChar: Character = {
+            id: 'dummy',
+            userId: userId,
+            name: t('dummy.charName') || '드림캐',
+            feeling: '',
+            title: '',
+            exampleChat: '',
+            negative: '',
+            createdAt: Date.now(),
+            dDayStartDate: Date.now()
+          };
+          setCharacters([dummyChar]);
+          setActiveCharId('dummy');
+          
+          if (topics.length > 0) {
+            setAllTopics(topics);
+            setTodayTopic(topics[0]);
+          } else {
+            const dummyTopic = { id: 'dummy', order: 1, content: t('dummy.firstTopic') || '오늘 하루는 어땠어?' } as Topic;
+            setAllTopics([dummyTopic]);
+            setTodayTopic(dummyTopic);
+          }
+          setLoading(false);
           return;
         }
 
@@ -311,17 +352,17 @@ function DiaryContent() {
   const activeChar = characters.find(c => c.id === activeCharId);
   const userProfile = activeCharId ? userProfiles[activeCharId] : null;
 
-  let formattedContent = todayTopic?.content || '';
+  let formattedContent = (locale === 'ja' && todayTopic?.contentJa) ? todayTopic.contentJa : (todayTopic?.content || '');
   if (formattedContent && activeChar) {
     formattedContent = formattedContent
-      .replace(/{유저}/g, userProfile?.name || '유저')
+      .replace(/{유저}/g, userProfile?.name || (locale === 'ja' ? t('common.user') : '유저'))
       .replace(/{캐릭터}/g, activeChar.name);
   }
 
   return (
     <div className="app-container diary-bg" style={{ paddingBottom: '65px' }}>
       <header className="header" style={{ borderBottomLeftRadius: 0, borderBottomRightRadius: 0, position: 'relative', display: 'flex', justifyContent: 'flex-start', alignItems: 'center' }}>
-        <span>교환일기</span>
+        <span>{t('diary.header')}</span>
       </header>
 
       {/* Character Selector (Horizontal Scroll) */}
@@ -382,7 +423,7 @@ function DiaryContent() {
           <div style={{ backgroundColor: 'white', padding: '20px', borderRadius: '15px', border: '1px solid var(--border-color)', marginBottom: '20px', boxShadow: '0 4px 10px rgba(0,0,0,0.02)' }}>
             <div style={{ flex: 1, paddingRight: '15px' }}>
               <p style={{ color: 'var(--point-color)', fontSize: '0.85rem', fontWeight: 'bold', marginBottom: '8px' }}>
-                {todayTopic.order}번째 질문
+                {todayTopic.order}{t('common.nthQuestion')}
               </p>
               <h3 style={{ fontSize: '1.2rem', lineHeight: '1.4' }}>
                 {formattedContent}
@@ -397,7 +438,7 @@ function DiaryContent() {
             {/* User Entry */}
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px', alignItems: 'flex-start' }}>
               <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', flex: 1 }}>
-                <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: '8px', marginRight: '5px' }}>{userProfile?.name || '유저'}</span>
+                <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: '8px', marginRight: '5px' }}>{userProfile?.name || t('common.user')}</span>
                 <div className="post-it" style={{ width: '100%', maxWidth: '85%', lineHeight: '1.6', fontSize: '0.95rem' }}>
                   {todayDiary.userEntry}
                 </div>
@@ -436,7 +477,7 @@ function DiaryContent() {
                         }}
                       >
                         <Lock size={16} />
-                        <span>답변 보기 (AD)</span>
+                        <span>{t('diary.viewReply')}</span>
                       </button>
                     </div>
                   ) : (
@@ -447,7 +488,7 @@ function DiaryContent() {
             </div>
             
             <p style={{ fontSize: '0.75rem', color: 'var(--gray-600)', textAlign: 'center', marginTop: '20px' }}>
-              캐붕이 생긴다면 <Link href={`/mypage/edit-character/${activeChar?.id}`} style={{ color: 'var(--point-color)', textDecoration: 'underline' }}>마이페이지</Link>에서 캐릭터 설정을 수정해주세요.
+              {t('diary.breakHintPre')}<Link href={`/mypage/edit-character/${activeChar?.id}`} style={{ color: 'var(--point-color)', textDecoration: 'underline' }}>{t('nav.mypage')}</Link>{t('diary.breakHintPost')}
             </p>
             <button 
               onClick={() => router.push('/diary/history?charId=' + activeCharId)}
@@ -467,99 +508,149 @@ function DiaryContent() {
                 transition: 'background-color 0.2s'
               }}
             >
-              일기 모아보기
+              {t('diary.viewAll')}
             </button>
           </div>
         ) : (
           <div style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
-            <div style={{ position: 'relative', flex: 1, display: 'flex', flexDirection: 'column', marginBottom: '15px' }}>
-              <textarea 
-                value={userEntry}
-                onChange={e => {
-                  setUserEntry(e.target.value.slice(0, 500));
-                  if (draftLoaded.current) {
-                    clearDraft(activeCharId);
-                    draftLoaded.current = false;
-                  }
-                }}
-                placeholder="여기에 일기를 작성해주세요..."
-                style={{
-                  flex: 1,
-                  minHeight: '60px',
-                  padding: '15px',
-                  paddingBottom: '30px',
-                  borderRadius: '15px',
-                  border: '1px solid var(--border-color)',
-                  outline: 'none',
-                  resize: 'none',
-                  fontSize: '1rem',
-                  lineHeight: '1.5',
-                }}
-                disabled={saving}
-              />
-              <span style={{ position: 'absolute', bottom: '15px', right: '15px', fontSize: '0.8rem', color: 'var(--text-muted)' }}>{userEntry.length}/500</span>
-            </div>
-            
-            <button 
-              onClick={handleSend}
-              disabled={!userEntry.trim() || saving}
-              style={{
-                padding: '15px',
-                backgroundColor: userEntry.trim() && !saving ? 'var(--point-color)' : 'var(--gray-400)',
-                color: 'white',
-                border: 'none',
-                borderRadius: '10px',
-                fontWeight: 'bold',
-                fontSize: '1.1rem',
-                display: 'flex',
-                justifyContent: 'center',
-                alignItems: 'center',
-                gap: '10px',
-                cursor: userEntry.trim() && !saving ? 'pointer' : 'not-allowed',
-                transition: 'background-color 0.2s'
-              }}
-            >
-              {saving ? (
-                <>
-                  <Loader2 className="animate-spin" size={20} style={{ animation: 'spin 2s linear infinite' }} />
-                  <span>{activeChar?.name}님이 일기를 쓰는 중...</span>
-                </>
-              ) : (
-                <>
-                  <Send size={20} />
-                  <span>일기 보내기</span>
-                </>
-              )}
-            </button>
-            <button 
-              onClick={() => router.push('/diary/history?charId=' + activeCharId)}
-              style={{
-                marginTop: '10px',
-                padding: '15px',
-                backgroundColor: 'white',
-                color: 'var(--point-color)',
-                border: '1px solid var(--point-color)',
-                borderRadius: '10px',
-                fontWeight: 'bold',
-                fontSize: '1.1rem',
-                display: 'flex',
-                justifyContent: 'center',
-                alignItems: 'center',
-                cursor: 'pointer',
-                transition: 'background-color 0.2s'
-              }}
-            >
-              일기 모아보기
-            </button>
+            {activeCharId === 'dummy' ? (
+              <>
+                <div style={{ flex: 1, display: 'flex', flexDirection: 'column', justifyContent: 'center', gap: '27px', padding: '20px 10px', marginTop: '10px' }}>
+                  {/* User Message */}
+                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', opacity: 0, animation: 'fadeInUp 0.6s ease 0.5s forwards' }}>
+                    <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: '8px', marginRight: '5px' }}>{t('common.me')}</span>
+                    <div className="post-it" style={{ maxWidth: '85%', lineHeight: '1.6', fontSize: '1rem' }} dangerouslySetInnerHTML={{ __html: t('dummy.diaryUserMsg') }}>
+                    </div>
+                  </div>
+
+                  {/* Character Message */}
+                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', opacity: 0, animation: 'fadeInUp 0.6s ease 1.2s forwards' }}>
+                    <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: '8px', marginLeft: '5px' }}>{t('dummy.charName') || '드림캐'}</span>
+                    <div className="notebook-paper" style={{ maxWidth: '85%', lineHeight: '1.6', fontSize: '1rem' }} dangerouslySetInnerHTML={{ __html: t('dummy.diaryCharMsg') }}>
+                    </div>
+                  </div>
+                </div>
+                <p style={{ fontSize: '16px', color: 'var(--gray-500)', textAlign: 'center', marginBottom: '20px', lineHeight: '1.5' }} dangerouslySetInnerHTML={{ __html: t('dummy.diaryGuide') }}>
+                </p>
+                <button 
+                  onClick={() => router.push('/onboarding?skip=true')}
+                  style={{
+                    marginTop: 'auto',
+                    padding: '15px',
+                    backgroundColor: 'var(--point-color)',
+                    color: 'white',
+                    border: 'none',
+                    borderRadius: '10px',
+                    fontWeight: 'bold',
+                    fontSize: '1.1rem',
+                    display: 'flex',
+                    justifyContent: 'center',
+                    alignItems: 'center',
+                    cursor: 'pointer',
+                    transition: 'background-color 0.2s',
+                    boxShadow: '0 4px 15px rgba(0,0,0,0.1)'
+                  }}
+                >
+                  {t('dummy.createCharBtn')}
+                </button>
+              </>
+            ) : (
+              <>
+                <div style={{ position: 'relative', flex: 1, display: 'flex', flexDirection: 'column', marginBottom: '15px' }}>
+                  <textarea 
+                    value={userEntry}
+                    onChange={e => {
+                      setUserEntry(e.target.value.slice(0, 500));
+                      if (draftLoaded.current) {
+                        clearDraft(activeCharId);
+                        draftLoaded.current = false;
+                      }
+                    }}
+                    placeholder={t('diary.placeholder')}
+                    style={{
+                      flex: 1,
+                      minHeight: '60px',
+                      padding: '15px',
+                      paddingBottom: '30px',
+                      borderRadius: '15px',
+                      border: '1px solid var(--border-color)',
+                      outline: 'none',
+                      resize: 'none',
+                      fontSize: '1rem',
+                      lineHeight: '1.5',
+                    }}
+                    disabled={saving}
+                  />
+                  <span style={{ position: 'absolute', bottom: '15px', right: '15px', fontSize: '0.8rem', color: 'var(--text-muted)' }}>{userEntry.length}/500</span>
+                </div>
+                
+                <button 
+                  onClick={handleSend}
+                  disabled={!userEntry.trim() || saving}
+                  style={{
+                    padding: '15px',
+                    backgroundColor: userEntry.trim() && !saving ? 'var(--point-color)' : 'var(--gray-400)',
+                    color: 'white',
+                    border: 'none',
+                    borderRadius: '10px',
+                    fontWeight: 'bold',
+                    fontSize: '1.1rem',
+                    display: 'flex',
+                    justifyContent: 'center',
+                    alignItems: 'center',
+                    gap: '10px',
+                    cursor: userEntry.trim() && !saving ? 'pointer' : 'not-allowed',
+                    transition: 'background-color 0.2s'
+                  }}
+                >
+                  {saving ? (
+                    <>
+                      <Loader2 className="animate-spin" size={20} style={{ animation: 'spin 2s linear infinite' }} />
+                      <span>{t('diary.writing').replace('{name}', activeChar?.name || '')}</span>
+                    </>
+                  ) : (
+                    <>
+                      <Send size={20} />
+                      <span>{t('diary.sendBtn')}</span>
+                    </>
+                  )}
+                </button>
+                <button 
+                  onClick={() => router.push('/diary/history?charId=' + activeCharId)}
+                  style={{
+                    marginTop: '10px',
+                    padding: '15px',
+                    backgroundColor: 'white',
+                    color: 'var(--point-color)',
+                    border: '1px solid var(--point-color)',
+                    borderRadius: '10px',
+                    fontWeight: 'bold',
+                    fontSize: '1.1rem',
+                    display: 'flex',
+                    justifyContent: 'center',
+                    alignItems: 'center',
+                    cursor: 'pointer',
+                    transition: 'background-color 0.2s'
+                  }}
+                >
+                  {t('diary.viewAll')}
+                </button>
+              </>
+            )}
           </div>
         )}
         
         <AdModal isOpen={adModalOpen} onConfirm={confirmAd} />
         <ErrorModal isOpen={errorModalOpen} onConfirm={() => setErrorModalOpen(false)} />
+        <EmptyCharacterModal isOpen={showEmptyModal} onClose={() => setShowEmptyModal(false)} />
       </main>
       
       <style dangerouslySetInnerHTML={{__html: `
         @keyframes spin { 100% { transform: rotate(360deg); } }
+        @keyframes fadeInUp {
+          from { opacity: 0; transform: translateY(20px); }
+          to { opacity: 1; transform: translateY(0); }
+        }
       `}} />
     </div>
   );

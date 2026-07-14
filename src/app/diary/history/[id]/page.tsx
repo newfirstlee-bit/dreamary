@@ -3,11 +3,13 @@
 import { useEffect, useState } from 'react';
 import Image from 'next/image';
 import { useRouter, useParams } from 'next/navigation';
+import { useLocale } from '@/lib/i18n';
 import { getUserId } from '@/lib/auth';
 import { getDiaryById, getCharacterById, getUserProfile, getDiariesByUserAndChar, getTopics, Diary, Character, UserProfile, Topic } from '@/lib/db';
 import { Loader2, ChevronLeft, ChevronRight } from 'lucide-react';
 
 export default function DiaryHistoryDetailPage() {
+  const { t, locale } = useLocale();
   const router = useRouter();
   const params = useParams();
   const diaryId = params.id as string;
@@ -79,23 +81,25 @@ export default function DiaryHistoryDetailPage() {
         <button onClick={() => router.push('/diary/history')} style={{ position: 'absolute', left: '20px', background: 'none', border: 'none', color: 'white', cursor: 'pointer', display: 'flex', alignItems: 'center' }}>
           <ChevronLeft size={28} color="var(--gray-800)" />
         </button>
-        <span>{diary.dateString.replace(/-/g, '.')} 일기</span>
+        <span>{diary.dateString.replace(/-/g, '.')} {t('common.diary')}</span>
       </header>
 
       <main className="content" style={{ display: 'flex', flexDirection: 'column' }}>
         {/* Topic Display */}
         <div style={{ backgroundColor: 'white', padding: '20px', borderRadius: '15px', border: '1px solid var(--border-color)', marginBottom: '20px', boxShadow: '0 4px 10px rgba(0,0,0,0.02)' }}>
           <p style={{ color: 'var(--point-color)', fontSize: '0.85rem', fontWeight: 'bold', marginBottom: '8px' }}>
-            {topic ? `${topic.order}번째 질문` : '질문'}
+            {topic ? `${topic.order}${t('common.nthQuestion')}` : t('common.question')}
           </p>
-          <h3 style={{ fontSize: '1.2rem', lineHeight: '1.4' }}>{diary.topicContent}</h3>
+          <h3 style={{ fontSize: '1.2rem', lineHeight: '1.4' }}>
+            {(locale === 'ja' && topic?.contentJa) ? topic.contentJa : diary.topicContent}
+          </h3>
         </div>
 
         <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
           {/* User Entry */}
           <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px', alignItems: 'flex-start' }}>
             <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', flex: 1 }}>
-              <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: '8px', marginRight: '5px' }}>{userProfile?.name || '유저'}</span>
+              <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: '8px', marginRight: '5px' }}>{userProfile?.name || (locale === 'ja' ? t('common.user') : '유저')}</span>
               <div className="post-it" style={{ width: '100%', maxWidth: '85%', lineHeight: '1.6', fontSize: '0.95rem' }}>
                 {diary.userEntry}
               </div>
