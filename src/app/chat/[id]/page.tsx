@@ -362,18 +362,18 @@ export default function ChatDetail({ params }: { params: { id: string } }) {
   }
 
   return (
-    <div className="app-container" style={{ display: 'flex', flexDirection: 'column', backgroundColor: 'var(--gray-50)', height: '100dvh', overflow: 'hidden', position: 'relative' }}>
+    <div className="app-container" style={{ display: 'flex', flexDirection: 'column', backgroundColor: 'var(--gray-50)', height: '100dvh', maxHeight: '-webkit-fill-available', overflow: 'hidden', position: 'relative' }}>
       {/* Header */}
       <header className="header" style={{ 
         backgroundColor: 'white', 
         borderBottom: '1px solid var(--border-color)', 
-        position: 'sticky', 
-        top: 0,
+        position: 'relative', 
         display: 'flex', 
         justifyContent: 'space-between', 
         alignItems: 'center',
         padding: '15px',
-        zIndex: 100
+        zIndex: 100,
+        flexShrink: 0
       }}>
         <button onClick={() => router.push('/chat')} style={{ background: 'none', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', color: 'var(--foreground)' }}>
           <ChevronLeft size={24} color="var(--gray-800)" />
@@ -385,7 +385,7 @@ export default function ChatDetail({ params }: { params: { id: string } }) {
       </header>
 
       {/* Chat Area */}
-      <div style={{ flex: 1, overflowY: 'auto', padding: '20px', display: 'flex', flexDirection: 'column', gap: '15px' }}>
+      <div style={{ flex: 1, overflowY: 'auto', padding: '20px', display: 'flex', flexDirection: 'column', gap: '15px', overscrollBehavior: 'none' }}>
         {messages.map((msg, idx) => {
           const isUser = msg.role === 'user';
           const showProfile = !isUser && (idx === 0 || messages[idx - 1].role === 'user');
