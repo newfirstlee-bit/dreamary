@@ -10,7 +10,7 @@ import Link from 'next/link';
 import { useLocale } from '@/lib/i18n';
 import { useAuth } from '@/components/AuthContext';
 import { auth, db } from '@/lib/firebase';
-import { signOut, signInWithEmailAndPassword } from 'firebase/auth';
+import { signOut, signInWithEmailAndPassword, updatePassword } from 'firebase/auth';
 import { doc, getDoc, updateDoc } from 'firebase/firestore';
 
 export default function MyPage() {
@@ -46,6 +46,9 @@ export default function MyPage() {
   const [editEmail, setEditEmail] = useState('');
   const [editGender, setEditGender] = useState('');
   const [editBirthdate, setEditBirthdate] = useState('');
+  const [editPassword, setEditPassword] = useState('');
+  const [editPasswordConfirm, setEditPasswordConfirm] = useState('');
+  const [editPasswordError, setEditPasswordError] = useState('');
   const [isSavingInfo, setIsSavingInfo] = useState(false);
 
   const truncate = (name: string) => name.length > 5 ? name.slice(0, 5) + '...' : name;
@@ -178,6 +181,9 @@ export default function MyPage() {
       setShowPasswordConfirmModal(false);
       setShowEditInfoModal(true);
       setVerifyPassword('');
+      setEditPassword('');
+      setEditPasswordConfirm('');
+      setEditPasswordError('');
     } catch (err) {
       console.error(err);
       setVerifyError('비밀번호가 일치하지 않습니다.');
@@ -188,8 +194,22 @@ export default function MyPage() {
 
   const handleSaveInfo = async () => {
     if (!user || !accountInfo) return;
+    if (editPassword) {
+      if (editPassword !== editPasswordConfirm) {
+        setEditPasswordError('비밀번호가 일치하지 않습니다.');
+        return;
+      }
+      if (editPassword.length < 6) {
+        setEditPasswordError('비밀번호는 6자리 이상이어야 합니다.');
+        return;
+      }
+    }
+    
     setIsSavingInfo(true);
     try {
+      if (editPassword) {
+        await updatePassword(user, editPassword);
+      }
       await updateDoc(doc(db, 'accounts', user.uid), {
         email: editEmail,
         gender: editGender,
@@ -255,12 +275,6 @@ export default function MyPage() {
                   수정
                 </button>
               </div>
-              <button 
-                onClick={() => setShowMigrateModal(true)}
-                style={{ width: '100%', padding: '15px', borderRadius: '12px', border: '1px solid var(--point-color)', backgroundColor: 'var(--point-color)', color: 'white', fontWeight: 'bold', fontSize: '1rem', display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '8px', cursor: 'pointer', marginTop: '10px' }}
-              >
-                <Key size={20} /> {t('mypage.enterBackupCode')}
-              </button>
             </div>
           </section>
         )}
@@ -387,6 +401,19 @@ export default function MyPage() {
                 style={{ width: '100%', padding: '15px', borderRadius: '12px', border: '1px solid var(--point-color)', backgroundColor: 'white', color: 'var(--point-color)', fontWeight: 'bold', fontSize: '1rem', display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '8px', cursor: 'pointer' }}
               >
                 <Download size={20} /> {t('mypage.backupChatBtn')}
+              </button>
+            </div>
+          </section>
+        )}
+
+        {user && (
+          <section style={{ marginTop: '10px' }}>
+            <div style={{ backgroundColor: 'white', padding: '20px', borderRadius: '15px', border: '1px solid var(--border-color)', display: 'flex', flexDirection: 'column', gap: '15px' }}>
+              <button 
+                onClick={() => setShowMigrateModal(true)}
+                style={{ width: '100%', padding: '15px', borderRadius: '12px', border: '1px solid var(--point-color)', backgroundColor: 'white', color: 'var(--point-color)', fontWeight: 'bold', fontSize: '1rem', display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '8px', cursor: 'pointer' }}
+              >
+                <Key size={20} /> {t('mypage.enterBackupCode')}
               </button>
             </div>
           </section>
@@ -719,6 +746,26 @@ export default function MyPage() {
                   onChange={(e) => setEditBirthdate(e.target.value)}
                   style={{ width: '100%', padding: '16px', borderRadius: '12px', border: '1px solid var(--border-color)', fontSize: '1.05rem', outline: 'none', color: editBirthdate ? 'black' : 'var(--gray-400)' }}
                 />
+              </div>
+              <div>
+                <label style={{ display: 'block', fontSize: '0.95rem', color: 'var(--gray-700)', marginBottom: '8px', fontWeight: 'bold' }}>비밀번호 변경 (선택)</label>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                  <input 
+                    type="password" 
+                    value={editPassword} 
+                    onChange={(e) => { setEditPassword(e.target.value); setEditPasswordError(''); }}
+                    placeholder="새 비밀번호 (6자리 이상)"
+                    style={{ width: '100%', padding: '16px', borderRadius: '12px', border: '1px solid var(--border-color)', fontSize: '1.05rem', outline: 'none' }}
+                  />
+                  <input 
+                    type="password" 
+                    value={editPasswordConfirm} 
+                    onChange={(e) => { setEditPasswordConfirm(e.target.value); setEditPasswordError(''); }}
+                    placeholder="새 비밀번호 확인"
+                    style={{ width: '100%', padding: '16px', borderRadius: '12px', border: `1px solid ${editPasswordError ? 'red' : 'var(--border-color)'}`, fontSize: '1.05rem', outline: 'none' }}
+                  />
+                </div>
+                {editPasswordError && <p style={{ color: 'red', fontSize: '0.85rem', marginTop: '6px' }}>{editPasswordError}</p>}
               </div>
             </div>
 
