@@ -664,7 +664,7 @@ export default function MyPage() {
           backgroundColor: 'white', zIndex: 4000,
           display: 'flex', flexDirection: 'column'
         }}>
-          <header style={{ display: 'flex', alignItems: 'center', padding: '20px', borderBottom: '1px solid var(--border-color)', flexShrink: 0 }}>
+          <header style={{ display: 'flex', alignItems: 'center', padding: '20px', paddingTop: 'calc(20px + env(safe-area-inset-top))', borderBottom: '1px solid var(--border-color)', flexShrink: 0 }}>
             <button onClick={() => setShowPasswordConfirmModal(false)} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '5px', display: 'flex', alignItems: 'center', marginLeft: '-5px' }}>
               <ChevronLeft size={28} color="var(--gray-800)" />
             </button>
@@ -724,7 +724,7 @@ export default function MyPage() {
           backgroundColor: 'white', zIndex: 4000,
           display: 'flex', flexDirection: 'column'
         }}>
-          <header style={{ display: 'flex', alignItems: 'center', padding: '20px', borderBottom: '1px solid var(--border-color)', flexShrink: 0 }}>
+          <header style={{ display: 'flex', alignItems: 'center', padding: '20px', paddingTop: 'calc(20px + env(safe-area-inset-top))', borderBottom: '1px solid var(--border-color)', flexShrink: 0 }}>
             <button onClick={() => setShowEditInfoModal(false)} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '5px', display: 'flex', alignItems: 'center', marginLeft: '-5px' }}>
               <ChevronLeft size={28} color="var(--gray-800)" />
             </button>

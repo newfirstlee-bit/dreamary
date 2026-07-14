@@ -372,6 +372,7 @@ export default function ChatDetail({ params }: { params: { id: string } }) {
         justifyContent: 'space-between', 
         alignItems: 'center',
         padding: '15px',
+        paddingTop: 'calc(15px + env(safe-area-inset-top))',
         zIndex: 100,
         flexShrink: 0
       }}>
