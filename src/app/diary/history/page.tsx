@@ -2,7 +2,7 @@
 
 import { useEffect, useState, Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { getUserId } from '@/lib/auth';
+import { useUserId } from '@/hooks/useUserId';
 import { getCharactersByUser, getDiariesByUserAndChar, getTopics, Character, Diary, Topic } from '@/lib/db';
 import { Loader2, ChevronLeft, ChevronRight } from 'lucide-react';
 import Link from 'next/link';
@@ -18,11 +18,13 @@ function DiaryHistoryContent() {
   const [activeCharId, setActiveCharId] = useState<string>('');
   const [diaries, setDiaries] = useState<Diary[]>([]);
   const [topics, setTopics] = useState<Topic[]>([]);
+  const userId = useUserId();
 
   useEffect(() => {
+    if (!userId) return;
+
     const init = async () => {
       try {
-        const userId = getUserId();
         const chars = await getCharactersByUser(userId);
 
         if (chars.length === 0) {
@@ -46,7 +48,7 @@ function DiaryHistoryContent() {
       }
     };
     init();
-  }, [router]);
+  }, [router, userId]);
 
   const fetchDiaries = async (userId: string, charId: string) => {
     const data = await getDiariesByUserAndChar(userId, charId);
@@ -58,7 +60,7 @@ function DiaryHistoryContent() {
   const handleCharSelect = async (charId: string) => {
     setActiveCharId(charId);
     setLoading(true);
-    await fetchDiaries(getUserId(), charId);
+    await fetchDiaries(userId!, charId);
     setLoading(false);
   };
 

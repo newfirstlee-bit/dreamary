@@ -3,7 +3,7 @@
 import React, { useEffect, useState, useRef } from 'react';
 import Image from 'next/image';
 import { useRouter } from 'next/navigation';
-import { getUserId } from '@/lib/auth';
+import { useUserId } from '@/hooks/useUserId';
 import { useAuth } from '@/components/AuthContext';
 import { useLocale } from '@/lib/i18n';
 import { getCharactersByUser, Character, updateCharacter, getDiariesByUserAndChar, getTopics, Topic, getUserProfile, UserProfile, getChatMessages, ChatMessage } from '@/lib/db';
@@ -42,19 +42,20 @@ export default function Home() {
   const [latestChat, setLatestChat] = useState<ChatMessage | null>(null);
   const [showEmptyModal, setShowEmptyModal] = useState(false);
 
+  const baseUserId = useUserId();
+  const userId = typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('demo') === 'true' 
+    ? '4b0b39a0-d691-4f5d-b562-0fc49a02e790' 
+    : baseUserId;
+
   useEffect(() => {
-    if (authLoading) return;
+    if (authLoading || !userId) return;
 
     trackEvent('Home_Viewed');
     
     const init = async () => {
       try {
-        let userId = getUserId();
-        
         // 데모 링크 처리 (?demo=true)
-        const urlParams = new URLSearchParams(window.location.search);
-        if (urlParams.get('demo') === 'true') {
-          userId = '4b0b39a0-d691-4f5d-b562-0fc49a02e790'; // 유저님이 직접 제공해주신 완성된 UUID
+        if (typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('demo') === 'true') {
           localStorage.setItem('dreamary_user_id', userId);
           // 쿠키도 함께 업데이트해줍니다
           document.cookie = "dreamary_user_id=" + userId + "; path=/; max-age=31536000";
@@ -152,7 +153,7 @@ export default function Home() {
     };
     
     init();
-  }, [router, authLoading]);
+  }, [authLoading, userId]);
 
   
   useEffect(() => {
@@ -172,7 +173,7 @@ export default function Home() {
 
       const fetchLatestChat = async () => {
         try {
-          const msgs = await getChatMessages(getUserId(), selectedCharId);
+          const msgs = await getChatMessages(userId!, selectedCharId);
           if (msgs.length > 0) {
             setLatestChat(msgs[msgs.length - 1]);
           } else {
@@ -192,14 +193,14 @@ export default function Home() {
                     userProfile: profile,
                     messages: [],
                     isFirstPing: true,
-                    userId: getUserId()
+                    userId: userId!
                   })
                 });
                 const data = await res.json();
                 if (res.ok && data.reply) {
                   const newMsg = {
                     id: data.savedId || Date.now().toString(),
-                    userId: getUserId(),
+                    userId: userId!,
                     characterId: selectedCharId,
                     role: 'assistant',
                     content: data.reply,
@@ -216,7 +217,7 @@ export default function Home() {
       };
       fetchLatestChat();
     }
-  }, [selectedCharId]);
+  }, [selectedCharId, userId]);
 
   const selectedChar = characters.find(c => c.id === selectedCharId) || characters[0];
 
@@ -283,7 +284,6 @@ export default function Home() {
         {/* Character Selector (Horizontal Scroll) */}
         <div style={{ display: 'flex', gap: '15px', overflowX: 'auto', padding: '25px', scrollbarWidth: 'none' }}>
             {[...characters].sort((a, b) => {
-              const userId = getUserId();
               const history: string[] = JSON.parse(localStorage.getItem(`recentChars_${userId}`) || '[]');
               
               // Ensure currently selected is ALWAYS first (index -1 artificially)
@@ -298,7 +298,6 @@ export default function Home() {
                   key={char.id} 
                   onClick={() => {
                     setSelectedCharId(char.id);
-                    const userId = getUserId();
                     const history: string[] = JSON.parse(localStorage.getItem(`recentChars_${userId}`) || '[]');
                     const newHistory = [char.id, ...history.filter(id => id !== char.id)];
                     localStorage.setItem(`recentChars_${userId}`, JSON.stringify(newHistory));

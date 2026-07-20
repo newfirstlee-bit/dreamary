@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 import Image from 'next/image';
 import { useRouter } from 'next/navigation';
-import { getUserId } from '@/lib/auth';
+import { useUserId } from '@/hooks/useUserId';
 import { getCharactersByUser, getUserProfile, Character, UserProfile, deleteCharacter } from '@/lib/db';
 import { Loader2, Settings, User, Plus, Heart, X, Copy, LogIn, Key, Download, LogOut, Eye, EyeOff, ChevronLeft } from 'lucide-react';
 import Link from 'next/link';
@@ -21,7 +21,7 @@ export default function MyPage() {
   
   const [characters, setCharacters] = useState<Character[]>([]);
   const [userProfiles, setUserProfiles] = useState<Record<string, UserProfile | null>>({});
-  const [userId, setUserId] = useState<string>('');
+  const userId = useUserId();
   
   const [selectedChar, setSelectedChar] = useState<Character | null>(null);
   const [deleteConfirmChar, setDeleteConfirmChar] = useState<Character | null>(null);
@@ -96,10 +96,9 @@ export default function MyPage() {
 
   useEffect(() => {
     const init = async () => {
+      if (!userId) return;
       try {
-        const uid = getUserId();
-        setUserId(uid);
-        const chars = await getCharactersByUser(uid);
+        const chars = await getCharactersByUser(userId);
 
 
         const profiles = await Promise.all(chars.map(c => getUserProfile(c.id)));
@@ -140,8 +139,8 @@ export default function MyPage() {
       }
     };
     // user 상태 변경 시 재조회되도록 의존성 추가
-    if (user !== undefined) init();
-  }, [router, user]);
+    if (user !== undefined && userId) init();
+  }, [router, user, userId]);
 
   const handleGenerateBackupCode = async () => {
     if (backupCode) {

@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react';
 import Image from 'next/image';
 import { useRouter, useParams } from 'next/navigation';
 import { useLocale } from '@/lib/i18n';
-import { getUserId } from '@/lib/auth';
+import { useUserId } from '@/hooks/useUserId';
 import { getDiaryById, getCharacterById, getUserProfile, getDiariesByUserAndChar, getTopics, Diary, Character, UserProfile, Topic } from '@/lib/db';
 import { Loader2, ChevronLeft, ChevronRight } from 'lucide-react';
 
@@ -22,11 +22,13 @@ export default function DiaryHistoryDetailPage() {
   
   const [prevDiaryId, setPrevDiaryId] = useState<string | null>(null);
   const [nextDiaryId, setNextDiaryId] = useState<string | null>(null);
+  const userId = useUserId();
 
   useEffect(() => {
+    if (!userId) return;
+
     const init = async () => {
       try {
-        const userId = getUserId();
         const d = await getDiaryById(diaryId);
 
         if (!d) {
@@ -65,7 +67,7 @@ export default function DiaryHistoryDetailPage() {
       }
     };
     init();
-  }, [diaryId, router]);
+  }, [diaryId, router, userId]);
 
   if (loading || !diary || !character) {
     return (

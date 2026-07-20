@@ -3,7 +3,7 @@
 import { useEffect, useState, useRef, ReactNode } from 'react';
 import Image from 'next/image';
 import { useRouter } from 'next/navigation';
-import { getUserId } from '@/lib/auth';
+import { useUserId } from '@/hooks/useUserId';
 import { auth } from '@/lib/firebase';
 import { getCharacterById, Character, getUserProfile, UserProfile, getChatMessages, subscribeChatMessages, ChatMessage, saveChatMessage, deleteChatMessages, unlockMessageAd } from '@/lib/db';
 import { Loader2, ChevronLeft, MoreVertical, Send, User, MoreHorizontal, Lock } from 'lucide-react';
@@ -29,7 +29,7 @@ export default function ChatDetail({ params }: { params: { id: string } }) {
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const isSendingRef = useRef(false);
   const draftLoaded = useRef(false);
-  const [resolvedUserId, setResolvedUserId] = useState<string | null>(null);
+  const userId = useUserId();
 
   const [adModalOpen, setAdModalOpen] = useState(false);
   const [errorModalOpen, setErrorModalOpen] = useState(false);
@@ -53,27 +53,17 @@ export default function ChatDetail({ params }: { params: { id: string } }) {
   };
 
   const loadMessages = async () => {
-    const uid = resolvedUserId || getUserId();
-    const history = await getChatMessages(uid, params.id);
+    if (!userId) return;
+    const history = await getChatMessages(userId, params.id);
     setMessages(history);
   };
 
-  // Firebase Auth 초기화 완료를 기다려 userId를 확정
   useEffect(() => {
-    const unsubAuth = auth.onAuthStateChanged(() => {
-      const uid = getUserId();
-      setResolvedUserId(uid);
-    });
-    return () => unsubAuth();
-  }, []);
-
-  useEffect(() => {
-    if (resolvedUserId === null) return; // auth 초기화 전에는 실행하지 않음
+    if (!userId) return; // auth 초기화 전에는 실행하지 않음
     trackEvent('Chat_Opened', { character_id: params.id });
     
     const init = async () => {
       try {
-        const userId = resolvedUserId;
         const char = await getCharacterById(params.id);
         if (!char) {
           router.replace('/chat');
@@ -112,7 +102,7 @@ export default function ChatDetail({ params }: { params: { id: string } }) {
     return () => {
       if (unsub) unsub();
     };
-  }, [params.id, router, resolvedUserId]);
+  }, [params.id, router, userId]);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -153,11 +143,10 @@ export default function ChatDetail({ params }: { params: { id: string } }) {
     isSendingRef.current = true;
     const userText = inputMsg.trim();
     const requestId = crypto.randomUUID();
-    const userId = resolvedUserId || getUserId();
 
     const userMsg: ChatMessage = {
       id: Date.now().toString(),
-      userId: userId,
+      userId: userId!,
       characterId: character.id,
       role: 'user',
       content: userText,
@@ -266,7 +255,8 @@ export default function ChatDetail({ params }: { params: { id: string } }) {
 
   const handleDeleteChat = async () => {
     try {
-      await deleteChatMessages(getUserId(), params.id);
+      if (!userId) return;
+      await deleteChatMessages(userId, params.id);
       setMessages([]);
       setShowSettings(false);
       setShowDeleteConfirm(false);

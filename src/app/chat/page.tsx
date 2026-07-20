@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 import Image from 'next/image';
 import { useRouter } from 'next/navigation';
-import { getUserId } from '@/lib/auth';
+import { useUserId } from '@/hooks/useUserId';
 import { getCharactersByUser, Character, getChatMessages, ChatMessage } from '@/lib/db';
 import { Loader2, User } from 'lucide-react';
 import { useLocale } from '@/lib/i18n';
@@ -16,11 +16,13 @@ export default function ChatList() {
   const [characters, setCharacters] = useState<Character[]>([]);
   const [lastMessages, setLastMessages] = useState<Record<string, ChatMessage | null>>({});
   const [showEmptyModal, setShowEmptyModal] = useState(false);
+  const userId = useUserId();
 
   useEffect(() => {
+    if (!userId) return;
+
     const init = async () => {
       try {
-        const userId = getUserId();
         const chars = await getCharactersByUser(userId);
         
         if (chars.length === 0) {
@@ -74,7 +76,7 @@ export default function ChatList() {
       }
     };
     init();
-  }, [router]);
+  }, [userId, t]);
 
   if (loading) {
     return (
@@ -125,7 +127,6 @@ export default function ChatList() {
                   return;
                 }
                 // Update recent history
-                const userId = getUserId();
                 const history: string[] = JSON.parse(localStorage.getItem(`recentChars_${userId}`) || '[]');
                 const newHistory = [char.id, ...history.filter(id => id !== char.id)];
                 localStorage.setItem(`recentChars_${userId}`, JSON.stringify(newHistory));
