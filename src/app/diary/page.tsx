@@ -3,7 +3,7 @@
 import { useEffect, useState, Suspense } from 'react';
 import Image from 'next/image';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { getUserId } from '@/lib/auth';
+import { useUserId } from '@/hooks/useUserId';
 import { getCharactersByUser, getUserProfile, getTopics, getDiariesByUserAndChar, subscribeDiaries, saveDiary, Character, UserProfile, Topic, Diary, unlockDiaryAd } from '@/lib/db';
 import { Loader2, Send, ChevronDown, User, Lock } from 'lucide-react';
 import Link from 'next/link';
@@ -19,6 +19,7 @@ import { useLocale } from '@/lib/i18n';
 function DiaryContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
+  const userId = useUserId();
   const { t, locale } = useLocale();
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -56,7 +57,7 @@ function DiaryContent() {
   const [userEntry, setUserEntry] = useState('');
 
   const loadInitialData = async () => {
-    const userId = getUserId();
+    if (!userId) return;
     const now = new Date();
     const dateString = now.toISOString().split('T')[0];
     const [chars, topics] = await Promise.all([
@@ -81,8 +82,7 @@ function DiaryContent() {
   };
 
   useEffect(() => {
-    if (!activeCharId) return;
-    const userId = getUserId();
+    if (!activeCharId || !userId) return;
     const now = new Date();
     const dateString = now.toISOString().split('T')[0];
     
@@ -92,12 +92,12 @@ function DiaryContent() {
     });
     
     return () => unsubscribe();
-  }, [activeCharId]);
+  }, [activeCharId, userId]);
 
   useEffect(() => {
     const init = async () => {
+      if (!userId) return;
       try {
-        const userId = getUserId();
         const [chars, topics] = await Promise.all([
           getCharactersByUser(userId),
           getTopics()
@@ -198,11 +198,11 @@ function DiaryContent() {
       }
     };
     init();
-  }, [router]);
+  }, [router, userId]);
 
   useEffect(() => {
     loadInitialData();
-  }, []);
+  }, [userId]);
 
   useEffect(() => {
     if (todayDiary && !todayDiary.isAdLocked && todayDiary.charReply) {
@@ -225,7 +225,7 @@ function DiaryContent() {
     setLoading(true);
 
     try {
-      const userId = getUserId();
+
       const now = new Date();
       const dateString = now.toISOString().split('T')[0];
       const diaries = await getDiariesByUserAndChar(userId, charId);
@@ -255,7 +255,7 @@ function DiaryContent() {
 
     setSaving(true);
     try {
-      const userId = getUserId();
+
       const char = characters.find(c => c.id === activeCharId);
       const activeProfile = userProfiles[activeCharId];
       const dateString = new Date().toISOString().split('T')[0];
@@ -330,7 +330,7 @@ function DiaryContent() {
 
       setUserEntry('');
       clearDraft(char!.id);
-      await loadInitialData();
+      // subscribeDiaries가 실시간으로 Firestore 업데이트를 감지하므로 별도 재조회 불필요
 
     } catch (err) {
       console.error(err);
@@ -369,7 +369,7 @@ function DiaryContent() {
       {characters.length > 0 && (
         <div style={{ display: 'flex', gap: '15px', overflowX: 'auto', padding: '15px 20px', scrollbarWidth: 'none', backgroundColor: '#F5F0FF' }}>
           {[...characters].sort((a, b) => {
-            const userId = getUserId();
+      
             const history: string[] = JSON.parse(localStorage.getItem(`recentChars_${userId}`) || '[]');
             const idxA = a.id === activeCharId ? -1 : (history.indexOf(a.id) === -1 ? 999 : history.indexOf(a.id));
             const idxB = b.id === activeCharId ? -1 : (history.indexOf(b.id) === -1 ? 999 : history.indexOf(b.id));
@@ -381,7 +381,7 @@ function DiaryContent() {
                 key={char.id} 
                 onClick={() => {
                   handleCharSelect(char.id);
-                  const userId = getUserId();
+            
                   const history: string[] = JSON.parse(localStorage.getItem(`recentChars_${userId}`) || '[]');
                   const newHistory = [char.id, ...history.filter(id => id !== char.id)];
                   localStorage.setItem(`recentChars_${userId}`, JSON.stringify(newHistory));
