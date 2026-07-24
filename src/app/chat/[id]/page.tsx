@@ -12,11 +12,11 @@ import ErrorModal from '@/components/ErrorModal';
 import { trackEvent } from '@/lib/mixpanel';
 import { trackChatAndCheckAd } from '@/lib/adTracker';
 import { saveDraft, loadDraft, clearDraft } from '@/lib/draftStorage';
-import { useLocale } from '@/lib/i18n';
+import { useLocale, getDateLocale } from '@/lib/i18n';
 
 export default function ChatDetail({ params }: { params: { id: string } }) {
   const router = useRouter();
-  const { t } = useLocale();
+  const { t, locale } = useLocale();
   const [loading, setLoading] = useState(true);
   const [character, setCharacter] = useState<Character | null>(null);
   const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
@@ -425,7 +425,7 @@ export default function ChatDetail({ params }: { params: { id: string } }) {
           const isUser = msg.role === 'user';
           const showProfile = !isUser && (idx === 0 || filteredMessages[idx - 1].role === 'user');
           const showTime = idx === filteredMessages.length - 1 || filteredMessages[idx + 1].role !== msg.role;
-          const timeString = new Date(msg.createdAt).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' });
+          const timeString = new Date(msg.createdAt).toLocaleTimeString(getDateLocale(locale), { hour: 'numeric', minute: '2-digit', hour12: true });
 
           if (msg.role === 'assistant') {
             return (
@@ -486,7 +486,7 @@ export default function ChatDetail({ params }: { params: { id: string } }) {
               <div style={{ display: 'flex', flexDirection: 'column', maxWidth: '75%', alignItems: 'flex-end' }}>
                 {renderMessageContent(msg.content, true)}
                 <span style={{ fontSize: '0.75rem', color: 'var(--gray-600)', marginTop: '4px', alignSelf: 'flex-end' }}>
-                  {new Date(msg.createdAt).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' })}
+                  {new Date(msg.createdAt).toLocaleTimeString(getDateLocale(locale), { hour: 'numeric', minute: '2-digit', hour12: true })}
                 </span>
               </div>
             </div>

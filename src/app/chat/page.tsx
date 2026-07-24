@@ -6,7 +6,7 @@ import { useRouter } from 'next/navigation';
 import { useUserId } from '@/hooks/useUserId';
 import { getCharactersByUser, Character, getChatMessages, ChatMessage } from '@/lib/db';
 import { Loader2, User } from 'lucide-react';
-import { useLocale } from '@/lib/i18n';
+import { useLocale, getDateLocale } from '@/lib/i18n';
 
 export default function ChatList() {
   const router = useRouter();
@@ -110,9 +110,9 @@ export default function ChatList() {
             const d = new Date(lastMsg.timestamp || lastMsg.createdAt);
             const today = new Date();
             if (d.toDateString() === today.toDateString()) {
-              timeString = d.toLocaleTimeString(locale === 'ja' ? 'ja-JP' : 'ko-KR', { hour: 'numeric', minute: '2-digit' });
+              timeString = d.toLocaleTimeString(getDateLocale(locale), { hour: 'numeric', minute: '2-digit', hour12: true });
             } else {
-              timeString = d.toLocaleDateString(locale === 'ja' ? 'ja-JP' : 'ko-KR', { month: 'long', day: 'numeric' });
+              timeString = d.toLocaleDateString(getDateLocale(locale), { month: 'long', day: 'numeric' });
             }
           }
 

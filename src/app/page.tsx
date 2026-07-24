@@ -5,7 +5,7 @@ import Image from 'next/image';
 import { useRouter } from 'next/navigation';
 import { useUserId } from '@/hooks/useUserId';
 import { useAuth } from '@/components/AuthContext';
-import { useLocale } from '@/lib/i18n';
+import { useLocale, getDateLocale } from '@/lib/i18n';
 import { getCharactersByUser, Character, updateCharacter, getDiariesByUserAndChar, getTopics, Topic, getUserProfile, UserProfile, getChatMessages, ChatMessage } from '@/lib/db';
 import { uploadImageToImgbb } from '@/lib/imgbb';
 import { Loader2, User, Settings, Camera, Image as ImageIcon, ChevronRight } from 'lucide-react';
@@ -371,7 +371,7 @@ export default function Home() {
                 </button>
               </div>
               <span style={{ fontSize: '1rem', fontWeight: 'normal', color: hasBg ? (isLightMode ? 'var(--gray-600)' : 'rgba(255,255,255,0.8)') : 'var(--text-muted)', textShadow: hasBg ? (isLightMode ? 'none' : '0 1px 4px rgba(0,0,0,0.5)') : 'none' }}>
-                {new Date(selectedChar?.dDayStartDate || selectedChar?.createdAt || Date.now()).toLocaleDateString('ko-KR', { year: 'numeric', month: '2-digit', day: '2-digit' }).replace(/\.\s/g, '.').replace(/\.$/, '')}
+                {new Date(selectedChar?.dDayStartDate || selectedChar?.createdAt || Date.now()).toLocaleDateString(getDateLocale(locale), { year: 'numeric', month: '2-digit', day: '2-digit' }).replace(/\.\s/g, '.').replace(/\.$/, '')}
               </span>
             </div>
             
@@ -433,7 +433,7 @@ export default function Home() {
                       )}
                     </div>
                     <span style={{ fontSize: '0.75rem', color: selectedCharId === 'dummy' ? 'var(--gray-600)' : (hasBg ? (isLightMode ? 'var(--gray-600)' : 'rgba(255,255,255,0.7)') : 'var(--gray-400)') }}>
-                      {new Date((latestChat as any).createdAt || (latestChat as any).timestamp || Date.now()).toLocaleTimeString(locale === 'ja' ? 'ja-JP' : 'ko-KR', { hour: 'numeric', minute: '2-digit' })}
+                      {new Date((latestChat as any).createdAt || (latestChat as any).timestamp || Date.now()).toLocaleTimeString(getDateLocale(locale), { hour: 'numeric', minute: '2-digit', hour12: true })}
                     </span>
                   </div>
                   <p style={{ color: hasBg ? (isLightMode ? 'var(--gray-800)' : 'rgba(255,255,255,0.9)') : 'var(--gray-600)', fontSize: '0.85rem', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>

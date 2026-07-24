@@ -56,7 +56,7 @@ export function formatDateRelative(timestamp: number, locale?: Locale): string {
   const d = new Date(timestamp);
   const today = new Date();
   if (d.toDateString() === today.toDateString()) {
-    return d.toLocaleTimeString(getDateLocale(lang), { hour: 'numeric', minute: '2-digit' });
+    return d.toLocaleTimeString(getDateLocale(lang), { hour: 'numeric', minute: '2-digit', hour12: true });
   }
   if (lang === 'ja') {
     return `${d.getMonth() + 1}月${d.getDate()}日`;
