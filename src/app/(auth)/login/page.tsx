@@ -7,6 +7,7 @@ import { auth } from '@/lib/firebase';
 import Link from 'next/link';
 import { Eye, EyeOff, ChevronLeft } from 'lucide-react';
 import { useLocale } from '@/lib/i18n';
+import { trackEvent } from '@/lib/mixpanel';
 
 export default function LoginPage() {
   const router = useRouter();
@@ -25,6 +26,7 @@ export default function LoginPage() {
     try {
       const email = `${id}@dreamary.internal`;
       await signInWithEmailAndPassword(auth, email, password);
+      trackEvent('Login_Success');
       router.push('/mypage');
     } catch (err: any) {
       console.error(err);
