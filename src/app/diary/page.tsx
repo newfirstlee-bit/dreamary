@@ -9,7 +9,6 @@ import { Loader2, Send, ChevronDown, User, Lock } from 'lucide-react';
 import Link from 'next/link';
 import AdModal from '@/components/AdModal';
 import ErrorModal from '@/components/ErrorModal';
-import EmptyCharacterModal from '@/components/EmptyCharacterModal';
 import { trackDiaryAndCheckAd } from '@/lib/adTracker';
 import { trackEvent } from '@/lib/mixpanel';
 import { saveDraft, loadDraft, clearDraft } from '@/lib/draftStorage';
@@ -27,7 +26,6 @@ function DiaryContent() {
   
   const [adModalOpen, setAdModalOpen] = useState(false);
   const [errorModalOpen, setErrorModalOpen] = useState(false);
-  const [showEmptyModal, setShowEmptyModal] = useState(false);
   const [modalResolver, setModalResolver] = useState<(() => void) | null>(null);
 
   const confirmAd = () => {
@@ -642,7 +640,6 @@ function DiaryContent() {
         
         <AdModal isOpen={adModalOpen} onConfirm={confirmAd} />
         <ErrorModal isOpen={errorModalOpen} onConfirm={() => setErrorModalOpen(false)} />
-        <EmptyCharacterModal isOpen={showEmptyModal} onClose={() => setShowEmptyModal(false)} />
       </main>
       
       <style dangerouslySetInnerHTML={{__html: `

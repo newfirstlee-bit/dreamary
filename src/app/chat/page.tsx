@@ -7,7 +7,6 @@ import { useUserId } from '@/hooks/useUserId';
 import { getCharactersByUser, Character, getChatMessages, ChatMessage } from '@/lib/db';
 import { Loader2, User } from 'lucide-react';
 import { useLocale } from '@/lib/i18n';
-import EmptyCharacterModal from '@/components/EmptyCharacterModal';
 
 export default function ChatList() {
   const router = useRouter();
@@ -15,7 +14,6 @@ export default function ChatList() {
   const [loading, setLoading] = useState(true);
   const [characters, setCharacters] = useState<Character[]>([]);
   const [lastMessages, setLastMessages] = useState<Record<string, ChatMessage | null>>({});
-  const [showEmptyModal, setShowEmptyModal] = useState(false);
   const userId = useUserId();
 
   useEffect(() => {
@@ -123,7 +121,7 @@ export default function ChatList() {
               key={char.id} 
               onClick={() => {
                 if (char.id === 'dummy') {
-                  setShowEmptyModal(true);
+                  router.push('/guide/chat');
                   return;
                 }
                 // Update recent history
@@ -178,7 +176,6 @@ export default function ChatList() {
         })}
       </div>
 
-      <EmptyCharacterModal isOpen={showEmptyModal} onClose={() => setShowEmptyModal(false)} />
     </div>
   );
 }

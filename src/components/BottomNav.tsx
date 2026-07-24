@@ -26,7 +26,7 @@ export default function BottomNav() {
   }, []);
   
   // Hide bottom nav on onboarding, specific pages, or when keyboard is open
-  if (isKeyboardOpen || pathname === '/onboarding' || pathname.startsWith('/mypage/edit-pairname') || pathname.startsWith('/home-settings') || pathname.startsWith('/chat/') || pathname.startsWith('/admin') || pathname.startsWith('/mypage/edit-character') || pathname.startsWith('/mypage/edit-user')) return null;
+  if (isKeyboardOpen || pathname === '/onboarding' || pathname === '/guide/chat' || pathname.startsWith('/mypage/edit-pairname') || pathname.startsWith('/home-settings') || pathname.startsWith('/chat/') || pathname.startsWith('/admin') || pathname.startsWith('/mypage/edit-character') || pathname.startsWith('/mypage/edit-user')) return null;
 
   const navItems = [
     { name: t('nav.home'), path: '/', icon: Home },

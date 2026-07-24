@@ -10,7 +10,6 @@ import { getCharactersByUser, Character, updateCharacter, getDiariesByUserAndCha
 import { uploadImageToImgbb } from '@/lib/imgbb';
 import { Loader2, User, Settings, Camera, Image as ImageIcon, ChevronRight } from 'lucide-react';
 import { trackEvent } from '@/lib/mixpanel';
-import EmptyCharacterModal from '@/components/EmptyCharacterModal';
 
 
 class ErrorBoundary extends React.Component {
@@ -40,7 +39,6 @@ export default function Home() {
   const [charTopics, setCharTopics] = useState<Record<string, Topic | null>>({});
   const [userProfiles, setUserProfiles] = useState<Record<string, UserProfile | null>>({});
   const [latestChat, setLatestChat] = useState<ChatMessage | null>(null);
-  const [showEmptyModal, setShowEmptyModal] = useState(false);
 
   const baseUserId = useUserId();
   const userId = typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('demo') === 'true' 
@@ -351,7 +349,7 @@ export default function Home() {
                 <button 
                   onClick={() => {
                     if (selectedChar?.id === 'dummy') {
-                      setShowEmptyModal(true);
+                      router.push('/onboarding?skip=true');
                     } else {
                       router.push(`/home-settings/${selectedChar.id}`);
                     }
@@ -387,7 +385,7 @@ export default function Home() {
               <div 
                 onClick={() => {
                   if (selectedChar?.id === 'dummy') {
-                    setShowEmptyModal(true);
+                    router.push('/guide/chat');
                   } else {
                     router.push('/chat/' + selectedCharId);
                   }
@@ -478,7 +476,6 @@ export default function Home() {
         </main>
       </div>
 
-      <EmptyCharacterModal isOpen={showEmptyModal} onClose={() => setShowEmptyModal(false)} />
     </div>
     </ErrorBoundary>
   );

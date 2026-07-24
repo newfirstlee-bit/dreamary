@@ -23,13 +23,23 @@ export default function ChatDetail({ params }: { params: { id: string } }) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [inputMsg, setInputMsg] = useState("");
   const [isTyping, setIsTyping] = useState(false);
+  const [streamingContent, setStreamingContent] = useState('');
+  const [streamingMessageId, setStreamingMessageId] = useState<string | null>(null);
   const [showSettings, setShowSettings] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const chatAreaRef = useRef<HTMLDivElement>(null);
+  const isAutoScrollEnabled = useRef(true);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const isSendingRef = useRef(false);
   const draftLoaded = useRef(false);
   const userId = useUserId();
+
+  const handleScroll = () => {
+    if (!chatAreaRef.current) return;
+    const { scrollTop, scrollHeight, clientHeight } = chatAreaRef.current;
+    isAutoScrollEnabled.current = scrollHeight - scrollTop - clientHeight < 100;
+  };
 
   const [adModalOpen, setAdModalOpen] = useState(false);
   const [errorModalOpen, setErrorModalOpen] = useState(false);
@@ -105,11 +115,13 @@ export default function ChatDetail({ params }: { params: { id: string } }) {
   }, [params.id, router, userId]);
 
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    if (isAutoScrollEnabled.current) {
+      messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    }
     if (messages.length > 0) {
       localStorage.setItem(`chat_read_${params.id}`, messages[messages.length - 1].id);
     }
-  }, [messages, isTyping, params.id]);
+  }, [messages, isTyping, streamingContent, params.id]);
 
   const triggerInitialPing = async (char: Character, profile: UserProfile | null) => {
     localStorage.setItem(`hasPinged_${char.id}`, 'true');
@@ -174,6 +186,7 @@ export default function ChatDetail({ params }: { params: { id: string } }) {
     }
 
     setIsTyping(true);
+    isAutoScrollEnabled.current = true;
     let success = false;
     let savedId = '';
     try {
@@ -190,58 +203,75 @@ export default function ChatDetail({ params }: { params: { id: string } }) {
       // Get recent 10 messages for context
       const contextMessages = [...messages, userMsg].slice(-10);
 
-      for (let attempt = 1; attempt <= 3; attempt++) {
-        try {
-          if (typeof window !== 'undefined' && localStorage.getItem('dev_force_error') === 'true') {
-            throw new Error('Forced error for testing');
-          }
+      const res = await fetch('/api/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          character,
+          userProfile,
+          messages: contextMessages,
+          isFirstPing: false,
+          userId: userId,
+          isAdTurn,
+          requestId
+        })
+      });
 
-          const res = await fetch('/api/chat', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              character,
-              userProfile,
-              messages: contextMessages,
-              isFirstPing: false,
-              userId: userId,
-              isAdTurn,
-              requestId
-            })
-          });
-          const data = await res.json();
+      if (!res.ok) {
+        throw new Error('Failed to fetch from API');
+      }
+
+      const reader = res.body?.getReader();
+      if (!reader) throw new Error('Streaming not supported');
+
+      savedId = res.headers.get('X-Message-Id') || '';
+      if (savedId) {
+        setStreamingMessageId(savedId);
+      }
+
+      const decoder = new TextDecoder('utf-8');
+      let done = false;
+      let assistantReply = '';
+
+      while (!done) {
+        const { value, done: readerDone } = await reader.read();
+        done = readerDone;
+        if (value) {
+          const chunk = decoder.decode(value, { stream: true });
+          const pieces = chunk.match(/.{1,3}/g) || [];
           
-          if (res.ok && data.reply) {
-            success = true;
-            savedId = data.savedId;
-            break;
+          for (const piece of pieces) {
+            assistantReply += piece;
+            setStreamingContent(assistantReply);
+            await new Promise(resolve => setTimeout(resolve, 50));
           }
-        } catch (e) {
-          console.error(`Attempt ${attempt} failed:`, e);
-        }
-        
-        if (!success && attempt < 3) {
-          await new Promise(resolve => setTimeout(resolve, 2000));
         }
       }
+
+      setStreamingContent('');
+      setStreamingMessageId(null);
+      success = true;
       
       if (success) {
         clearDraft(character.id);
 
         if (isAdTurn) {
           await adWaitPromise;
-          await unlockMessageAd(savedId);
+          if (savedId) {
+            await unlockMessageAd(savedId);
+          }
         }
         trackEvent('Chat_Response_Received', {
           character_id: character.id,
         });
         // loadMessages() is no longer needed due to subscription
       } else {
-        throw new Error('All 3 attempts failed');
+        throw new Error('Streaming failed');
       }
     } catch (error) {
       console.error('Send failed:', error);
       closeAdModal();
+      setStreamingMessageId(null);
       
       setMessages(prev => prev.filter(m => m.id !== userMsg.id));
       setInputMsg(userText);
@@ -390,11 +420,11 @@ export default function ChatDetail({ params }: { params: { id: string } }) {
       </header>
 
       {/* Chat Area */}
-      <div style={{ flex: 1, overflowY: 'auto', padding: '20px', display: 'flex', flexDirection: 'column', gap: '15px', overscrollBehavior: 'none' }}>
-        {messages.map((msg, idx) => {
+      <div ref={chatAreaRef} onScroll={handleScroll} style={{ flex: 1, overflowY: 'auto', padding: '20px', display: 'flex', flexDirection: 'column', gap: '15px', overscrollBehavior: 'none' }}>
+        {messages.filter(msg => msg.id !== streamingMessageId).map((msg, idx, filteredMessages) => {
           const isUser = msg.role === 'user';
-          const showProfile = !isUser && (idx === 0 || messages[idx - 1].role === 'user');
-          const showTime = idx === messages.length - 1 || messages[idx + 1].role !== msg.role;
+          const showProfile = !isUser && (idx === 0 || filteredMessages[idx - 1].role === 'user');
+          const showTime = idx === filteredMessages.length - 1 || filteredMessages[idx + 1].role !== msg.role;
           const timeString = new Date(msg.createdAt).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' });
 
           if (msg.role === 'assistant') {
@@ -462,7 +492,26 @@ export default function ChatDetail({ params }: { params: { id: string } }) {
             </div>
           );
         })}
-        {isTyping && (
+        
+        {streamingContent && (
+          <div style={{ display: 'flex', gap: '8px', marginBottom: '8px', alignItems: 'flex-start' }}>
+            {character?.image && (
+              <div style={{ width: '32px', height: '32px', borderRadius: '50%', backgroundColor: 'var(--gray-200)', overflow: 'hidden', position: 'relative', flexShrink: 0 }}>
+                <Image src={character.image} alt={character.name} fill style={{ objectFit: 'cover' }} />
+              </div>
+            )}
+            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', maxWidth: '75%' }}>
+              <span style={{ fontSize: '0.75rem', color: 'var(--gray-500)', marginBottom: '4px', marginLeft: '4px' }}>
+                {character?.name}
+              </span>
+              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', width: '100%' }}>
+                {renderMessageContent(streamingContent, false)}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {isTyping && !streamingContent && (
           <div style={{ display: 'flex', justifyContent: 'flex-start', gap: '10px', alignItems: 'flex-end', marginBottom: '20px' }}>
             {character?.image && (
               <div style={{ width: '36px', height: '36px', borderRadius: '50%', backgroundColor: 'var(--gray-200)', overflow: 'hidden', position: 'relative', flexShrink: 0 }}>

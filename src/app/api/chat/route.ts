@@ -1,6 +1,37 @@
 import { NextResponse } from 'next/server';
 import { saveChatMessage, ChatMessage, getMessageByRequestId } from '@/lib/db';
 
+export const maxDuration = 300;
+
+async function* parseOpenRouterStream(stream: ReadableStream<Uint8Array>) {
+  const reader = stream.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    
+    const lines = buffer.split('\n');
+    buffer = lines.pop() || '';
+    
+    for (let line of lines) {
+      line = line.trim();
+      if (line.startsWith('data: ') && line !== 'data: [DONE]') {
+        try {
+          const data = JSON.parse(line.slice(6));
+          if (data.choices && data.choices[0].delta && data.choices[0].delta.content) {
+            yield data.choices[0].delta.content;
+          }
+        } catch (e) {
+          // parse error, ignore
+        }
+      }
+    }
+  }
+}
+
 export async function POST(req: Request) {
   try {
     const { character, userProfile, messages, isFirstPing, userId, isAdTurn, requestId } = await req.json();
@@ -133,35 +164,97 @@ ${(userName === '유저' || userName === '나' || userName === 'ユーザー') ?
           ...formattedMessages
         ],
         temperature: 0.8,
-        max_tokens: isFirstPing ? 100 : 2000
+        max_tokens: isFirstPing ? 100 : 2000,
+        stream: !isFirstPing // 첫 인사는 기존처럼 JSON, 일반 대화는 스트리밍
       })
     });
 
-    const data = await response.json();
-    if (!response.ok) {
-      console.error('OpenRouter API Error:', data);
-      return NextResponse.json({ error: data.error?.message || 'Failed to generate reply' }, { status: response.status });
+    if (isFirstPing) {
+      const data = await response.json();
+      if (!response.ok) {
+        console.error('OpenRouter API Error:', data);
+        return NextResponse.json({ error: data.error?.message || 'Failed to generate reply' }, { status: response.status });
+      }
+
+      const charReply = data.choices[0]?.message?.content || "";
+      const newMsg: ChatMessage = {
+        id: crypto.randomUUID(),
+        userId: userId || 'unknown',
+        characterId: character.id,
+        role: 'assistant',
+        content: charReply,
+        createdAt: Date.now(),
+        isAdLocked: isAdTurn === true,
+        ...(requestId ? { requestId } : {}),
+      };
+      
+      if (userId) {
+        await saveChatMessage(newMsg);
+      }
+      return NextResponse.json({ reply: charReply, savedId: newMsg.id });
     }
 
-    const charReply = data.choices[0]?.message?.content || "";
-    
-    // Background save to DB
-    const newMsg: ChatMessage = {
-      id: crypto.randomUUID(),
-      userId: userId || 'unknown',
-      characterId: character.id,
-      role: 'assistant',
-      content: charReply,
-      createdAt: Date.now(),
-      isAdLocked: isAdTurn === true,
-      ...(requestId ? { requestId } : {}),
-    };
-    
-    if (userId) {
-      await saveChatMessage(newMsg);
+    // Streaming for standard chat
+    if (!response.ok) {
+      const errData = await response.json().catch(() => ({}));
+      return NextResponse.json({ error: errData.error?.message || 'Failed to generate reply' }, { status: response.status });
     }
-    
-    return NextResponse.json({ reply: charReply, savedId: newMsg.id });
+
+    let fullReply = '';
+    const newMsgId = crypto.randomUUID();
+
+    const stream = new ReadableStream({
+      async start(controller) {
+        let isClientConnected = true;
+        try {
+          if (response.body) {
+            for await (const chunk of parseOpenRouterStream(response.body)) {
+              fullReply += chunk;
+              if (isClientConnected) {
+                try {
+                  controller.enqueue(new TextEncoder().encode(chunk));
+                } catch (err) {
+                  isClientConnected = false;
+                  console.log('Client disconnected. Continuing background generation...');
+                }
+              }
+            }
+          }
+        } catch (err) {
+          console.error('Streaming error:', err);
+          controller.error(err);
+        } finally {
+          try {
+            const newMsg: ChatMessage = {
+              id: newMsgId,
+              userId: userId || 'unknown',
+              characterId: character.id,
+              role: 'assistant',
+              content: fullReply,
+              createdAt: Date.now(),
+              isAdLocked: isAdTurn === true,
+              ...(requestId ? { requestId } : {}),
+            };
+            if (userId && fullReply) {
+              await saveChatMessage(newMsg);
+            }
+          } catch (dbErr) {
+            console.error('DB save failed:', dbErr);
+          }
+          controller.close();
+        }
+      }
+    });
+
+    return new Response(stream, {
+      headers: {
+        'Content-Type': 'text/plain; charset=utf-8',
+        'Transfer-Encoding': 'chunked',
+        'Cache-Control': 'no-cache, no-transform',
+        'X-Message-Id': newMsgId
+      }
+    });
+
   } catch (error: any) {
     console.error('API Route Error:', error);
     return NextResponse.json({ error: error.message || 'Internal Server Error' }, { status: 500 });
