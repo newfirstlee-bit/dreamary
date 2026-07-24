@@ -47,10 +47,9 @@ export default function Home() {
 
   useEffect(() => {
     if (authLoading || !userId) return;
-
-    trackEvent('Home_Viewed');
     
     const init = async () => {
+
       try {
         // 데모 링크 처리 (?demo=true)
         if (typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('demo') === 'true') {
@@ -60,6 +59,12 @@ export default function Home() {
         }
 
         const chars = await getCharactersByUser(userId);
+        
+        const hasCharacter = chars.length > 0 && chars[0]?.id !== 'dummy';
+        trackEvent('main_screen_view', {
+          has_character: hasCharacter,
+          is_first_visit: localStorage.getItem('has_seen_onboarding') !== 'true'
+        });
         
         if (chars.length === 0) {
           if (localStorage.getItem('has_seen_onboarding') !== 'true') {
@@ -349,8 +354,9 @@ export default function Home() {
                 <button 
                   onClick={() => {
                     if (selectedChar?.id === 'dummy') {
-                      router.push('/onboarding?skip=true');
-                    } else {
+                      trackEvent('locked_feature_tapped', { feature_name: 'settings', screen: 'home' });
+                      router.push('/onboarding?skip=true&entry_point=home_settings');
+                  } else {
                       router.push(`/home-settings/${selectedChar.id}`);
                     }
                   }}
@@ -385,6 +391,7 @@ export default function Home() {
               <div 
                 onClick={() => {
                   if (selectedChar?.id === 'dummy') {
+                    trackEvent('locked_feature_tapped', { feature_name: 'chat', screen: 'home' });
                     router.push('/guide/chat');
                   } else {
                     router.push('/chat/' + selectedCharId);
@@ -445,7 +452,14 @@ export default function Home() {
 
             {selectedCharId && unwrittenChars.has(selectedCharId) && todayTopic ? (
               <div 
-                onClick={() => router.push('/diary?charId=' + selectedCharId)}
+                onClick={() => {
+                  if (selectedCharId === 'dummy') {
+                    trackEvent('locked_feature_tapped', { feature_name: 'diary', screen: 'home' });
+                    router.push('/diary?charId=dummy');
+                  } else {
+                    router.push('/diary?charId=' + selectedCharId);
+                  }
+                }}
                 style={{ 
                   order: selectedCharId === 'dummy' ? 1 : 2,
                   padding: '14px', 

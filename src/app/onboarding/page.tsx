@@ -79,7 +79,15 @@ export default function OnboardingPage() {
       }, 1600); // 1.2s delay + 0.6s anim = 1.8s. 버튼 CSS transition(0.3s) 고려하여 1.6s에 활성화 시작
       return () => clearTimeout(timer);
     } else if (phase === 'character') {
-      if (charStep === 1) trackEvent('CharacterNameInput_Viewed');
+      if (charStep === 1) {
+        if (!sessionStorage.getItem('setup_started')) {
+          trackEvent('character_setup_started', {
+            entry_point: new URLSearchParams(window.location.search).get('entry_point') || 'direct'
+          });
+          sessionStorage.setItem('setup_started', 'true');
+        }
+        trackEvent('CharacterNameInput_Viewed');
+      }
       else if (charStep === 2) trackEvent('CharacterGenderInput_Viewed');
       else if (charStep === 3) trackEvent('CharacterFeelingInput_Viewed');
       else if (charStep === 4) trackEvent('CharacterTitleInput_Viewed');
@@ -580,7 +588,13 @@ function CharacterStep({ step, store, onNext }: { step: number, store: any, onNe
           {step === 7 && t('onboarding.charStep7Subtitle')}
         </p>
 
-        {step === 1 && <input className="input-field" autoFocus value={store.charName} onChange={e => store.setCharField('charName', e.target.value.slice(0, 10))} placeholder={t('onboarding.charStep1Placeholder')} />}
+        {step === 1 && <input className="input-field" autoFocus value={store.charName} onChange={e => {
+          if (!sessionStorage.getItem('name_typing_tracked')) {
+            trackEvent('character_name_typing_started');
+            sessionStorage.setItem('name_typing_tracked', 'true');
+          }
+          store.setCharField('charName', e.target.value.slice(0, 10));
+        }} placeholder={t('onboarding.charStep1Placeholder')} />}
         {step === 2 && <GenderSelect value={store.charGender} onChange={v => store.setCharField('charGender', v)} />}
         {step === 3 && <input className="input-field" autoFocus value={store.charFeeling} onChange={e => store.setCharField('charFeeling', e.target.value.slice(0, 300))} placeholder={t('onboarding.charStep3Placeholder')} />}
         {step === 4 && <input className="input-field" autoFocus value={store.charTitle} onChange={e => store.setCharField('charTitle', e.target.value.slice(0, 300))} placeholder={t('onboarding.charStep4Placeholder')} />}

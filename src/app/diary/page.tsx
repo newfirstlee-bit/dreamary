@@ -325,6 +325,11 @@ function DiaryContent() {
         character_id: char.id,
         content_length: userEntry.length
       });
+      
+      if (!localStorage.getItem('core_interaction_tracked')) {
+        trackEvent('Core_interaction', { type: 'diary' });
+        localStorage.setItem('core_interaction_tracked', 'true');
+      }
 
       setUserEntry('');
       clearDraft(char!.id);
@@ -531,7 +536,10 @@ function DiaryContent() {
                 <p style={{ fontSize: '16px', color: 'var(--gray-500)', textAlign: 'center', marginBottom: '20px', lineHeight: '1.5' }} dangerouslySetInnerHTML={{ __html: t('dummy.diaryGuide') }}>
                 </p>
                 <button 
-                  onClick={() => router.push('/onboarding?skip=true')}
+                  onClick={() => {
+                    trackEvent('locked_feature_tapped', { feature_name: 'diary_create_btn', screen: 'diary' });
+                    router.push('/onboarding?skip=true&entry_point=diary_dummy');
+                  }}
                   style={{
                     marginTop: 'auto',
                     padding: '15px',

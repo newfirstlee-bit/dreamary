@@ -181,6 +181,12 @@ export default function ChatDetail({ params }: { params: { id: string } }) {
       character_id: character.id,
       message_length: userText.length
     });
+    
+    if (!localStorage.getItem('core_interaction_tracked')) {
+      trackEvent('Core_interaction', { type: 'chat' });
+      localStorage.setItem('core_interaction_tracked', 'true');
+    }
+    
     if (inputRef.current) {
       inputRef.current.style.height = 'auto';
     }

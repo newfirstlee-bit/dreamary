@@ -121,6 +121,7 @@ export default function ChatList() {
               key={char.id} 
               onClick={() => {
                 if (char.id === 'dummy') {
+                  trackEvent('locked_feature_tapped', { feature_name: 'chat_list', screen: 'chat' });
                   router.push('/guide/chat');
                   return;
                 }

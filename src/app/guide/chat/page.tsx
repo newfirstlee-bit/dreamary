@@ -153,7 +153,10 @@ export default function GuideChatPage() {
           </span>
           <button 
             className="btn-primary" 
-            onClick={() => router.push('/onboarding?skip=true')}
+            onClick={() => {
+              trackEvent('locked_feature_tapped', { feature_name: 'guide_chat_create_btn', screen: 'guide_chat' });
+              router.push('/onboarding?skip=true&entry_point=guide_chat');
+            }}
             style={{ 
               width: '100%', 
               marginTop: 0,
