@@ -7,6 +7,7 @@ import { useUserId } from '@/hooks/useUserId';
 import { getCharactersByUser, Character, getChatMessages, ChatMessage } from '@/lib/db';
 import { Loader2, User } from 'lucide-react';
 import { useLocale, getDateLocale } from '@/lib/i18n';
+import { trackEvent } from '@/lib/mixpanel';
 
 export default function ChatList() {
   const router = useRouter();
