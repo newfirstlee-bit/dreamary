@@ -362,6 +362,11 @@ function DiaryContent() {
       .replace(/{캐릭터}/g, activeChar.name);
   }
 
+  const handleDummyClick = () => {
+    trackEvent('locked_feature_tapped', { feature_name: 'diary_create_btn', screen: 'diary' });
+    router.push('/onboarding?skip=true&entry_point=diary_dummy');
+  };
+
   return (
     <div className="app-container diary-bg" style={{ paddingBottom: '65px' }}>
       <header className="header" style={{ borderBottomLeftRadius: 0, borderBottomRightRadius: 0, position: 'relative', display: 'flex', justifyContent: 'flex-start', alignItems: 'center' }}>
@@ -518,7 +523,10 @@ function DiaryContent() {
           <div style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
             {activeCharId === 'dummy' ? (
               <>
-                <div style={{ flex: 1, display: 'flex', flexDirection: 'column', justifyContent: 'center', gap: '27px', padding: '20px 10px', marginTop: '-10px' }}>
+                <div 
+                  onClick={handleDummyClick}
+                  style={{ flex: 1, display: 'flex', flexDirection: 'column', justifyContent: 'center', gap: '27px', padding: '20px 10px', marginTop: '-10px', cursor: 'pointer' }}
+                >
                   {/* User Message */}
                   <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', opacity: 0, animation: 'fadeInUp 0.6s ease 0.5s forwards' }}>
                     <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: '8px', marginRight: '5px' }}>{t('common.me')}</span>
@@ -533,13 +541,14 @@ function DiaryContent() {
                     </div>
                   </div>
                 </div>
-                <p style={{ fontSize: '16px', color: 'var(--gray-500)', textAlign: 'center', marginBottom: '20px', lineHeight: '1.5' }} dangerouslySetInnerHTML={{ __html: t('dummy.diaryGuide') }}>
+                <p 
+                  onClick={handleDummyClick}
+                  style={{ fontSize: '16px', color: 'var(--gray-500)', textAlign: 'center', marginBottom: '20px', lineHeight: '1.5', cursor: 'pointer' }} 
+                  dangerouslySetInnerHTML={{ __html: t('dummy.diaryGuide') }}
+                >
                 </p>
                 <button 
-                  onClick={() => {
-                    trackEvent('locked_feature_tapped', { feature_name: 'diary_create_btn', screen: 'diary' });
-                    router.push('/onboarding?skip=true&entry_point=diary_dummy');
-                  }}
+                  onClick={handleDummyClick}
                   style={{
                     marginTop: 'auto',
                     padding: '15px',
