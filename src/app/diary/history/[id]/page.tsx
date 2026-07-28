@@ -155,7 +155,7 @@ export default function DiaryHistoryDetailPage() {
           }}
         >
           <ChevronLeft size={20} />
-          <span>이전</span>
+          <span>{locale === 'ja' ? '前へ' : '이전'}</span>
         </button>
         
         <button 
@@ -168,7 +168,7 @@ export default function DiaryHistoryDetailPage() {
             fontWeight: 'bold', fontSize: '1.05rem', padding: '10px' 
           }}
         >
-          <span>다음</span>
+          <span>{locale === 'ja' ? '次へ' : '다음'}</span>
           <ChevronRight size={20} />
         </button>
       </div>

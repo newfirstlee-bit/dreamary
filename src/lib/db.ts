@@ -221,6 +221,10 @@ export const saveChatMessage = async (message: ChatMessage) => {
   await setDoc(doc(db, 'chatMessages', message.id), message);
 };
 
+export const updateChatMessage = async (msgId: string, content: string) => {
+  await updateDoc(doc(db, 'chatMessages', msgId), { content });
+};
+
 export const deleteChatMessages = async (userId: string, characterId: string) => {
   const q = query(
     collection(db, 'chatMessages'),

@@ -5,14 +5,25 @@ import Image from 'next/image';
 import { useRouter } from 'next/navigation';
 import { useUserId } from '@/hooks/useUserId';
 import { auth } from '@/lib/firebase';
-import { getCharacterById, Character, getUserProfile, UserProfile, getChatMessages, subscribeChatMessages, ChatMessage, saveChatMessage, deleteChatMessages, unlockMessageAd } from '@/lib/db';
-import { Loader2, ChevronLeft, MoreVertical, Send, User, MoreHorizontal, Lock } from 'lucide-react';
+import { getCharacterById, Character, getUserProfile, UserProfile, getChatMessages, subscribeChatMessages, ChatMessage, saveChatMessage, deleteChatMessages, unlockMessageAd, updateChatMessage, deleteMessage } from '@/lib/db';
+import { Loader2, ChevronLeft, MoreVertical, Send, User, MoreHorizontal, Lock, Pencil, Trash2 } from 'lucide-react';
 import AdModal from '@/components/AdModal';
 import ErrorModal from '@/components/ErrorModal';
 import { trackEvent } from '@/lib/mixpanel';
 import { trackChatAndCheckAd } from '@/lib/adTracker';
 import { saveDraft, loadDraft, clearDraft } from '@/lib/draftStorage';
 import { useLocale, getDateLocale } from '@/lib/i18n';
+
+// polyfill for crypto.randomUUID() which fails on HTTP (non-HTTPS) mobile
+const generateId = (): string => {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID();
+  }
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
+    const r = (Math.random() * 16) | 0;
+    return (c === 'x' ? r : (r & 0x3) | 0x8).toString(16);
+  });
+};
 
 export default function ChatDetail({ params }: { params: { id: string } }) {
   const router = useRouter();
@@ -27,6 +38,12 @@ export default function ChatDetail({ params }: { params: { id: string } }) {
   const [streamingMessageId, setStreamingMessageId] = useState<string | null>(null);
   const [showSettings, setShowSettings] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  
+  // Message Edit/Delete States
+  const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
+  const [editContent, setEditContent] = useState("");
+  const [deleteConfirmMessageId, setDeleteConfirmMessageId] = useState<string | null>(null);
+
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const chatAreaRef = useRef<HTMLDivElement>(null);
   const isAutoScrollEnabled = useRef(true);
@@ -34,6 +51,26 @@ export default function ChatDetail({ params }: { params: { id: string } }) {
   const isSendingRef = useRef(false);
   const draftLoaded = useRef(false);
   const userId = useUserId();
+
+  const handleEditSave = async (msgId: string) => {
+    if (!editContent.trim()) return;
+    try {
+      await updateChatMessage(msgId, editContent);
+      setEditingMessageId(null);
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
+  const handleDeleteConfirm = async () => {
+    if (!deleteConfirmMessageId) return;
+    try {
+      await deleteMessage(deleteConfirmMessageId);
+      setDeleteConfirmMessageId(null);
+    } catch (e) {
+      console.error(e);
+    }
+  };
 
   const handleScroll = () => {
     if (!chatAreaRef.current) return;
@@ -115,13 +152,34 @@ export default function ChatDetail({ params }: { params: { id: string } }) {
   }, [params.id, router, userId]);
 
   useEffect(() => {
-    if (isAutoScrollEnabled.current) {
+    if (isAutoScrollEnabled.current && !editingMessageId) {
       messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
     }
     if (messages.length > 0) {
       localStorage.setItem(`chat_read_${params.id}`, messages[messages.length - 1].id);
     }
   }, [messages, isTyping, streamingContent, params.id]);
+
+  // Auto-expand edit textarea only when first opening (not on every keystroke)
+  useEffect(() => {
+    if (editingMessageId) {
+      // Lock scroll position to prevent Android from scrolling on cursor move
+      const scrollPos = chatAreaRef.current?.scrollTop ?? 0;
+      setTimeout(() => {
+        const ta = document.getElementById('edit-textarea') as HTMLTextAreaElement;
+        if (ta) {
+          ta.style.height = 'auto';
+          ta.style.height = ta.scrollHeight + 'px';
+          ta.focus();
+          ta.setSelectionRange(ta.value.length, ta.value.length);
+        }
+        // Restore scroll after focus (Android may have scrolled)
+        if (chatAreaRef.current) {
+          chatAreaRef.current.scrollTop = scrollPos;
+        }
+      }, 50);
+    }
+  }, [editingMessageId]); // only on open, NOT on editContent change
 
   const triggerInitialPing = async (char: Character, profile: UserProfile | null) => {
     localStorage.setItem(`hasPinged_${char.id}`, 'true');
@@ -154,7 +212,7 @@ export default function ChatDetail({ params }: { params: { id: string } }) {
     if (!inputMsg.trim() || !character || isSendingRef.current) return;
     isSendingRef.current = true;
     const userText = inputMsg.trim();
-    const requestId = crypto.randomUUID();
+    const requestId = generateId();
 
     const userMsg: ChatMessage = {
       id: Date.now().toString(),
@@ -403,7 +461,39 @@ export default function ChatDetail({ params }: { params: { id: string } }) {
 
   return (
     <div className="app-container" style={{ display: 'flex', flexDirection: 'column', backgroundColor: 'var(--gray-50)', height: '100dvh', maxHeight: '-webkit-fill-available', overflow: 'hidden', position: 'relative' }}>
-      {/* Header */}
+      {deleteConfirmMessageId && (
+        <>
+          <div 
+            onClick={() => setDeleteConfirmMessageId(null)}
+            style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.5)', zIndex: 3000 }} 
+          />
+          <div style={{ 
+            position: 'fixed', top: '50%', left: '50%', transform: 'translate(-50%, -50%)', width: '90%', maxWidth: '340px', 
+            backgroundColor: 'white', borderRadius: '20px', padding: '30px 20px 20px', zIndex: 3001,
+            display: 'flex', flexDirection: 'column', alignItems: 'center', textAlign: 'center'
+          }}>
+            <h2 style={{ fontSize: '1.2rem', fontWeight: 'bold', marginBottom: '25px' }}>
+              {locale === 'ja' ? 'このメッセージを削除しますか？' : '대화를 삭제할까요?'}
+            </h2>
+            <div style={{ display: 'flex', gap: '10px', width: '100%' }}>
+              <button 
+                onClick={handleDeleteConfirm}
+                style={{ flex: 1, padding: '15px', backgroundColor: '#FFF0F0', border: 'none', borderRadius: '12px', fontSize: '1rem', fontWeight: 'bold', color: 'red', cursor: 'pointer' }}
+              >
+                {locale === 'ja' ? '削除' : '삭제'}
+              </button>
+              <button 
+                onClick={() => setDeleteConfirmMessageId(null)}
+                style={{ flex: 1, padding: '15px', backgroundColor: 'var(--gray-200)', border: 'none', borderRadius: '12px', fontSize: '1rem', fontWeight: 'bold', color: 'var(--gray-800)', cursor: 'pointer' }}
+              >
+                {locale === 'ja' ? 'キャンセル' : '취소하기'}
+              </button>
+            </div>
+          </div>
+        </>
+      )}
+
+      {/* Ad Modal */}
       <header className="header" style={{ 
         backgroundColor: 'white', 
         borderBottom: '1px solid var(--border-color)', 
@@ -426,7 +516,11 @@ export default function ChatDetail({ params }: { params: { id: string } }) {
       </header>
 
       {/* Chat Area */}
-      <div ref={chatAreaRef} onScroll={handleScroll} style={{ flex: 1, overflowY: 'auto', padding: '20px', display: 'flex', flexDirection: 'column', gap: '15px', overscrollBehavior: 'none' }}>
+      <div 
+        ref={chatAreaRef} 
+        onScroll={handleScroll} 
+        style={{ flex: 1, overflowY: 'auto', padding: '20px', display: 'flex', flexDirection: 'column', gap: '15px', overscrollBehavior: 'none' }}
+      >
         {messages.filter(msg => msg.id !== streamingMessageId).map((msg, idx, filteredMessages) => {
           const isUser = msg.role === 'user';
           const showProfile = !isUser && (idx === 0 || filteredMessages[idx - 1].role === 'user');
@@ -435,23 +529,70 @@ export default function ChatDetail({ params }: { params: { id: string } }) {
 
           if (msg.role === 'assistant') {
             return (
-              <div key={msg.id} style={{ display: 'flex', gap: '8px', marginBottom: '8px', alignItems: 'flex-start' }}>
-                {showProfile && character?.image && (
+              <div key={msg.id} style={{ display: 'flex', gap: '8px', marginBottom: '8px', alignItems: 'flex-start', flexDirection: editingMessageId === msg.id ? 'column' : 'row', width: '100%' }}>
+                {editingMessageId !== msg.id && showProfile && character?.image && (
                   <div style={{ width: '32px', height: '32px', borderRadius: '50%', backgroundColor: 'var(--gray-200)', overflow: 'hidden', position: 'relative', flexShrink: 0 }}>
                     <Image src={character.image} alt={character.name} fill style={{ objectFit: 'cover' }} />
                   </div>
                 )}
-                {!showProfile && character?.image && (
+                {editingMessageId !== msg.id && !showProfile && character?.image && (
                   <div style={{ width: '32px', flexShrink: 0 }} />
                 )}
-                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', maxWidth: '75%' }}>
-                  {showProfile && (
+                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', maxWidth: editingMessageId === msg.id ? '100%' : '75%', flex: 1, width: '100%' }}>
+                  {editingMessageId !== msg.id && showProfile && (
                     <span style={{ fontSize: '0.75rem', color: 'var(--gray-500)', marginBottom: '4px', marginLeft: '4px' }}>
                       {character?.name}
                     </span>
                   )}
+                  {editingMessageId === msg.id && showProfile && character?.image && (
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px' }}>
+                      <div style={{ width: '32px', height: '32px', borderRadius: '50%', backgroundColor: 'var(--gray-200)', overflow: 'hidden', position: 'relative', flexShrink: 0 }}>
+                        <Image src={character.image} alt={character.name} fill style={{ objectFit: 'cover' }} />
+                      </div>
+                      <span style={{ fontSize: '0.75rem', color: 'var(--gray-500)' }}>
+                        {character?.name}
+                      </span>
+                    </div>
+                  )}
                   
-                  {msg.isAdLocked ? (
+                  {editingMessageId === msg.id ? (
+                    <div style={{ width: '100%', minWidth: '260px', backgroundColor: 'white', padding: '15px', borderRadius: '15px', border: '1px solid var(--border-color)', display: 'flex', flexDirection: 'column' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '10px', color: 'var(--point-color)' }}>
+                        <Pencil size={16} /> <span style={{ fontSize: '0.9rem', fontWeight: 'bold' }}>{locale === 'ja' ? 'メッセージを編集中' : '메시지 수정 중'}</span>
+                      </div>
+                      <textarea 
+                        id="edit-textarea"
+                        value={editContent}
+                        onChange={e => {
+                          setEditContent(e.target.value.slice(0, 4000));
+                          e.target.style.height = 'auto';
+                          e.target.style.height = e.target.scrollHeight + 'px';
+                        }}
+                        style={{ width: '100%', minHeight: '120px', backgroundColor: 'var(--gray-50)', border: '1px solid var(--border-color)', borderRadius: '10px', padding: '10px', color: 'var(--foreground)', fontSize: '0.95rem', resize: 'none', outline: 'none', overflow: 'auto', boxSizing: 'border-box', lineHeight: '1.5' }}
+                      />
+                      <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '5px' }}>
+                        <span style={{ fontSize: '0.8rem', color: 'var(--gray-500)' }}>{editContent.length}/4000</span>
+                      </div>
+                      <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px', marginTop: '15px' }}>
+                        <button 
+                          onMouseDown={(e) => e.preventDefault()}
+                          onTouchStart={(e) => e.preventDefault()}
+                          onClick={() => setEditingMessageId(null)} 
+                          style={{ padding: '8px 16px', borderRadius: '8px', border: '1px solid var(--border-color)', backgroundColor: 'var(--gray-100)', color: 'var(--gray-800)', cursor: 'pointer', fontSize: '0.9rem', fontWeight: 'bold' }}
+                        >
+                          {locale === 'ja' ? 'キャンセル' : '취소'}
+                        </button>
+                        <button 
+                          onMouseDown={(e) => e.preventDefault()}
+                          onTouchStart={(e) => e.preventDefault()}
+                          onClick={() => handleEditSave(msg.id)} 
+                          style={{ padding: '8px 16px', borderRadius: '8px', border: 'none', backgroundColor: 'var(--point-color)', color: 'white', fontWeight: 'bold', cursor: 'pointer', fontSize: '0.9rem' }}
+                        >
+                          {locale === 'ja' ? '修正完了' : '수정 완료'}
+                        </button>
+                      </div>
+                    </div>
+                  ) : msg.isAdLocked ? (
                     <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '10px', padding: '15px 20px', backgroundColor: 'white', borderRadius: '16px', borderTopLeftRadius: '4px', border: '1px solid var(--border-color)' }}>
                       <div style={{ filter: 'blur(5px)', opacity: 0.5, userSelect: 'none', fontSize: '0.9rem', lineHeight: '1.4' }}>
                         (부드럽게 미소지으며 네 머리카락을 넘겨준다. 심장이 요동친다.) 정말 보고 싶었어. 오늘 하루 어땠어?
@@ -477,10 +618,18 @@ export default function ChatDetail({ params }: { params: { id: string } }) {
                     </div>
                   )}
                   
-                  {showTime && (
-                    <span style={{ fontSize: '0.65rem', color: 'var(--gray-500)', marginTop: '4px', marginLeft: '4px' }}>
-                      {timeString}
-                    </span>
+                  {editingMessageId !== msg.id && (
+                    <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', width: '100%', gap: '8px', marginTop: '4px' }}>
+                      <button onClick={() => { setEditingMessageId(msg.id); setEditContent(msg.content); }} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '2px', display: 'flex', color: 'var(--gray-500)' }}>
+                        <Pencil size={12} />
+                      </button>
+                      <button onClick={() => setDeleteConfirmMessageId(msg.id)} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '2px', display: 'flex', color: 'var(--gray-500)' }}>
+                        <Trash2 size={12} />
+                      </button>
+                      <span style={{ fontSize: '0.65rem', color: 'var(--gray-500)' }}>
+                        {showTime ? timeString : ''}
+                      </span>
+                    </div>
                   )}
                 </div>
               </div>
@@ -489,11 +638,60 @@ export default function ChatDetail({ params }: { params: { id: string } }) {
           
           return (
             <div key={msg.id} style={{ display: 'flex', flexDirection: 'row-reverse', gap: '10px', alignItems: 'flex-start' }}>
-              <div style={{ display: 'flex', flexDirection: 'column', maxWidth: '75%', alignItems: 'flex-end' }}>
-                {renderMessageContent(msg.content, true)}
-                <span style={{ fontSize: '0.75rem', color: 'var(--gray-600)', marginTop: '4px', alignSelf: 'flex-end' }}>
-                  {new Date(msg.createdAt).toLocaleTimeString(getDateLocale(locale), { hour: 'numeric', minute: '2-digit', hour12: true })}
-                </span>
+              <div style={{ display: 'flex', flexDirection: 'column', maxWidth: editingMessageId === msg.id ? '100%' : '75%', alignItems: 'flex-end', width: '100%', flex: 1 }}>
+                {editingMessageId === msg.id ? (
+                  <div style={{ width: '100%', minWidth: '260px', backgroundColor: 'white', padding: '15px', borderRadius: '15px', border: '1px solid var(--border-color)', display: 'flex', flexDirection: 'column' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '10px', color: 'var(--point-color)' }}>
+                      <Pencil size={16} /> <span style={{ fontSize: '0.9rem', fontWeight: 'bold' }}>{locale === 'ja' ? 'メッセージを編集中' : '메시지 수정 중'}</span>
+                    </div>
+                    <textarea 
+                      id="edit-textarea"
+                      value={editContent}
+                      onChange={e => {
+                        setEditContent(e.target.value.slice(0, 4000));
+                        e.target.style.height = 'auto';
+                        e.target.style.height = e.target.scrollHeight + 'px';
+                      }}
+                      style={{ width: '100%', minHeight: '120px', backgroundColor: 'var(--gray-50)', border: '1px solid var(--border-color)', borderRadius: '10px', padding: '10px', color: 'var(--foreground)', fontSize: '0.95rem', resize: 'none', outline: 'none', overflow: 'auto', boxSizing: 'border-box', lineHeight: '1.5' }}
+                    />
+                    <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '5px' }}>
+                      <span style={{ fontSize: '0.8rem', color: 'var(--gray-500)' }}>{editContent.length}/4000</span>
+                    </div>
+                    <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px', marginTop: '15px' }}>
+                      <button 
+                        onMouseDown={(e) => e.preventDefault()}
+                        onTouchStart={(e) => e.preventDefault()}
+                        onClick={() => setEditingMessageId(null)} 
+                        style={{ padding: '8px 16px', borderRadius: '8px', border: '1px solid var(--border-color)', backgroundColor: 'var(--gray-100)', color: 'var(--gray-800)', cursor: 'pointer', fontSize: '0.9rem', fontWeight: 'bold' }}
+                      >
+                        {locale === 'ja' ? 'キャンセル' : '취소'}
+                      </button>
+                      <button 
+                        onMouseDown={(e) => e.preventDefault()}
+                        onTouchStart={(e) => e.preventDefault()}
+                        onClick={() => handleEditSave(msg.id)} 
+                        style={{ padding: '8px 16px', borderRadius: '8px', border: 'none', backgroundColor: 'var(--point-color)', color: 'white', fontWeight: 'bold', cursor: 'pointer', fontSize: '0.9rem' }}
+                      >
+                        {locale === 'ja' ? '修正完了' : '수정 완료'}
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <>
+                    {renderMessageContent(msg.content, true)}
+                    <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', width: '100%', gap: '8px', marginTop: '4px' }}>
+                      <button onClick={() => { setEditingMessageId(msg.id); setEditContent(msg.content); }} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '2px', display: 'flex', color: 'var(--gray-500)' }}>
+                        <Pencil size={12} />
+                      </button>
+                      <button onClick={() => setDeleteConfirmMessageId(msg.id)} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '2px', display: 'flex', color: 'var(--gray-500)' }}>
+                        <Trash2 size={12} />
+                      </button>
+                      <span style={{ fontSize: '0.65rem', color: 'var(--gray-500)' }}>
+                        {timeString}
+                      </span>
+                    </div>
+                  </>
+                )}
               </div>
             </div>
           );
@@ -538,60 +736,67 @@ export default function ChatDetail({ params }: { params: { id: string } }) {
       </div>
 
       {/* Input Area */}
-      <div style={{ position: 'relative', backgroundColor: 'white', borderTop: '1px solid var(--border-color)', padding: '10px 15px 25px', display: 'flex', flexDirection: 'column' }}>
-        <div style={{ position: 'absolute', top: '-45px', right: '15px', display: 'flex' }}>
-          <button 
-            onClick={insertActionBracket}
-            style={{ padding: '8px 16px', borderRadius: '20px', backgroundColor: 'var(--point-color)', color: 'white', border: 'none', fontSize: '0.9rem', fontWeight: 'bold', cursor: 'pointer', boxShadow: '0 2px 8px rgba(0,0,0,0.15)' }}
-          >
-            {t('chat.actionBracket')}
-          </button>
+      {!editingMessageId && (
+        <div style={{ position: 'relative', backgroundColor: 'white', borderTop: '1px solid var(--border-color)', padding: '10px 15px 25px', display: 'flex', flexDirection: 'column' }}>
+          <div style={{ position: 'absolute', top: '-45px', right: '15px', display: 'flex' }}>
+            <button 
+              onClick={insertActionBracket}
+              style={{ padding: '8px 16px', borderRadius: '20px', backgroundColor: 'var(--point-color)', color: 'white', border: 'none', fontSize: '0.9rem', fontWeight: 'bold', cursor: 'pointer', boxShadow: '0 2px 8px rgba(0,0,0,0.15)' }}
+            >
+              {t('chat.actionBracket')}
+            </button>
+          </div>
+          <div style={{ display: 'flex', gap: '10px', alignItems: 'center', marginTop: '5px' }}>
+            <textarea
+              ref={inputRef}
+              rows={1}
+              value={inputMsg}
+              onChange={(e) => {
+                setInputMsg(e.target.value);
+                if (draftLoaded.current) {
+                  clearDraft(character?.id || '');
+                  draftLoaded.current = false;
+                }
+                e.target.style.height = 'auto';
+                e.target.style.height = Math.min(e.target.scrollHeight, 120) + 'px';
+              }}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && !e.shiftKey) {
+                  e.preventDefault();
+                  // prevents double triggering on Korean IME
+                  if (!e.nativeEvent.isComposing) {
+                    handleSend();
+                  }
+                }
+              }}
+              placeholder={t('chat.placeholder')}
+              style={{ 
+                flex: 1, 
+                padding: '12px 16px', 
+                borderRadius: '24px', 
+                border: '1px solid var(--border-color)', 
+                outline: 'none', 
+                fontSize: '1rem', 
+                backgroundColor: 'var(--gray-50)',
+                resize: 'none',
+                overflowY: 'auto',
+                minHeight: '44px',
+                maxHeight: '120px',
+                lineHeight: '1.2'
+              }}
+            />
+            <button 
+              onMouseDown={(e) => e.preventDefault()}
+              onTouchStart={(e) => e.preventDefault()}
+              onClick={handleSend}
+              disabled={!inputMsg.trim() || isSendingRef.current}
+              style={{ width: '40px', height: '40px', borderRadius: '50%', backgroundColor: inputMsg.trim() && !isSendingRef.current ? 'var(--point-color)' : 'var(--gray-300)', color: 'white', border: 'none', display: 'flex', justifyContent: 'center', alignItems: 'center', cursor: inputMsg.trim() && !isSendingRef.current ? 'pointer' : 'not-allowed', flexShrink: 0, paddingRight: '2px' }}
+            >
+              <Send size={18} />
+            </button>
+          </div>
         </div>
-        <div style={{ display: 'flex', gap: '10px', alignItems: 'center', marginTop: '5px' }}>
-          <textarea 
-            ref={inputRef}
-            rows={1}
-            value={inputMsg}
-            onChange={(e) => {
-              setInputMsg(e.target.value);
-              if (draftLoaded.current) {
-                clearDraft(character?.id || '');
-                draftLoaded.current = false;
-              }
-              e.target.style.height = 'auto';
-              e.target.style.height = Math.min(e.target.scrollHeight, 120) + 'px';
-            }}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter' && !e.shiftKey) {
-                e.preventDefault();
-                handleSend();
-              }
-            }}
-            placeholder={t('chat.placeholder')}
-            style={{ 
-              flex: 1, 
-              padding: '12px 16px', 
-              borderRadius: '24px', 
-              border: '1px solid var(--border-color)', 
-              outline: 'none', 
-              fontSize: '1rem', 
-              backgroundColor: 'var(--gray-50)',
-              resize: 'none',
-              overflowY: 'auto',
-              minHeight: '44px',
-              maxHeight: '120px',
-              lineHeight: '1.2'
-            }}
-          />
-          <button 
-            onClick={handleSend}
-            disabled={!inputMsg.trim() || isTyping}
-            style={{ width: '40px', height: '40px', borderRadius: '50%', backgroundColor: inputMsg.trim() && !isTyping ? 'var(--point-color)' : 'var(--gray-300)', color: 'white', border: 'none', display: 'flex', justifyContent: 'center', alignItems: 'center', cursor: inputMsg.trim() && !isTyping ? 'pointer' : 'not-allowed', flexShrink: 0 }}
-          >
-            <Send size={18} />
-          </button>
-        </div>
-      </div>
+      )}
 
       {/* Settings Bottom Sheet */}
       {showSettings && (
