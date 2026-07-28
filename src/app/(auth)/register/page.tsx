@@ -11,7 +11,7 @@ import { useLocale } from '@/lib/i18n';
 
 export default function RegisterPage() {
   const router = useRouter();
-  const { t } = useLocale();
+  const { t, locale } = useLocale();
   const [id, setId] = useState('');
   const [password, setPassword] = useState('');
   const [passwordConfirm, setPasswordConfirm] = useState('');
@@ -21,6 +21,8 @@ export default function RegisterPage() {
   
   const [error, setError] = useState('');
   const [idError, setIdError] = useState(false);
+  const [isIdAvailable, setIsIdAvailable] = useState<boolean | null>(null);
+  const [checkingId, setCheckingId] = useState(false);
   const [loading, setLoading] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const [showPasswordConfirm, setShowPasswordConfirm] = useState(false);
@@ -29,6 +31,7 @@ export default function RegisterPage() {
 
   const handleIdChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const val = e.target.value;
+    setIsIdAvailable(null);
     // 영소문자/숫자 외 문자가 포함되어 있는지 확인
     if (/[^a-z0-9]/.test(val)) {
       setIdError(true);
@@ -37,6 +40,30 @@ export default function RegisterPage() {
     }
     // 소문자 변환, 정규식으로 제거 후 최대 10자까지만 설정
     setId(val.toLowerCase().replace(/[^a-z0-9]/g, '').slice(0, 10));
+  };
+
+  const checkDuplicateId = async () => {
+    if (!id || idError) return;
+    setCheckingId(true);
+    try {
+      const res = await fetch('/api/auth/check-id', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id })
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setIsIdAvailable(!data.exists);
+      } else {
+        console.error(data.error);
+        alert(t('auth.serverError') || '서버 오류가 발생했습니다.');
+      }
+    } catch (err) {
+      console.error(err);
+      alert(t('auth.serverError') || '서버 오류가 발생했습니다.');
+    } finally {
+      setCheckingId(false);
+    }
   };
 
   const handleRegister = async (e: React.FormEvent) => {
@@ -94,16 +121,45 @@ export default function RegisterPage() {
       <form onSubmit={handleRegister} style={{ display: 'flex', flexDirection: 'column', gap: '20px', paddingBottom: '40px' }}>
         <div>
           <label style={{ display: 'block', marginBottom: '8px', fontWeight: 'bold', fontSize: '0.9rem' }}>{t('auth.idRequired')}</label>
-          <input
-            type="text"
-            value={id}
-            onChange={handleIdChange}
-            placeholder={t('auth.idHint')}
-            maxLength={10}
-            required
-            style={{ width: '100%', padding: '15px', borderRadius: '12px', border: `1px solid ${idError ? 'red' : 'var(--border-color)'}`, fontSize: '1rem', outline: 'none' }}
-          />
+          <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
+            <input
+              type="text"
+              value={id}
+              onChange={handleIdChange}
+              placeholder={t('auth.idHint')}
+              maxLength={10}
+              required
+              style={{ flex: 1, padding: '15px', borderRadius: '12px', border: `1px solid ${idError ? 'red' : 'var(--border-color)'}`, fontSize: '1rem', outline: 'none' }}
+            />
+            <button
+              type="button"
+              onClick={checkDuplicateId}
+              disabled={!id || idError || checkingId}
+              style={{
+                padding: '15px 20px',
+                borderRadius: '12px',
+                border: 'none',
+                backgroundColor: !id || idError || checkingId ? 'var(--gray-300)' : 'var(--point-color)',
+                color: 'white',
+                fontWeight: 'bold',
+                cursor: !id || idError || checkingId ? 'not-allowed' : 'pointer',
+                whiteSpace: 'nowrap'
+              }}
+            >
+              {checkingId ? (locale === 'ja' ? '確認中' : '확인중') : (locale === 'ja' ? '重複確認' : '중복확인')}
+            </button>
+          </div>
           {idError && <div style={{ color: 'red', fontSize: '0.8rem', marginTop: '5px' }}>{t('auth.idError')}</div>}
+          {isIdAvailable === false && !idError && (
+            <div style={{ color: 'red', fontSize: '0.85rem', marginTop: '5px', fontWeight: 'bold' }}>
+              {locale === 'ja' ? 'このIDはすでに使用されています。' : '이미 사용중인 ID예요'}
+            </div>
+          )}
+          {isIdAvailable === true && !idError && (
+            <div style={{ color: 'green', fontSize: '0.85rem', marginTop: '5px', fontWeight: 'bold' }}>
+              {locale === 'ja' ? 'このIDは使用できます。' : '사용할 수 있는 ID입니다'}
+            </div>
+          )}
         </div>
 
         <div>
@@ -195,11 +251,11 @@ export default function RegisterPage() {
 
         <button
           type="submit"
-          disabled={loading || !id || !password || !passwordConfirm || !email || !gender || !birthdate}
+          disabled={loading || !id || !password || !passwordConfirm || !email || !gender || !birthdate || isIdAvailable !== true}
           style={{ 
             marginTop: '10px', padding: '16px', borderRadius: '12px', border: 'none', 
-            backgroundColor: loading || !id || !password || !email || !gender || !birthdate ? 'var(--gray-300)' : 'var(--point-color)', 
-            color: 'white', fontSize: '1.1rem', fontWeight: 'bold', cursor: loading ? 'not-allowed' : 'pointer'
+            backgroundColor: loading || !id || !password || !email || !gender || !birthdate || isIdAvailable !== true ? 'var(--gray-300)' : 'var(--point-color)', 
+            color: 'white', fontSize: '1.1rem', fontWeight: 'bold', cursor: loading || !id || !password || !email || !gender || !birthdate || isIdAvailable !== true ? 'not-allowed' : 'pointer'
           }}
         >
           {loading ? t('auth.registering') : t('auth.doRegister')}

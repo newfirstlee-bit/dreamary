@@ -25,13 +25,13 @@ function applyJosa(word: string, josaType: '이/가' | '을/를' | '은/는' | '
   return word + getJosa(word, josaType);
 }
 
-type Phase = 'value-proposition' | 'character' | 'narrative-prompt' | 'narrative' | 'user' | 'saving';
+type Phase = 'character' | 'narrative-prompt' | 'narrative' | 'user' | 'saving';
 
 export default function OnboardingPage() {
   const router = useRouter();
   const store = useOnboardingStore();
   const { t, locale } = useLocale();
-  const [phase, setPhase] = useState<Phase>('value-proposition');
+  const [phase, setPhase] = useState<Phase>('character');
   const [charStep, setCharStep] = useState(1);
   const [narrativeStep, setNarrativeStep] = useState(1);
   const [userStep, setUserStep] = useState(1);
@@ -71,14 +71,7 @@ export default function OnboardingPage() {
   }, []);
 
   useEffect(() => {
-    if (phase === 'value-proposition') {
-      trackEvent('ValueProposition_Viewed');
-      setIsNextEnabled(false);
-      const timer = setTimeout(() => {
-        setIsNextEnabled(true);
-      }, 1600); // 1.2s delay + 0.6s anim = 1.8s. 버튼 CSS transition(0.3s) 고려하여 1.6s에 활성화 시작
-      return () => clearTimeout(timer);
-    } else if (phase === 'character') {
+    if (phase === 'character') {
       if (charStep === 1) {
         if (!sessionStorage.getItem('setup_started')) {
           trackEvent('character_setup_started', {
@@ -132,12 +125,7 @@ export default function OnboardingPage() {
       if (charStep > 1) {
         setCharStep(charStep - 1);
       } else {
-        const searchParams = new URLSearchParams(window.location.search);
-        if (searchParams.get('skip') === 'true') {
-          router.back();
-        } else {
-          setPhase('value-proposition');
-        }
+        router.back();
       }
     } else if (phase === 'narrative-prompt') {
       setPhase('character');
@@ -268,7 +256,7 @@ export default function OnboardingPage() {
       progress = (userStep / 4) * 100;
     }
 
-    if (phase === 'value-proposition' || phase === 'narrative-prompt' || phase === 'saving') return null;
+    if (phase === 'narrative-prompt' || phase === 'saving') return null;
 
     return (
       <div style={{ width: '100%', height: '4px', backgroundColor: 'var(--border-color)' }}>
@@ -278,7 +266,7 @@ export default function OnboardingPage() {
   };
 
   return (
-    <div className={`app-container ${phase === 'value-proposition' ? 'diary-bg' : ''}`} style={{ 
+    <div className="app-container" style={{ 
       minHeight: viewportStyle.height, 
       height: viewportStyle.height, 
       position: 'relative', 
@@ -289,7 +277,7 @@ export default function OnboardingPage() {
       {renderProgressBar()}
       
       <header style={{ display: 'flex', alignItems: 'center', padding: '20px', paddingBottom: '10px', minHeight: '68px' }}>
-        {phase !== 'saving' && phase !== 'value-proposition' && (
+        {phase !== 'saving' && (
           <button onClick={handleBack} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '5px', display: 'flex', alignItems: 'center' }}>
             <ChevronLeft size={28} color="var(--gray-800)" />
           </button>
@@ -297,47 +285,6 @@ export default function OnboardingPage() {
       </header>
 
       <main className="content" style={{ display: 'flex', flexDirection: 'column', padding: 0 }}>
-        {phase === 'value-proposition' && (
-          <div style={{ flex: 1, display: 'flex', flexDirection: 'column', padding: '0 20px' }}>
-            <div style={{ display: 'flex', justifyContent: 'center', marginTop: '40px' }}>
-              <h1 style={{ fontSize: '1.5rem', lineHeight: '1.4', textAlign: 'center', fontWeight: 'bold' }} dangerouslySetInnerHTML={{ __html: t('onboarding.valuePropTitle') }} />
-            </div>
-            
-            <div style={{ flex: 1, display: 'flex', flexDirection: 'column', justifyContent: 'center', gap: '27px', padding: '0 10px', transform: 'translateY(-10px)' }}>
-              {/* User Message */}
-              <div style={{ display: 'flex', justifyContent: 'flex-end', opacity: 0, animation: 'fadeInUp 0.6s ease 0.5s forwards' }}>
-                <div className="post-it" style={{ maxWidth: '85%', lineHeight: '1.6', fontSize: '18px' }}>
-                  {t('onboarding.valuePropMsg1')}
-                </div>
-              </div>
-
-              {/* Character Message */}
-              <div style={{ display: 'flex', justifyContent: 'flex-start', opacity: 0, animation: 'fadeInUp 0.6s ease 1.2s forwards' }}>
-                <div className="notebook-paper" style={{ maxWidth: '85%', lineHeight: '1.6', fontSize: '18px' }} dangerouslySetInnerHTML={{ __html: t('onboarding.valuePropMsg2') }} />
-              </div>
-            </div>
-            
-            <div style={{ paddingBottom: '20px' }}>
-              <button 
-                className="btn-primary" 
-                onClick={() => {
-                  localStorage.setItem('has_seen_onboarding', 'true');
-                  router.push('/');
-                }}
-                disabled={!isNextEnabled}
-                style={{ 
-                  width: '100%', 
-                  marginTop: 0, 
-                  opacity: isNextEnabled ? 1 : 0.5, 
-                  transition: 'opacity 0.3s ease',
-                  cursor: isNextEnabled ? 'pointer' : 'not-allowed'
-                }}
-              >
-                {t('onboarding.startBtn')}
-              </button>
-            </div>
-          </div>
-        )}
         
         {phase === 'character' && <CharacterStep step={charStep} store={store} onNext={handleNextCharStep} />}
         

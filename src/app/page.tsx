@@ -62,13 +62,13 @@ export default function Home() {
         
         const hasCharacter = chars.length > 0 && chars[0]?.id !== 'dummy';
         trackEvent('main_screen_view', {
-          has_character: hasCharacter,
-          is_first_visit: localStorage.getItem('has_seen_onboarding') !== 'true'
+          has_character: hasCharacter
         });
         
         if (chars.length === 0) {
-          if (localStorage.getItem('has_seen_onboarding') !== 'true') {
-            router.replace('/onboarding');
+          if (!sessionStorage.getItem('has_redirected_to_diary')) {
+            sessionStorage.setItem('has_redirected_to_diary', 'true');
+            router.replace('/diary');
             return;
           } else {
             const dummyChar: Character = {

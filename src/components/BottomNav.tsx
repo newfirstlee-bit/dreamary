@@ -60,7 +60,16 @@ export default function BottomNav() {
         const Icon = item.icon;
         
         return (
-          <Link key={item.path} href={item.path} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%', textDecoration: 'none', color, width: '25%', touchAction: 'manipulation' }}>
+          <Link 
+            key={item.path} 
+            href={item.path} 
+            onClick={() => {
+              if (typeof window !== 'undefined') {
+                sessionStorage.setItem('has_redirected_to_diary', 'true');
+              }
+            }}
+            style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%', textDecoration: 'none', color, width: '25%', touchAction: 'manipulation' }}
+          >
             <Icon size={24} color={color} />
             <span style={{ fontSize: '0.7rem', marginTop: '4px', fontWeight: isActive ? 'bold' : 'normal' }}>
               {item.name}

@@ -518,7 +518,7 @@ function DiaryContent() {
           <div style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
             {activeCharId === 'dummy' ? (
               <>
-                <div style={{ flex: 1, display: 'flex', flexDirection: 'column', justifyContent: 'center', gap: '27px', padding: '20px 10px', marginTop: '10px' }}>
+                <div style={{ flex: 1, display: 'flex', flexDirection: 'column', justifyContent: 'center', gap: '27px', padding: '20px 10px', marginTop: '-10px' }}>
                   {/* User Message */}
                   <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', opacity: 0, animation: 'fadeInUp 0.6s ease 0.5s forwards' }}>
                     <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: '8px', marginRight: '5px' }}>{t('common.me')}</span>
