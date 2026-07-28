@@ -375,11 +375,36 @@ export default function MyPage() {
           </div>
         </section>
 
+        {/* 로그인 섹션 (비로그인) */}
+        {!user && (
+          <section style={{ marginTop: '30px' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '15px' }}>
+              <h2 style={{ fontSize: '1.2rem', fontWeight: 'bold' }}>
+                {locale === 'ja' ? 'ログイン' : '로그인'}
+              </h2>
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+              <button 
+                onClick={() => router.push('/login')}
+                style={{ width: '100%', padding: '15px', borderRadius: '12px', border: 'none', backgroundColor: 'var(--point-color)', color: 'white', fontWeight: 'bold', fontSize: '1rem', display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '8px', cursor: 'pointer' }}
+              >
+                <LogIn size={20} /> {t('mypage.loginRegisterBtn')}
+              </button>
+              <button 
+                onClick={handleGenerateBackupCode}
+                style={{ width: '100%', padding: '15px', borderRadius: '12px', border: '1px solid var(--point-color)', backgroundColor: 'white', color: 'var(--point-color)', fontWeight: 'bold', fontSize: '1rem', display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '8px', cursor: 'pointer' }}
+              >
+                <Download size={20} /> {t('mypage.backupChatBtn')}
+              </button>
+            </div>
+          </section>
+        )}
+
         {/* My Info Section (UUID) - Only for non-logged-in users */}
         {!user && (
-          <section style={{ marginTop: '10px' }}>
+          <section style={{ marginTop: '30px' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '15px' }}>
-            <h2 style={{ fontSize: '1.2rem', color: 'var(--foreground)' }}>{t('mypage.myInfo')}</h2>
+            <h2 style={{ fontSize: '1.2rem', color: 'var(--foreground)', fontWeight: 'bold' }}>{t('mypage.myInfo')}</h2>
           </div>
           <div style={{ backgroundColor: 'white', padding: '20px', borderRadius: '15px', border: '1px solid var(--border-color)', display: 'flex', flexDirection: 'column', gap: '20px' }}>
             
@@ -408,25 +433,32 @@ export default function MyPage() {
           </section>
         )}
 
-        {/* 계정/이관 관련 섹션 (비로그인) */}
-        {!user && (
-          <section style={{ marginTop: '10px' }}>
-            <div style={{ backgroundColor: 'white', padding: '20px', borderRadius: '15px', border: '1px solid var(--border-color)', display: 'flex', flexDirection: 'column', gap: '15px' }}>
-              <button 
-                onClick={() => router.push('/login')}
-                style={{ width: '100%', padding: '15px', borderRadius: '12px', border: 'none', backgroundColor: 'var(--point-color)', color: 'white', fontWeight: 'bold', fontSize: '1rem', display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '8px', cursor: 'pointer' }}
-              >
-                <LogIn size={20} /> {t('mypage.loginRegisterBtn')}
-              </button>
-              <button 
-                onClick={handleGenerateBackupCode}
-                style={{ width: '100%', padding: '15px', borderRadius: '12px', border: '1px solid var(--point-color)', backgroundColor: 'white', color: 'var(--point-color)', fontWeight: 'bold', fontSize: '1rem', display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '8px', cursor: 'pointer' }}
-              >
-                <Download size={20} /> {t('mypage.backupChatBtn')}
-              </button>
-            </div>
-          </section>
-        )}
+        {/* Developer Account Section */}
+        <section style={{ marginTop: '30px' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '15px' }}>
+            <h2 style={{ fontSize: '1.2rem', fontWeight: 'bold' }}>
+              {locale === 'ja' ? '公式アカウント' : '개발자 계정'}
+            </h2>
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+            <a 
+              href="https://x.com/Dreamary_" 
+              target="_blank" 
+              rel="noopener noreferrer"
+              style={{ width: '100%', padding: '15px', borderRadius: '12px', border: '1px solid var(--gray-400)', backgroundColor: 'white', color: 'var(--gray-700)', fontWeight: 'bold', fontSize: '1rem', display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '8px', cursor: 'pointer', textDecoration: 'none' }}
+            >
+              {locale === 'ja' ? 'アップデート・お知らせ' : '업데이트/공지'}
+            </a>
+            <a 
+              href="https://peing.net/ko/dreamary_" 
+              target="_blank" 
+              rel="noopener noreferrer"
+              style={{ width: '100%', padding: '15px', borderRadius: '12px', border: '1px solid var(--gray-400)', backgroundColor: 'white', color: 'var(--gray-700)', fontWeight: 'bold', fontSize: '1rem', display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '8px', cursor: 'pointer', textDecoration: 'none' }}
+            >
+              {locale === 'ja' ? 'フィードバックを送る' : '피드백 쓰기'}
+            </a>
+          </div>
+        </section>
 
         {user && (
           <section style={{ marginTop: '30px' }}>
