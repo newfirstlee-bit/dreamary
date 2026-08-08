@@ -5,10 +5,9 @@ export const config: Config = {
   path: "/api/account/delete"
 };
 
-async function getFirebaseAdmin() {
-  const [{ cert, getApps, initializeApp }, { getAuth }, { getFirestore }] = await Promise.all([
+async function getFirestoreAdmin() {
+  const [{ cert, getApps, initializeApp }, { getFirestore }] = await Promise.all([
     import('firebase-admin/app'),
-    import('firebase-admin/auth'),
     import('firebase-admin/firestore'),
   ]);
 
@@ -18,10 +17,7 @@ async function getFirebaseAdmin() {
     initializeApp({ credential: cert(JSON.parse(rawServiceAccount)) });
   }
 
-  return {
-    auth: getAuth(),
-    firestore: getFirestore(),
-  };
+  return getFirestore();
 }
 
 async function deleteSnapshotDocs(firestore: any, docs: any[]) {
@@ -31,6 +27,35 @@ async function deleteSnapshotDocs(firestore: any, docs: any[]) {
     docs.slice(start, start + BATCH_LIMIT).forEach((item: any) => batch.delete(item.ref));
     await batch.commit();
   }
+}
+
+// REST API helper
+async function verifyIdTokenRest(idToken: string) {
+  const apiKey = process.env.NEXT_PUBLIC_FIREBASE_API_KEY;
+  if (!apiKey) throw new Error('NEXT_PUBLIC_FIREBASE_API_KEY is not set');
+
+  const res = await fetch(`https://identitytoolkit.googleapis.com/v1/accounts:lookup?key=${apiKey}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ idToken })
+  });
+  const data = await res.json();
+  if (data.error) throw new Error(data.error.message || 'Token verification failed');
+  if (!data.users || data.users.length === 0) throw new Error('User not found');
+  return data.users[0].localId; // This is the uid
+}
+
+async function deleteUserRest(idToken: string) {
+  const apiKey = process.env.NEXT_PUBLIC_FIREBASE_API_KEY;
+  if (!apiKey) throw new Error('NEXT_PUBLIC_FIREBASE_API_KEY is not set');
+
+  const res = await fetch(`https://identitytoolkit.googleapis.com/v1/accounts:delete?key=${apiKey}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ idToken })
+  });
+  const data = await res.json();
+  if (data.error) throw new Error(data.error.message || 'User deletion failed');
 }
 
 export default async function reqHandler(req: Request) {
@@ -50,11 +75,14 @@ export default async function reqHandler(req: Request) {
     }
 
     const { uid } = await req.json();
-    const { auth, firestore } = await getFirebaseAdmin();
-    const decoded = await auth.verifyIdToken(idToken);
-    if (!uid || decoded.uid !== uid) {
+    
+    // Verify token using REST API to avoid firebase-admin/auth ESM issues
+    const verifiedUid = await verifyIdTokenRest(idToken);
+    if (!uid || verifiedUid !== uid) {
       return new Response(JSON.stringify({ error: '본인 계정만 탈퇴할 수 있습니다.' }), { status: 403, headers: corsHeaders });
     }
+
+    const firestore = await getFirestoreAdmin();
 
     // 사용자 관련 데이터 조회
     const [charactersSnap, chatMessagesSnap, diariesSnap, reportsSnap, usedBackupCodesSnap, ownedBackupCodesSnap] = await Promise.all([
@@ -70,7 +98,7 @@ export default async function reqHandler(req: Request) {
     const userProfileRefs = charactersSnap.docs.map((characterDoc: any) => firestore.collection('users').doc(characterDoc.id));
     const accountRef = firestore.collection('accounts').doc(uid);
 
-    // 순서대로 삭제: 신고 → 백업코드 → 채팅 → 일기 → 프로필 → 캐릭터 → 계정 → Auth
+    // 순서대로 삭제: 신고 → 백업코드 → 채팅 → 일기 → 프로필 → 캐릭터 → 계정
     await deleteSnapshotDocs(firestore, reportsSnap.docs);
     await deleteSnapshotDocs(firestore, usedBackupCodesSnap.docs);
     await deleteSnapshotDocs(firestore, ownedBackupCodesSnap.docs);
@@ -85,7 +113,9 @@ export default async function reqHandler(req: Request) {
 
     await deleteSnapshotDocs(firestore, charactersSnap.docs);
     await accountRef.delete();
-    await auth.deleteUser(uid);
+
+    // Auth delete using REST API
+    await deleteUserRest(idToken);
 
     return new Response(JSON.stringify({ success: true }), { headers: corsHeaders });
   } catch (error: any) {
