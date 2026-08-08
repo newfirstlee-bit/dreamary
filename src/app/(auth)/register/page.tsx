@@ -1,4 +1,5 @@
 "use client";
+import { apiPostJson } from '@/lib/api';
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
@@ -8,6 +9,11 @@ import { auth, db } from '@/lib/firebase';
 import Link from 'next/link';
 import { Eye, EyeOff, ChevronLeft } from 'lucide-react';
 import { useLocale } from '@/lib/i18n';
+import { getStoredGuestUserId } from '@/lib/auth';
+import { completeOwnershipMigration, prepareOwnershipMigration } from '@/lib/db';
+import { clearUserCache } from '@/lib/appCache';
+import { copyRecentCharacterOrder } from '@/lib/characterOrder';
+import { invalidateCharacterStore } from '@/store/useAppStore';
 
 export default function RegisterPage() {
   const router = useRouter();
@@ -46,18 +52,8 @@ export default function RegisterPage() {
     if (!id || idError) return;
     setCheckingId(true);
     try {
-      const res = await fetch('/api/auth/check-id', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id })
-      });
-      const data = await res.json();
-      if (res.ok) {
-        setIsIdAvailable(!data.exists);
-      } else {
-        console.error(data.error);
-        alert(t('auth.serverError') || '서버 오류가 발생했습니다.');
-      }
+      const data = await apiPostJson<{ exists: boolean }>('/api/auth/check-id', { id });
+      setIsIdAvailable(!data.exists);
     } catch (err) {
       console.error(err);
       alert(t('auth.serverError') || '서버 오류가 발생했습니다.');
@@ -79,10 +75,19 @@ export default function RegisterPage() {
 
     try {
       const pseudoEmail = `${id}@dreamary.internal`;
-      
-      // Firebase Auth 생성
+
+      const guestUserId = getStoredGuestUserId();
+      const migration = guestUserId ? await prepareOwnershipMigration(guestUserId) : null;
       const userCredential = await createUserWithEmailAndPassword(auth, pseudoEmail, password);
       const user = userCredential.user;
+
+      if (migration && guestUserId !== user.uid) {
+        await completeOwnershipMigration(migration, user.uid);
+        copyRecentCharacterOrder(guestUserId, user.uid);
+      }
+      if (guestUserId) clearUserCache(guestUserId);
+      clearUserCache(user.uid);
+      invalidateCharacterStore();
 
       // Firestore accounts 컬렉션에 사용자 메타데이터 저장
       await setDoc(doc(db, 'accounts', user.uid), {
@@ -110,7 +115,7 @@ export default function RegisterPage() {
   };
 
   return (
-    <div className="app-container" style={{ padding: '20px', display: 'flex', flexDirection: 'column', minHeight: '100vh', backgroundColor: 'var(--bg-color)' }}>
+    <div className="app-container full-page auth-page" style={{ backgroundColor: 'var(--bg-color)' }}>
       <header style={{ marginBottom: '30px', marginTop: '20px', position: 'relative', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
         <button onClick={() => router.back()} style={{ position: 'absolute', left: 0, background: 'none', border: 'none', cursor: 'pointer', padding: '5px', display: 'flex', alignItems: 'center' }}>
           <ChevronLeft size={28} color="var(--gray-800)" />
