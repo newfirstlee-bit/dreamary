@@ -289,7 +289,7 @@
   "auth.passwordMismatch": "パスワードが一致しません。",
   "auth.registerSuccess": "会員登録が完了しました。",
   "auth.idRequired": "ID *",
-  "auth.idHint": "英小文字、数字のみ入力（IDとして使用）",
+  "auth.idHint": "英小文字、数字のみ入力",
   "auth.idError": "英小文字と数字のみ入力可能です",
   "auth.passwordRequired": "パスワード *",
   "auth.passwordHint": "6文字以上入力",
