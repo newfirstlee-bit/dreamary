@@ -8,3 +8,6 @@
 [build.environment]
   NODE_VERSION = "20"
   SECRETS_SCAN_OMIT_PATHS = ".netlify,.next/static,**/*.pack,android/**,ios/**"
+
+[functions]
+  external_node_modules = ["firebase-admin"]
