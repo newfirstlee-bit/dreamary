@@ -134,7 +134,7 @@ export default function RegisterPage() {
               placeholder={t('auth.idHint')}
               maxLength={10}
               required
-              style={{ flex: 1, padding: '15px', borderRadius: '12px', border: `1px solid ${idError ? 'red' : 'var(--border-color)'}`, fontSize: '1rem', outline: 'none' }}
+              style={{ flex: 1, minWidth: 0, padding: '15px', borderRadius: '12px', border: `1px solid ${idError ? 'red' : 'var(--border-color)'}`, fontSize: '1rem', outline: 'none' }}
             />
             <button
               type="button"
