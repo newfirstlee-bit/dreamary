@@ -2,6 +2,22 @@
   command = "npm run build"
   publish = ".next"
 
+[functions]
+  directory = "netlify/functions"
+  node_bundler = "esbuild"
+
+[[redirects]]
+  from = "/api/auth/check-id"
+  to = "/.netlify/functions/auth-check-id"
+  status = 200
+  force = true
+
+[[redirects]]
+  from = "/api/auth/find-id"
+  to = "/.netlify/functions/auth-find-id"
+  status = 200
+  force = true
+
 [[plugins]]
   package = "@netlify/plugin-nextjs"
 
