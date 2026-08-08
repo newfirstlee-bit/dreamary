@@ -80,8 +80,7 @@ export default async (req: Request, context: Context) => {
       });
     }
 
-    const account = snapshot.docs[0].data();
-    const uid = account.uid;
+    const uid = snapshot.docs[0].id;
 
     // Generate random 8-character password
     const tempPassword = Math.random().toString(36).slice(-8);
