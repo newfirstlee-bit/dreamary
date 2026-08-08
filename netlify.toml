@@ -10,4 +10,4 @@
   SECRETS_SCAN_OMIT_PATHS = ".netlify,.next/static,**/*.pack,android/**,ios/**"
 
 [functions]
-  external_node_modules = ["firebase-admin"]
+  external_node_modules = ["firebase-admin", "jwks-rsa", "jose"]
