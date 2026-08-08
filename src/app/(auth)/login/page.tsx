@@ -3,11 +3,17 @@
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { signInWithEmailAndPassword } from 'firebase/auth';
-import { auth } from '@/lib/firebase';
+import { auth, db } from '@/lib/firebase';
 import Link from 'next/link';
 import { Eye, EyeOff, ChevronLeft } from 'lucide-react';
 import { useLocale } from '@/lib/i18n';
 import { trackEvent } from '@/lib/mixpanel';
+import { completeOwnershipMigration, prepareOwnershipMigration } from '@/lib/db';
+import { getStoredGuestUserId } from '@/lib/auth';
+import { clearUserCache } from '@/lib/appCache';
+import { copyRecentCharacterOrder } from '@/lib/characterOrder';
+import { doc, setDoc } from 'firebase/firestore';
+import { invalidateCharacterStore } from '@/store/useAppStore';
 
 export default function LoginPage() {
   const router = useRouter();
@@ -25,7 +31,17 @@ export default function LoginPage() {
 
     try {
       const email = `${id}@dreamary.internal`;
-      await signInWithEmailAndPassword(auth, email, password);
+      const guestUserId = getStoredGuestUserId();
+      const migration = guestUserId ? await prepareOwnershipMigration(guestUserId) : null;
+      const credential = await signInWithEmailAndPassword(auth, email, password);
+      if (migration && guestUserId !== credential.user.uid) {
+        await completeOwnershipMigration(migration, credential.user.uid);
+        copyRecentCharacterOrder(guestUserId, credential.user.uid);
+      }
+      await setDoc(doc(db, 'accounts', credential.user.uid), { id, updatedAt: Date.now() }, { merge: true });
+      if (guestUserId) clearUserCache(guestUserId);
+      clearUserCache(credential.user.uid);
+      invalidateCharacterStore();
       trackEvent('Login_Success');
       router.push('/mypage');
     } catch (err: any) {
@@ -37,7 +53,7 @@ export default function LoginPage() {
   };
 
   return (
-    <div className="app-container" style={{ padding: '20px', display: 'flex', flexDirection: 'column', height: '100vh', backgroundColor: 'var(--bg-color)' }}>
+    <div className="app-container full-page auth-page" style={{ backgroundColor: 'var(--bg-color)' }}>
       <header style={{ marginBottom: '40px', marginTop: '20px', position: 'relative', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
         <button onClick={() => router.back()} style={{ position: 'absolute', left: 0, background: 'none', border: 'none', cursor: 'pointer', padding: '5px', display: 'flex', alignItems: 'center' }}>
           <ChevronLeft size={28} color="var(--gray-800)" />

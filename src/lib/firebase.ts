@@ -1,6 +1,7 @@
 import { initializeApp, getApps, getApp } from "firebase/app";
-import { getFirestore } from "firebase/firestore";
-import { getAuth } from "firebase/auth";
+import { initializeFirestore } from "firebase/firestore";
+import { getAuth, initializeAuth, browserLocalPersistence } from "firebase/auth";
+import { Capacitor } from "@capacitor/core";
 
 const firebaseConfig = {
   apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY,
@@ -12,5 +13,22 @@ const firebaseConfig = {
 };
 
 const app = !getApps().length ? initializeApp(firebaseConfig) : getApp();
-export const db = getFirestore(app);
-export const auth = getAuth(app);
+
+// Native WebViews can delay or block Firestore's initial WebSocket connection.
+// Auto detection keeps the normal transport when it works and falls back only
+// when needed, without forcing every request through long polling.
+export const db = initializeFirestore(
+  app,
+  Capacitor.isNativePlatform() ? { experimentalAutoDetectLongPolling: true } : {}
+);
+
+// iOS Capacitor에서 IndexedDB 접근 시 응답이 지연되는 버그를 피하기 위해 localStorage를 강제합니다.
+let authInstance;
+try {
+  authInstance = Capacitor.isNativePlatform()
+    ? initializeAuth(app, { persistence: browserLocalPersistence })
+    : getAuth(app);
+} catch (e) {
+  authInstance = getAuth(app);
+}
+export const auth = authInstance;

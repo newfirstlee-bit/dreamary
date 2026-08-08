@@ -1,4 +1,5 @@
 "use client";
+import { apiFetch } from '@/lib/api';
 
 import { useRouter } from 'next/navigation';
 import { LogOut } from 'lucide-react';
@@ -9,7 +10,7 @@ export default function LogoutButton() {
   const handleLogout = async () => {
     if (!confirm('로그아웃 하시겠습니까?')) return;
     
-    await fetch('/api/admin/logout', { method: 'POST' });
+    await apiFetch('/api/admin/logout', { method: 'POST' });
     router.refresh(); // Refresh layout to check cookie again
   };
 

@@ -5,13 +5,17 @@ import { useRouter, useParams } from 'next/navigation';
 import { getCharacterById, updatePairName, Character } from '@/lib/db';
 import { ChevronLeft, Loader2 } from 'lucide-react';
 import { useLocale } from '@/lib/i18n';
+import { resolveStaticEntityId } from '@/lib/navigation';
+import { clearUserCache } from '@/lib/appCache';
+import { invalidateCharacterStore } from '@/store/useAppStore';
 
 export default function EditPairName() {
   const router = useRouter();
   const params = useParams();
-  const id = params.id as string;
+  const routeId = params.id as string;
   const { t } = useLocale();
 
+  const [id, setId] = useState('');
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [character, setCharacter] = useState<Character | null>(null);
@@ -19,8 +23,10 @@ export default function EditPairName() {
 
   useEffect(() => {
     const fetchChar = async () => {
-      if (id) {
-        const char = await getCharacterById(id);
+      const resolvedId = resolveStaticEntityId(routeId);
+      setId(resolvedId);
+      if (resolvedId) {
+        const char = await getCharacterById(resolvedId);
         if (char) {
           setCharacter(char);
           if (char.pairName) setPairName(char.pairName);
@@ -29,12 +35,16 @@ export default function EditPairName() {
       setLoading(false);
     };
     fetchChar();
-  }, [id]);
+  }, [routeId]);
 
   const handleSave = async () => {
-    if (!pairName.trim() || pairName.length > 10) return;
+    if (!id || !pairName.trim() || pairName.length > 10) return;
     setSaving(true);
     await updatePairName(id, pairName.trim());
+    if (character?.userId) {
+      clearUserCache(character.userId);
+      invalidateCharacterStore(character.userId);
+    }
     router.push('/mypage');
   };
 
@@ -48,14 +58,14 @@ export default function EditPairName() {
   }
 
   return (
-    <div className="app-container" style={{ display: 'flex', flexDirection: 'column', backgroundColor: 'white' }}>
-      <header style={{ display: 'flex', alignItems: 'center', padding: '20px', paddingBottom: '10px' }}>
+    <div className="app-container full-page" style={{ backgroundColor: 'white' }}>
+      <header className="full-page-header">
         <button onClick={() => router.push('/mypage')} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '5px', display: 'flex', alignItems: 'center' }}>
           <ChevronLeft size={28} color="var(--gray-800)" />
         </button>
       </header>
 
-      <main className="content" style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '30px' }}>
+      <main className="content" style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', gap: '30px', overflowY: 'auto' }}>
         <div style={{ marginTop: '20px' }}>
           <h2 style={{ fontSize: '1.4rem', fontWeight: 'bold', marginBottom: '10px', color: 'var(--foreground)' }}>
             {t('editPair.title')}
@@ -76,16 +86,18 @@ export default function EditPairName() {
             {pairName.length}/10
           </div>
         </div>
+      </main>
 
+      <footer className="full-page-footer">
         <button 
           onClick={handleSave}
           disabled={!pairName.trim() || saving}
           className="btn-primary"
-          style={{ width: '100%', padding: '16px', fontSize: '1.1rem', marginTop: 'auto', marginBottom: '20px', borderRadius: '15px' }}
+          style={{ width: '100%', padding: '16px', fontSize: '1.1rem', marginTop: 0, borderRadius: '15px' }}
         >
           {saving ? t('common.saving') : t('common.save')}
         </button>
-      </main>
+      </footer>
 
       <style dangerouslySetInnerHTML={{__html: `
         .input-field {

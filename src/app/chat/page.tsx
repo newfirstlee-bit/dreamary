@@ -4,10 +4,22 @@ import { useEffect, useState } from 'react';
 import Image from 'next/image';
 import { useRouter } from 'next/navigation';
 import { useUserId } from '@/hooks/useUserId';
-import { getCharactersByUser, Character, getChatMessages, ChatMessage } from '@/lib/db';
+import { Character, getLatestChatMessage, ChatMessage } from '@/lib/db';
 import { Loader2, User } from 'lucide-react';
 import { useLocale, getDateLocale } from '@/lib/i18n';
 import { trackEvent } from '@/lib/mixpanel';
+import { withTimeout } from '@/lib/async';
+import { readUserCache, writeUserCache } from '@/lib/appCache';
+import { useAuth } from '@/components/AuthContext';
+import { sortCharactersByRecent, touchRecentCharacter } from '@/lib/characterOrder';
+import { getCharactersWithGuestRecovery } from '@/lib/ownership';
+import { buildStaticEntityRoute } from '@/lib/navigation';
+import { useAppStore } from '@/store/useAppStore';
+
+interface ChatListCache {
+  characters: Character[];
+  lastMessages: Record<string, ChatMessage | null>;
+}
 
 export default function ChatList() {
   const router = useRouter();
@@ -16,66 +28,91 @@ export default function ChatList() {
   const [characters, setCharacters] = useState<Character[]>([]);
   const [lastMessages, setLastMessages] = useState<Record<string, ChatMessage | null>>({});
   const userId = useUserId();
+  const { status } = useAuth();
+  const { loadCharacters } = useAppStore();
 
   useEffect(() => {
     if (!userId) return;
 
+    const cachedChat = readUserCache<ChatListCache>(userId, 'chat');
+    if (cachedChat) {
+      setCharacters(cachedChat.characters);
+      setLastMessages(cachedChat.lastMessages);
+      setLoading(false);
+    }
+
+    const showGuestChat = () => {
+      const dummyChar: Character = {
+        id: 'dummy',
+        userId,
+        name: t('dummy.charName') || '드림캐',
+        feeling: '',
+        title: '',
+        exampleChat: '',
+        negative: '',
+        createdAt: Date.now(),
+        dDayStartDate: Date.now()
+      };
+      setCharacters([dummyChar]);
+      const dummyMessages = {
+        dummy: {
+          id: 'dummy_chat',
+          userId: 'dummy',
+          characterId: 'dummy',
+          role: 'assistant',
+          content: t('dummy.chatMsg') || '지금 바빠? 하고싶은 말이 있어.',
+          createdAt: Date.now(),
+          locale: 'ko'
+        } as ChatMessage
+      };
+      setLastMessages(dummyMessages);
+      writeUserCache<ChatListCache>(userId, 'chat', {
+        characters: [dummyChar],
+        lastMessages: dummyMessages
+      });
+    };
+
     const init = async () => {
       try {
-        const chars = await getCharactersByUser(userId);
+        const chars = sortCharactersByRecent(
+          await withTimeout(loadCharacters(userId, status === 'authenticated')),
+          userId
+        );
         
         if (chars.length === 0) {
-          const dummyChar: Character = {
-            id: 'dummy',
-            userId: userId,
-            name: t('dummy.charName') || '드림캐',
-            feeling: '',
-            title: '',
-            exampleChat: '',
-            negative: '',
-            createdAt: Date.now(),
-            dDayStartDate: Date.now()
-          };
-          setCharacters([dummyChar]);
-          setLastMessages({
-            'dummy': {
-              id: 'dummy_chat',
-              userId: 'dummy',
-              characterId: 'dummy',
-              role: 'assistant',
-              content: t('dummy.chatMsg') || '지금 바빠? 하고싶은 말이 있어.',
-              createdAt: Date.now(),
-              locale: 'ko'
-            } as ChatMessage
-          });
+          if (status === 'guest') showGuestChat();
+          else {
+            setCharacters([]);
+            setLastMessages({});
+            writeUserCache<ChatListCache>(userId, 'chat', { characters: [], lastMessages: {} });
+          }
           setLoading(false);
           return;
         }
 
+        setCharacters(chars);
+        setLoading(false);
+
         const messagesObj: Record<string, ChatMessage | null> = {};
-        await Promise.all(chars.map(async (char) => {
-          const msgs = await getChatMessages(userId, char.id);
-          messagesObj[char.id] = msgs.length > 0 ? msgs[msgs.length - 1] : null;
-        }));
-        
-        // Sort chars by recent (LRU) to match home tab
-        const recentHistory: string[] = JSON.parse(localStorage.getItem(`recentChars_${userId}`) || '[]');
-        chars.sort((a, b) => {
-          const idxA = recentHistory.indexOf(a.id) === -1 ? 999 : recentHistory.indexOf(a.id);
-          const idxB = recentHistory.indexOf(b.id) === -1 ? 999 : recentHistory.indexOf(b.id);
-          return idxA - idxB;
-        });
+        await withTimeout(Promise.all(chars.map(async (char) => {
+          messagesObj[char.id] = await getLatestChatMessage(userId, char.id);
+        })));
 
         setCharacters(chars);
         setLastMessages(messagesObj);
+        writeUserCache<ChatListCache>(userId, 'chat', {
+          characters: chars,
+          lastMessages: messagesObj
+        });
       } catch (error) {
         console.error('Failed to load characters:', error);
+        if (!cachedChat && status === 'guest') showGuestChat();
       } finally {
         setLoading(false);
       }
     };
     init();
-  }, [userId, t]);
+  }, [userId, t, status]);
 
   if (loading) {
     return (
@@ -86,7 +123,7 @@ export default function ChatList() {
   }
 
   return (
-    <div className="app-container diary-bg" style={{ paddingBottom: '65px' }}>
+    <div className="app-container tab-page diary-bg status-surface-check">
       <header className="header" style={{ borderBottom: '1px solid rgba(0,0,0,0.15)', position: 'relative', display: 'flex', justifyContent: 'flex-start', alignItems: 'center' }}>
         <span>{t('nav.chat')}</span>
       </header>
@@ -126,12 +163,9 @@ export default function ChatList() {
                   router.push('/guide/chat');
                   return;
                 }
-                // Update recent history
-                const history: string[] = JSON.parse(localStorage.getItem(`recentChars_${userId}`) || '[]');
-                const newHistory = [char.id, ...history.filter(id => id !== char.id)];
-                localStorage.setItem(`recentChars_${userId}`, JSON.stringify(newHistory));
+                touchRecentCharacter(userId, char.id);
                 
-                router.push(`/chat/${char.id}`);
+                router.push(buildStaticEntityRoute('/chat', char.id));
               }}
               style={{ 
                 backgroundColor: '#FAFAFA', 

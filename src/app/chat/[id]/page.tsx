@@ -1,18 +1,26 @@
 "use client";
+import { apiFetch, apiPostJson } from '@/lib/api';
+import { showAd } from "@/lib/ads";
 
-import { useEffect, useState, useRef, ReactNode } from 'react';
+import { useEffect, useState, useRef, ReactNode, useCallback, Suspense } from 'react';
 import Image from 'next/image';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
+import { Capacitor } from '@capacitor/core';
 import { useUserId } from '@/hooks/useUserId';
 import { auth } from '@/lib/firebase';
 import { getCharacterById, Character, getUserProfile, UserProfile, getChatMessages, subscribeChatMessages, ChatMessage, saveChatMessage, deleteChatMessages, unlockMessageAd, updateChatMessage, deleteMessage } from '@/lib/db';
-import { Loader2, ChevronLeft, MoreVertical, Send, User, MoreHorizontal, Lock, Pencil, Trash2 } from 'lucide-react';
+import { Loader2, ChevronLeft, MoreVertical, Send, User, MoreHorizontal, Lock, Pencil, Trash2, Siren } from 'lucide-react';
 import AdModal from '@/components/AdModal';
 import ErrorModal from '@/components/ErrorModal';
+import ReportModal, { ReportSubmitPayload } from '@/components/ReportModal';
 import { trackEvent } from '@/lib/mixpanel';
-import { trackChatAndCheckAd } from '@/lib/adTracker';
+import { recordSuccessfulChatTurn, shouldShowChatAd } from '@/lib/adTracker';
 import { saveDraft, loadDraft, clearDraft } from '@/lib/draftStorage';
 import { useLocale, getDateLocale } from '@/lib/i18n';
+import { clearUserCache } from '@/lib/appCache';
+import { buildStaticEntityRoute, resolveStaticEntityId } from '@/lib/navigation';
+import { ensureInitialPing } from '@/lib/initialPing';
+import { logAdDiagnostic } from '@/lib/adDiagnostics';
 
 // polyfill for crypto.randomUUID() which fails on HTTP (non-HTTPS) mobile
 const generateId = (): string => {
@@ -25,8 +33,9 @@ const generateId = (): string => {
   });
 };
 
-export default function ChatDetail({ params }: { params: { id: string } }) {
+function ChatDetailContent({ params }: { params: { id: string } }) {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const { t, locale } = useLocale();
   const [loading, setLoading] = useState(true);
   const [character, setCharacter] = useState<Character | null>(null);
@@ -38,6 +47,7 @@ export default function ChatDetail({ params }: { params: { id: string } }) {
   const [streamingMessageId, setStreamingMessageId] = useState<string | null>(null);
   const [showSettings, setShowSettings] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [reportTarget, setReportTarget] = useState<ChatMessage | null>(null);
   
   // Message Edit/Delete States
   const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
@@ -48,9 +58,27 @@ export default function ChatDetail({ params }: { params: { id: string } }) {
   const chatAreaRef = useRef<HTMLDivElement>(null);
   const isAutoScrollEnabled = useRef(true);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  const inputAreaRef = useRef<HTMLDivElement>(null);
   const isSendingRef = useRef(false);
   const draftLoaded = useRef(false);
   const userId = useUserId();
+  // Static app builds use /chat/1 as a physical page and keep the real ID in
+  // the query string. useSearchParams is reactive during soft navigation,
+  // unlike reading window.location during render.
+  const characterId = searchParams.get('entityId') || resolveStaticEntityId(params.id);
+
+  const resizeChatInput = useCallback((textarea: HTMLTextAreaElement | null) => {
+    if (!textarea) return;
+    const style = window.getComputedStyle(textarea);
+    const lineHeight = parseFloat(style.lineHeight) || 22;
+    const paddingTop = parseFloat(style.paddingTop) || 0;
+    const paddingBottom = parseFloat(style.paddingBottom) || 0;
+    const maxHeight = Math.ceil(lineHeight * 6 + paddingTop + paddingBottom);
+    textarea.style.height = 'auto';
+    const nextHeight = Math.min(textarea.scrollHeight, maxHeight);
+    textarea.style.height = `${nextHeight}px`;
+    textarea.style.overflowY = textarea.scrollHeight > maxHeight ? 'auto' : 'hidden';
+  }, []);
 
   const handleEditSave = async (msgId: string) => {
     if (!editContent.trim()) return;
@@ -80,45 +108,66 @@ export default function ChatDetail({ params }: { params: { id: string } }) {
 
   const [adModalOpen, setAdModalOpen] = useState(false);
   const [errorModalOpen, setErrorModalOpen] = useState(false);
-  const [modalResolver, setModalResolver] = useState<(() => void) | null>(null);
+  const [adFailureMessage, setAdFailureMessage] = useState('');
+  const [modalResolver, setModalResolver] = useState<((didOpen: boolean) => void) | null>(null);
 
   const confirmAd = () => {
-    window.open('https://www.effectivecpmnetwork.com/rk8wuv0t?key=d9c3569d98ad59723168cace64459dd2', '_blank');
-    setAdModalOpen(false);
-    if (modalResolver) {
-      modalResolver();
-      setModalResolver(null);
-    }
+    showAd((result) => {
+      setAdModalOpen(false);
+      if (modalResolver) {
+        if (!result.didOpen && result.message) {
+          setAdFailureMessage(result.message);
+        }
+        modalResolver(result.didOpen);
+        setModalResolver(null);
+      }
+    });
   };
 
   const closeAdModal = () => {
     setAdModalOpen(false);
     if (modalResolver) {
-      modalResolver();
+      modalResolver(false);
       setModalResolver(null);
     }
   };
 
+  const submitChatReport = async ({ reasons, otherText }: ReportSubmitPayload) => {
+    if (!reportTarget || !character || !userId) return;
+    await apiPostJson('/api/reports/create', {
+      userId,
+      characterId: character.id,
+      characterName: character.name,
+      source: 'chat',
+      targetId: reportTarget.id,
+      content: reportTarget.content,
+      reasons,
+      otherText,
+      locale,
+    });
+    alert(t('report.success'));
+  };
+
   const loadMessages = async () => {
     if (!userId) return;
-    const history = await getChatMessages(userId, params.id);
+    const history = await getChatMessages(userId, characterId);
     setMessages(history);
   };
 
   useEffect(() => {
     if (!userId) return; // auth 초기화 전에는 실행하지 않음
-    trackEvent('Chat_Opened', { character_id: params.id });
+    trackEvent('Chat_Opened', { character_id: characterId });
     
     const init = async () => {
       try {
-        const char = await getCharacterById(params.id);
+        const char = await getCharacterById(characterId);
         if (!char) {
           router.replace('/chat');
           return;
         }
         setCharacter(char);
 
-        const draft = loadDraft(char.id);
+        const draft = loadDraft(char.id, 'chat');
         if (draft) {
           setInputMsg(draft);
           draftLoaded.current = true;
@@ -128,7 +177,7 @@ export default function ChatDetail({ params }: { params: { id: string } }) {
         setUserProfile(profile);
 
         const history = await getChatMessages(userId, char.id);
-        if (history.length === 0 && !localStorage.getItem(`hasPinged_${char.id}`)) {
+        if (history.length === 0) {
           triggerInitialPing(char, profile);
         }
 
@@ -149,16 +198,46 @@ export default function ChatDetail({ params }: { params: { id: string } }) {
     return () => {
       if (unsub) unsub();
     };
-  }, [params.id, router, userId]);
+  }, [characterId, router, userId]);
 
   useEffect(() => {
     if (isAutoScrollEnabled.current && !editingMessageId) {
       messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
     }
     if (messages.length > 0) {
-      localStorage.setItem(`chat_read_${params.id}`, messages[messages.length - 1].id);
+      localStorage.setItem(`chat_read_${characterId}`, messages[messages.length - 1].id);
     }
-  }, [messages, isTyping, streamingContent, params.id]);
+  }, [messages, isTyping, streamingContent, characterId]);
+
+  useEffect(() => {
+    resizeChatInput(inputRef.current);
+  }, [inputMsg, resizeChatInput]);
+
+  useEffect(() => {
+    if (!adFailureMessage) return;
+    const timer = window.setTimeout(() => setAdFailureMessage(''), 3500);
+    return () => window.clearTimeout(timer);
+  }, [adFailureMessage]);
+
+  useEffect(() => {
+    const syncInputAreaHeight = () => {
+      const height = inputAreaRef.current?.offsetHeight || 72;
+      document.documentElement.style.setProperty('--chat-input-area-height', `${Math.round(height)}px`);
+    };
+
+    syncInputAreaHeight();
+    const observer = typeof ResizeObserver !== 'undefined' && inputAreaRef.current
+      ? new ResizeObserver(syncInputAreaHeight)
+      : null;
+    if (observer && inputAreaRef.current) observer.observe(inputAreaRef.current);
+    window.addEventListener('resize', syncInputAreaHeight);
+
+    return () => {
+      observer?.disconnect();
+      window.removeEventListener('resize', syncInputAreaHeight);
+      document.documentElement.style.removeProperty('--chat-input-area-height');
+    };
+  }, []);
 
   // Auto-expand edit textarea only when first opening (not on every keystroke)
   useEffect(() => {
@@ -182,25 +261,11 @@ export default function ChatDetail({ params }: { params: { id: string } }) {
   }, [editingMessageId]); // only on open, NOT on editContent change
 
   const triggerInitialPing = async (char: Character, profile: UserProfile | null) => {
-    localStorage.setItem(`hasPinged_${char.id}`, 'true');
+    if (!userId) return;
     setIsTyping(true);
     try {
-      const res = await fetch('/api/chat', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          character: char,
-          userProfile: profile,
-          messages: [],
-          isFirstPing: true,
-          userId: getUserId()
-        })
-      });
-      const data = await res.json();
-      if (res.ok && data.reply) {
-        // The message is already saved by the server now, but to be safe we just let the subscription handle it.
-        // Or if we still want local optimism, the subscription will merge it.
-      }
+      await ensureInitialPing({ character: char, userProfile: profile, userId });
+      clearUserCache(userId, ['chat', 'home']);
     } catch (error) {
       console.error('Initial ping failed:', error);
     } finally {
@@ -223,10 +288,8 @@ export default function ChatDetail({ params }: { params: { id: string } }) {
       createdAt: Date.now()
     };
 
-    // Save immediately before fetch so it isn't lost if user leaves
-    await saveChatMessage(userMsg);
-    // Note: Since we have subscribeChatMessages, it will automatically update 'messages' state
-    // But for instant UI feedback we can also append locally
+    // Note: Since we have subscribeChatMessages, it will automatically update 'messages' state.
+    // But for instant UI feedback we can also append locally.
     setMessages(prev => {
       if (!prev.find(m => m.id === userMsg.id)) {
         return [...prev, userMsg];
@@ -253,78 +316,109 @@ export default function ChatDetail({ params }: { params: { id: string } }) {
     isAutoScrollEnabled.current = true;
     let success = false;
     let savedId = '';
+    let attemptedAdTurn = false;
+    let userMessagePersisted = false;
     try {
-      const isAdTurn = trackChatAndCheckAd();
+      // Save before calling AI so the server can build context, but remove it again if sending fails.
+      await saveChatMessage(userMsg);
+      userMessagePersisted = true;
+      if (userId) clearUserCache(userId, ['chat', 'home']);
+
+      const isAdTurn = shouldShowChatAd();
+      const isNativeChat = Capacitor.isNativePlatform();
+      attemptedAdTurn = isAdTurn;
       
-      let adWaitPromise = Promise.resolve();
+      let adWaitPromise = Promise.resolve(true);
       if (isAdTurn) {
         setAdModalOpen(true);
-        adWaitPromise = new Promise<void>((resolve) => {
-          setModalResolver(() => () => resolve());
+        adWaitPromise = new Promise<boolean>((resolve) => {
+          setModalResolver(() => (didOpen: boolean) => resolve(didOpen));
         });
+        const adOpened = await adWaitPromise;
+        if (!adOpened) {
+          logAdDiagnostic('chat', 'ad_open_failed', { characterId: character.id, requestId });
+          throw new Error('AD_OPEN_FAILED');
+        }
+        logAdDiagnostic('chat', 'ad_completed', { characterId: character.id, requestId });
       }
 
       // Get recent 10 messages for context
       const contextMessages = [...messages, userMsg].slice(-10);
 
-      const res = await fetch('/api/chat', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
+      if (isNativeChat) {
+        const data = await apiPostJson<{ reply?: string; savedId?: string }>('/api/chat', {
           character,
           userProfile,
           messages: contextMessages,
           isFirstPing: false,
           userId: userId,
-          isAdTurn,
+          isAdTurn: false,
+          preferJsonResponse: true,
           requestId
-        })
-      });
+        });
 
-      if (!res.ok) {
-        throw new Error('Failed to fetch from API');
-      }
+        savedId = data.savedId || '';
+        if (data.reply && !savedId) {
+          setStreamingContent(data.reply);
+          await new Promise(resolve => setTimeout(resolve, 300));
+          setStreamingContent('');
+        }
+        success = true;
+      } else {
+        const res = await apiFetch('/api/chat', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            character,
+            userProfile,
+            messages: contextMessages,
+            isFirstPing: false,
+            userId: userId,
+            isAdTurn: false,
+            requestId
+          })
+        });
 
-      const reader = res.body?.getReader();
-      if (!reader) throw new Error('Streaming not supported');
+        if (!res.ok) {
+          throw new Error('Failed to fetch from API');
+        }
 
-      savedId = res.headers.get('X-Message-Id') || '';
-      if (savedId) {
-        setStreamingMessageId(savedId);
-      }
+        const reader = res.body?.getReader();
+        if (!reader) throw new Error('Streaming not supported');
 
-      const decoder = new TextDecoder('utf-8');
-      let done = false;
-      let assistantReply = '';
+        savedId = res.headers.get('X-Message-Id') || '';
+        if (savedId) {
+          setStreamingMessageId(savedId);
+        }
 
-      while (!done) {
-        const { value, done: readerDone } = await reader.read();
-        done = readerDone;
-        if (value) {
-          const chunk = decoder.decode(value, { stream: true });
-          const pieces = chunk.match(/.{1,3}/g) || [];
-          
-          for (const piece of pieces) {
-            assistantReply += piece;
-            setStreamingContent(assistantReply);
-            await new Promise(resolve => setTimeout(resolve, 50));
+        const decoder = new TextDecoder('utf-8');
+        let done = false;
+        let assistantReply = '';
+
+        while (!done) {
+          const { value, done: readerDone } = await reader.read();
+          done = readerDone;
+          if (value) {
+            const chunk = decoder.decode(value, { stream: true });
+            const pieces = chunk.match(/.{1,3}/g) || [];
+
+            for (const piece of pieces) {
+              assistantReply += piece;
+              setStreamingContent(assistantReply);
+              await new Promise(resolve => setTimeout(resolve, 50));
+            }
           }
         }
-      }
 
-      setStreamingContent('');
-      setStreamingMessageId(null);
-      success = true;
+        setStreamingContent('');
+        setStreamingMessageId(null);
+        success = true;
+      }
       
       if (success) {
-        clearDraft(character.id);
+        recordSuccessfulChatTurn();
+        clearDraft(character.id, 'chat');
 
-        if (isAdTurn) {
-          await adWaitPromise;
-          if (savedId) {
-            await unlockMessageAd(savedId);
-          }
-        }
         trackEvent('Chat_Response_Received', {
           character_id: character.id,
         });
@@ -338,9 +432,19 @@ export default function ChatDetail({ params }: { params: { id: string } }) {
       setStreamingMessageId(null);
       
       setMessages(prev => prev.filter(m => m.id !== userMsg.id));
+      if (userMessagePersisted) {
+        deleteMessage(userMsg.id).catch(deleteError => {
+          console.warn('Failed to remove unsent chat message:', deleteError);
+        });
+      }
       setInputMsg(userText);
-      saveDraft(character.id, userText);
-      setErrorModalOpen(true);
+      saveDraft(character.id, userText, 'chat');
+      if ((error as Error)?.message !== 'AD_OPEN_FAILED') {
+        if (attemptedAdTurn) {
+          logAdDiagnostic('chat', 'app_server_request_failed', { characterId: character.id, requestId }, error);
+        }
+        setErrorModalOpen(true);
+      }
     } finally {
       setIsTyping(false);
       isSendingRef.current = false;
@@ -350,7 +454,7 @@ export default function ChatDetail({ params }: { params: { id: string } }) {
   const handleDeleteChat = async () => {
     try {
       if (!userId) return;
-      await deleteChatMessages(userId, params.id);
+      await deleteChatMessages(userId, characterId);
       setMessages([]);
       setShowSettings(false);
       setShowDeleteConfirm(false);
@@ -460,7 +564,7 @@ export default function ChatDetail({ params }: { params: { id: string } }) {
   }
 
   return (
-    <div className="app-container" style={{ display: 'flex', flexDirection: 'column', backgroundColor: 'var(--gray-50)', height: '100dvh', maxHeight: '-webkit-fill-available', overflow: 'hidden', position: 'relative' }}>
+    <div className="app-container full-page chat-detail-page status-surface-solid" style={{ display: 'flex', flexDirection: 'column', backgroundColor: 'var(--gray-50)', overflow: 'hidden', position: 'relative' }}>
       {deleteConfirmMessageId && (
         <>
           <div 
@@ -502,7 +606,6 @@ export default function ChatDetail({ params }: { params: { id: string } }) {
         justifyContent: 'space-between', 
         alignItems: 'center',
         padding: '15px',
-        paddingTop: 'calc(15px + env(safe-area-inset-top))',
         zIndex: 100,
         flexShrink: 0
       }}>
@@ -518,6 +621,7 @@ export default function ChatDetail({ params }: { params: { id: string } }) {
       {/* Chat Area */}
       <div 
         ref={chatAreaRef} 
+        className="chat-scroll-area"
         onScroll={handleScroll} 
         style={{ flex: 1, overflowY: 'auto', padding: '20px', display: 'flex', flexDirection: 'column', gap: '15px', overscrollBehavior: 'none' }}
       >
@@ -599,9 +703,20 @@ export default function ChatDetail({ params }: { params: { id: string } }) {
                       </div>
                       <button 
                         onClick={async () => {
-                          window.open('https://www.effectivecpmnetwork.com/rk8wuv0t?key=d9c3569d98ad59723168cace64459dd2', '_blank');
-                          await unlockMessageAd(msg.id);
-                          loadMessages();
+                          showAd(async (result) => {
+                            if (!result.didOpen) {
+                              if (result.message) setAdFailureMessage(result.message);
+                              logAdDiagnostic('chat', 'ad_open_failed', { characterId: character.id, messageId: msg.id, action: 'unlock_existing_message' });
+                              return;
+                            }
+                            try {
+                              await unlockMessageAd(msg.id);
+                              logAdDiagnostic('chat', 'ad_completed', { characterId: character.id, messageId: msg.id, action: 'unlock_existing_message' });
+                            } catch (e) {
+                              logAdDiagnostic('chat', 'ad_unlock_failed', { characterId: character.id, messageId: msg.id, action: 'unlock_existing_message' }, e);
+                            }
+                            loadMessages();
+                          });
                         }}
                         style={{
                           display: 'flex', alignItems: 'center', gap: '6px',
@@ -620,6 +735,16 @@ export default function ChatDetail({ params }: { params: { id: string } }) {
                   
                   {editingMessageId !== msg.id && (
                     <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', width: '100%', gap: '8px', marginTop: '4px' }}>
+                      {!msg.isAdLocked && (
+                        <button
+                          onClick={() => setReportTarget(msg)}
+                          aria-label={t('report.button')}
+                          title={t('report.button')}
+                          style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '2px', display: 'flex', color: 'var(--gray-500)' }}
+                        >
+                          <Siren size={13} />
+                        </button>
+                      )}
                       <button onClick={() => { setEditingMessageId(msg.id); setEditContent(msg.content); }} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '2px', display: 'flex', color: 'var(--gray-500)' }}>
                         <Pencil size={12} />
                       </button>
@@ -680,9 +805,6 @@ export default function ChatDetail({ params }: { params: { id: string } }) {
                   <>
                     {renderMessageContent(msg.content, true)}
                     <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', width: '100%', gap: '8px', marginTop: '4px' }}>
-                      <button onClick={() => { setEditingMessageId(msg.id); setEditContent(msg.content); }} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '2px', display: 'flex', color: 'var(--gray-500)' }}>
-                        <Pencil size={12} />
-                      </button>
                       <button onClick={() => setDeleteConfirmMessageId(msg.id)} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '2px', display: 'flex', color: 'var(--gray-500)' }}>
                         <Trash2 size={12} />
                       </button>
@@ -730,14 +852,14 @@ export default function ChatDetail({ params }: { params: { id: string } }) {
           </div>
         )}
         <p style={{ fontSize: '0.75rem', color: 'var(--gray-600)', textAlign: 'center', marginTop: '10px', marginBottom: '20px', wordBreak: 'keep-all', lineHeight: '1.4' }}>
-          {t('chat.breakHintPre')}<span onClick={() => router.push(`/mypage/edit-character/${character.id}`)} style={{ textDecoration: 'underline', cursor: 'pointer', color: 'var(--point-color)' }}>{t('common.edit')}</span>] &gt; <span onClick={() => setShowSettings(true)} style={{ textDecoration: 'underline', cursor: 'pointer', color: 'var(--gray-800)' }}>[{t('chat.deleteAll')}</span>{t('chat.breakHintPost')}
+          {t('chat.breakHintPre')}<span onClick={() => router.push(buildStaticEntityRoute('/mypage/edit-character', character.id))} style={{ textDecoration: 'underline', cursor: 'pointer', color: 'var(--point-color)' }}>{t('common.edit')}</span>] &gt; <span onClick={() => setShowSettings(true)} style={{ textDecoration: 'underline', cursor: 'pointer', color: 'var(--gray-800)' }}>[{t('chat.deleteAll')}</span>{t('chat.breakHintPost')}
         </p>
         <div ref={messagesEndRef} />
       </div>
 
       {/* Input Area */}
       {!editingMessageId && (
-        <div style={{ position: 'relative', backgroundColor: 'white', borderTop: '1px solid var(--border-color)', padding: '10px 15px 25px', display: 'flex', flexDirection: 'column' }}>
+        <div ref={inputAreaRef} className="chat-input-area">
           <div style={{ position: 'absolute', top: '-45px', right: '15px', display: 'flex' }}>
             <button 
               onClick={insertActionBracket}
@@ -749,17 +871,18 @@ export default function ChatDetail({ params }: { params: { id: string } }) {
           <div style={{ display: 'flex', gap: '10px', alignItems: 'center', marginTop: '5px' }}>
             <textarea
               ref={inputRef}
+              className="chat-message-input"
               rows={1}
               value={inputMsg}
               onChange={(e) => {
                 setInputMsg(e.target.value);
                 if (draftLoaded.current) {
-                  clearDraft(character?.id || '');
+                  clearDraft(character?.id || '', 'chat');
                   draftLoaded.current = false;
                 }
-                e.target.style.height = 'auto';
-                e.target.style.height = Math.min(e.target.scrollHeight, 120) + 'px';
+                resizeChatInput(e.target);
               }}
+              onFocus={() => window.setTimeout(() => messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }), 100)}
               onKeyDown={(e) => {
                 if (e.key === 'Enter' && !e.shiftKey) {
                   e.preventDefault();
@@ -770,20 +893,6 @@ export default function ChatDetail({ params }: { params: { id: string } }) {
                 }
               }}
               placeholder={t('chat.placeholder')}
-              style={{ 
-                flex: 1, 
-                padding: '12px 16px', 
-                borderRadius: '24px', 
-                border: '1px solid var(--border-color)', 
-                outline: 'none', 
-                fontSize: '1rem', 
-                backgroundColor: 'var(--gray-50)',
-                resize: 'none',
-                overflowY: 'auto',
-                minHeight: '44px',
-                maxHeight: '120px',
-                lineHeight: '1.2'
-              }}
             />
             <button 
               onMouseDown={(e) => e.preventDefault()}
@@ -806,13 +915,13 @@ export default function ChatDetail({ params }: { params: { id: string } }) {
             <h3 style={{ fontSize: '1.2rem', fontWeight: 'bold', marginBottom: '10px' }}>{t('chat.settings')}</h3>
             
             <button 
-              onClick={() => router.push(`/mypage/edit-user/${character.id}`)}
+              onClick={() => router.push(buildStaticEntityRoute('/mypage/edit-user', character.id))}
               style={{ padding: '15px', borderRadius: '12px', backgroundColor: 'var(--gray-50)', border: '1px solid var(--border-color)', color: 'var(--gray-800)', textAlign: 'left', fontSize: '1rem', fontWeight: 'bold', cursor: 'pointer' }}
             >
               {t('chat.editProfile')}
             </button>
             <button 
-              onClick={() => router.push(`/mypage/edit-character/${character.id}`)}
+              onClick={() => router.push(buildStaticEntityRoute('/mypage/edit-character', character.id))}
               style={{ padding: '15px', borderRadius: '12px', backgroundColor: 'var(--gray-50)', border: '1px solid var(--border-color)', color: 'var(--gray-800)', textAlign: 'left', fontSize: '1rem', fontWeight: 'bold', cursor: 'pointer' }}
             >
               {t('chat.editCharProfile')}
@@ -866,7 +975,29 @@ export default function ChatDetail({ params }: { params: { id: string } }) {
       )}
 
       <AdModal isOpen={adModalOpen} onConfirm={confirmAd} />
+      <ReportModal
+        isOpen={!!reportTarget}
+        onClose={() => setReportTarget(null)}
+        onSubmit={submitChatReport}
+      />
+      {adFailureMessage && (
+        <div style={{ position: 'fixed', left: '50%', bottom: 'calc(var(--safe-bottom) + 16px)', transform: 'translateX(-50%)', zIndex: 4000, width: 'calc(100% - 32px)', maxWidth: '448px', backgroundColor: 'var(--gray-900)', color: 'white', borderRadius: '12px', padding: '12px 14px', fontSize: '0.9rem', textAlign: 'center', lineHeight: 1.4 }}>
+          {adFailureMessage}
+        </div>
+      )}
       <ErrorModal isOpen={errorModalOpen} onConfirm={() => setErrorModalOpen(false)} />
     </div>
+  );
+}
+
+export default function ChatDetail(props: { params: { id: string } }) {
+  return (
+    <Suspense fallback={(
+      <div className="app-container full-page status-surface-solid" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        <Loader2 className="animate-spin" size={48} color="var(--point-color)" />
+      </div>
+    )}>
+      <ChatDetailContent {...props} />
+    </Suspense>
   );
 }

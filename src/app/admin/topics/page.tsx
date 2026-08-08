@@ -1,4 +1,5 @@
 "use client";
+import { apiFetch } from '@/lib/api';
 
 import { useEffect, useState, useRef } from 'react';
 import { getTopics, saveTopic, deleteTopic, getTopicAnswerCount, Topic } from '@/lib/db';
@@ -76,7 +77,7 @@ export default function AdminTopics() {
     setLoading(true);
     
     try {
-      const res = await fetch('/api/admin/translate-topics', { method: 'POST' });
+      const res = await apiFetch('/api/admin/translate-topics', { method: 'POST' });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Failed to translate');
       alert(`총 ${data.count}개의 항목이 성공적으로 번역되었습니다.`);

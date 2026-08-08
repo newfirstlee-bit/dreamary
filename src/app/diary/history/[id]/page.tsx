@@ -1,18 +1,23 @@
 "use client";
 
-import { useEffect, useState } from 'react';
+import { Suspense, useEffect, useState } from 'react';
 import Image from 'next/image';
-import { useRouter, useParams } from 'next/navigation';
+import { useRouter, useParams, useSearchParams } from 'next/navigation';
 import { useLocale } from '@/lib/i18n';
 import { useUserId } from '@/hooks/useUserId';
 import { getDiaryById, getCharacterById, getUserProfile, getDiariesByUserAndChar, getTopics, Diary, Character, UserProfile, Topic } from '@/lib/db';
 import { Loader2, ChevronLeft, ChevronRight } from 'lucide-react';
+import { buildStaticEntityRoute, resolveStaticEntityId } from '@/lib/navigation';
 
-export default function DiaryHistoryDetailPage() {
+function DiaryHistoryDetailContent() {
   const { t, locale } = useLocale();
   const router = useRouter();
   const params = useParams();
-  const diaryId = params.id as string;
+  const searchParams = useSearchParams();
+  // Static app builds reuse /diary/history/1 and carry the real diary ID in
+  // the query string. Subscribe to that query so list/detail and prev/next
+  // navigation never fall back to the build-only ID.
+  const diaryId = searchParams.get('entityId') || resolveStaticEntityId(params.id as string);
   
   const [loading, setLoading] = useState(true);
   const [diary, setDiary] = useState<Diary | null>(null);
@@ -145,7 +150,7 @@ export default function DiaryHistoryDetailPage() {
         zIndex: 100
       }}>
         <button 
-          onClick={() => prevDiaryId && router.push(`/diary/history/${prevDiaryId}`)}
+          onClick={() => prevDiaryId && router.push(buildStaticEntityRoute('/diary/history', prevDiaryId))}
           disabled={!prevDiaryId}
           style={{ 
             display: 'flex', alignItems: 'center', gap: '4px', background: 'none', border: 'none', 
@@ -159,7 +164,7 @@ export default function DiaryHistoryDetailPage() {
         </button>
         
         <button 
-          onClick={() => nextDiaryId && router.push(`/diary/history/${nextDiaryId}`)}
+          onClick={() => nextDiaryId && router.push(buildStaticEntityRoute('/diary/history', nextDiaryId))}
           disabled={!nextDiaryId}
           style={{ 
             display: 'flex', alignItems: 'center', gap: '4px', background: 'none', border: 'none', 
@@ -177,5 +182,17 @@ export default function DiaryHistoryDetailPage() {
         @keyframes spin { 100% { transform: rotate(360deg); } }
       `}} />
     </div>
+  );
+}
+
+export default function DiaryHistoryDetailPage() {
+  return (
+    <Suspense fallback={(
+      <div className="app-container" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        <Loader2 className="animate-spin" size={48} color="var(--point-color)" />
+      </div>
+    )}>
+      <DiaryHistoryDetailContent />
+    </Suspense>
   );
 }

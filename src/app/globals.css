@@ -21,7 +21,25 @@
   --card-bg: var(--white);
   --border-color: #E0D8C3;
   --text-muted: var(--gray-600);
+  --safe-top: var(--safe-area-inset-top, env(safe-area-inset-top, 0px));
+  --safe-bottom: var(--safe-area-inset-bottom, env(safe-area-inset-bottom, 0px));
+  --keyboard-height: 0px;
+  --bottom-ui-safe-gap: var(--safe-bottom);
+  --android-system-bottom-fallback: 48px;
+  --bottom-nav-height: calc(65px + var(--bottom-ui-safe-gap));
+  --fixed-cta-footer-height: calc(84px + var(--bottom-ui-safe-gap));
+  --tab-header-height: 52px;
   color-scheme: light; /* Force light mode native UI elements */
+}
+
+body.is-android-app {
+  --bottom-ui-safe-gap: max(var(--safe-bottom), var(--android-system-bottom-fallback));
+  --safe-top: max(var(--safe-area-inset-top, env(safe-area-inset-top, 0px)), 24px);
+}
+
+body.is-keyboard-open {
+  --bottom-ui-safe-gap: 0px;
+  --fixed-cta-footer-height: 72px;
 }
 
 * {
@@ -56,7 +74,7 @@ body {
 .header {
   color: var(--foreground);
   padding: 20px;
-  padding-top: calc(20px + env(safe-area-inset-top));
+  padding-top: calc(20px + var(--safe-top));
   text-align: left;
   font-size: 20px;
   font-weight: bold;
@@ -66,6 +84,325 @@ body {
   flex: 1;
   padding: 20px;
   overflow-y: auto;
+}
+
+/* Bottom-tab pages always reserve the real navigation-bar space. */
+.tab-page {
+  height: var(--app-viewport-height, 100dvh);
+  min-height: 0;
+  padding-bottom: var(--bottom-nav-height) !important;
+  overflow: hidden;
+}
+
+.tab-page > .header {
+  height: calc(var(--tab-header-height) + var(--safe-top));
+  min-height: calc(var(--tab-header-height) + var(--safe-top));
+  padding: var(--safe-top) 20px 0;
+  flex-shrink: 0;
+}
+
+.tab-page > .content,
+.tab-page .home-main {
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.home-shell {
+  flex: 1;
+  min-height: 0;
+}
+
+.diary-dummy-message {
+  width: 100%;
+}
+
+.diary-dummy-message .notebook-paper {
+  width: 100%;
+  max-width: 100% !important;
+}
+
+.diary-cta {
+  position: sticky;
+  bottom: 0;
+  flex-shrink: 0;
+}
+
+.diary-writing-input-wrap {
+  flex-shrink: 0;
+}
+
+.diary-entry-textarea {
+  width: 100%;
+  min-height: 120px;
+  background-color: white;
+}
+
+body.is-ios-app.is-keyboard-open .diary-page .diary-content {
+  padding-bottom: calc(var(--keyboard-height) + 24px) !important;
+}
+
+/* Full-page flows do not use the bottom tabs and must respect device safe areas. */
+.full-page {
+  height: var(--app-viewport-height, 100dvh);
+  min-height: 0;
+  padding-top: var(--safe-top);
+  overflow: hidden;
+}
+
+/* Safety net: tabs never survive a full-page route or an open software keyboard. */
+body.is-full-page-route .bottom-nav,
+body.is-keyboard-open .bottom-nav,
+body.has-full-page-overlay .bottom-nav,
+.full-page ~ .bottom-nav {
+  display: none !important;
+}
+
+body.is-keyboard-open .tab-page,
+body.has-full-page-overlay .tab-page {
+  padding-bottom: 0 !important;
+}
+
+.account-full-page-header {
+  height: calc(52px + var(--safe-top));
+  min-height: calc(52px + var(--safe-top));
+  padding: var(--safe-top) 20px 0;
+  border-bottom: 1px solid var(--border-color);
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+}
+
+.account-full-page-footer {
+  padding: 12px 20px calc(16px + var(--bottom-ui-safe-gap));
+  background-color: white;
+  border-top: 1px solid var(--border-color);
+  flex-shrink: 0;
+}
+
+.full-page-header {
+  min-height: 56px;
+  padding: 10px 20px 8px;
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+}
+
+.full-page > .header {
+  padding-top: 20px;
+}
+
+.chat-detail-page {
+  padding-bottom: 0;
+}
+
+.chat-input-area {
+  position: relative;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  padding: 10px 15px max(10px, var(--safe-bottom));
+  background-color: white;
+  border-top: 1px solid var(--border-color);
+}
+
+.chat-message-input {
+  flex: 1;
+  min-height: 44px;
+  max-height: 156px;
+  padding: 12px 16px;
+  border: 1px solid var(--border-color);
+  border-radius: 24px;
+  outline: none;
+  font-size: 16px;
+  line-height: 22px;
+  background-color: var(--gray-50);
+  resize: none;
+  overflow-y: hidden;
+}
+
+body.is-keyboard-open .chat-input-area {
+  padding-bottom: 8px;
+}
+
+body.is-ios-app.is-keyboard-open .chat-detail-page .chat-input-area {
+  position: fixed;
+  left: 50%;
+  bottom: var(--keyboard-height);
+  transform: translateX(-50%);
+  width: 100%;
+  max-width: 480px;
+  z-index: 1200;
+}
+
+body.is-ios-app.is-keyboard-open .chat-detail-page .chat-scroll-area {
+  padding-bottom: calc(var(--chat-input-area-height, 72px) + 24px) !important;
+}
+
+.auth-page {
+  padding: 20px;
+  padding-top: calc(20px + var(--safe-top));
+  overflow-y: auto;
+}
+
+.full-page-footer {
+  flex-shrink: 0;
+  padding: 12px 20px calc(16px + var(--bottom-ui-safe-gap));
+  background: var(--background);
+}
+
+body.is-keyboard-open .full-page-footer {
+  position: fixed;
+  left: 50%;
+  bottom: var(--keyboard-height);
+  transform: translateX(-50%);
+  width: 100%;
+  max-width: 480px;
+  padding: 8px 20px 8px;
+  border-top: 1px solid var(--border-color);
+  z-index: 120;
+}
+
+body.is-keyboard-open .full-page .content {
+  padding-bottom: 72px !important;
+}
+
+.fixed-cta-page {
+  padding-bottom: 0 !important;
+}
+
+.fixed-cta-content {
+  min-height: 0;
+  overflow-y: auto;
+  padding-bottom: var(--fixed-cta-footer-height);
+}
+
+.fixed-cta-footer {
+  position: fixed;
+  bottom: 0;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 100%;
+  max-width: 480px;
+  padding: 8px 20px calc(16px + var(--bottom-ui-safe-gap));
+  background-color: white;
+  border-top: 1px solid var(--border-color);
+  z-index: 100;
+}
+
+.fixed-cta-footer .btn-primary {
+  margin-top: 0;
+}
+
+body.is-keyboard-open .fixed-cta-footer,
+body.is-keyboard-open .account-full-page-footer {
+  bottom: var(--keyboard-height);
+  padding-bottom: 8px;
+}
+
+/* Android already resizes the WebView for the IME; do not lift the CTA twice. */
+body.is-android-app.is-keyboard-open .full-page-footer,
+body.is-android-app.is-keyboard-open .fixed-cta-footer,
+body.is-android-app.is-keyboard-open .account-full-page-footer {
+  bottom: 0;
+}
+
+.guide-chat-content {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  padding: 0 20px;
+  overflow-y: auto;
+}
+
+@media (max-height: 760px) {
+  .guide-chat-content h1 {
+    margin-top: 4px !important;
+    margin-bottom: 12px !important;
+    font-size: 1.35rem !important;
+  }
+
+  .guide-chat-content > div {
+    gap: 8px !important;
+    transform: none !important;
+  }
+
+  .full-page-footer {
+    padding-top: 8px;
+  }
+}
+
+@media (max-height: 760px) {
+  .tab-page > .header {
+    padding-left: 16px;
+    padding-right: 16px;
+    font-size: 18px;
+  }
+
+  .tab-page > .content {
+    padding: 12px 16px;
+  }
+
+  .home-character-selector {
+    padding: 10px 16px !important;
+    gap: 10px !important;
+  }
+
+  .home-character-card {
+    padding: 8px !important;
+    gap: 5px !important;
+  }
+
+  .home-character-avatar {
+    width: 54px !important;
+    height: 54px !important;
+  }
+
+  .home-main {
+    padding: 0 16px 12px !important;
+    gap: 8px !important;
+  }
+
+  .home-bottom-cards {
+    gap: 8px !important;
+  }
+
+  .diary-character-selector {
+    padding: 8px 16px !important;
+  }
+
+  .diary-character-card {
+    padding: 7px !important;
+    gap: 4px !important;
+  }
+
+  .diary-character-avatar {
+    width: 46px !important;
+    height: 46px !important;
+  }
+
+  .diary-topic-card {
+    padding: 12px 14px !important;
+    margin-bottom: 10px !important;
+  }
+
+  .diary-dummy-flow {
+    gap: 10px !important;
+    padding: 4px 2px 8px !important;
+    justify-content: flex-start !important;
+  }
+
+  .diary-dummy-flow .post-it,
+  .diary-dummy-flow .notebook-paper {
+    padding-top: 10px;
+    padding-bottom: 10px;
+    line-height: 1.45 !important;
+  }
+
+  .diary-guide {
+    margin-bottom: 8px !important;
+    font-size: 14px !important;
+  }
 }
 
 /* Checklist Styles */
@@ -207,13 +544,24 @@ input[type="range"]::-moz-range-track {
   border: none;
 }
 
-/* grid background for diary */
-.diary-bg {
+/* Shared check-pattern surface. Used by tab sub-main screens and their native status-bar area. */
+.diary-bg,
+.status-surface-check {
   background-color: #FAFAFA;
   background-image: 
     linear-gradient(rgba(0, 0, 0, 0.05) 1px, transparent 1px),
     linear-gradient(90deg, rgba(0, 0, 0, 0.05) 1px, transparent 1px);
   background-size: 20px 20px;
+}
+
+.status-surface-solid {
+  background-color: var(--gray-50);
+  background-image: none;
+}
+
+.status-surface-white {
+  background-color: white;
+  background-image: none;
 }
 
 .typing-dot {
@@ -314,4 +662,29 @@ input[type="range"]::-moz-range-track {
     position: sticky;
     top: 0;
   }
+}
+
+/* Native App Styles */
+body.is-native-app {
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-tap-highlight-color: transparent;
+  -webkit-touch-callout: none;
+  touch-action: manipulation;
+}
+
+body.is-native-app .app-container {
+  padding-top: 0;
+}
+
+body.is-native-app .full-page {
+  padding-top: var(--safe-top);
+}
+
+body.is-native-app .auth-page {
+  padding-top: calc(20px + var(--safe-top));
+}
+
+body.is-native-app .home-page {
+  padding-top: var(--safe-top);
 }

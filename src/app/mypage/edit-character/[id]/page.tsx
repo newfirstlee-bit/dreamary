@@ -9,6 +9,9 @@ import { uploadImageToImgbb } from '@/lib/imgbb';
 import { Loader2, ChevronLeft, Camera, User } from 'lucide-react';
 import { trackEvent } from '@/lib/mixpanel';
 import { useLocale } from '@/lib/i18n';
+import { clearUserCache } from '@/lib/appCache';
+import { invalidateCharacterStore } from '@/store/useAppStore';
+import { resolveStaticEntityId } from '@/lib/navigation';
 
 function GenderSelect({ value, onChange }: { value: string, onChange: (v: string) => void }) {
   const { t } = useLocale();
@@ -42,9 +45,10 @@ function GenderSelect({ value, onChange }: { value: string, onChange: (v: string
 export default function EditCharacterPage() {
   const router = useRouter();
   const params = useParams();
-  const charId = params.id as string;
+  const routeId = params.id as string;
   const { t } = useLocale();
 
+  const [charId, setCharId] = useState('');
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   
@@ -70,7 +74,9 @@ export default function EditCharacterPage() {
   useEffect(() => {
     const init = async () => {
       try {
-        const char = await getCharacterById(charId);
+        const resolvedId = resolveStaticEntityId(routeId);
+        setCharId(resolvedId);
+        const char = await getCharacterById(resolvedId);
         
         if (!char) {
           router.replace('/mypage');
@@ -95,7 +101,7 @@ export default function EditCharacterPage() {
       }
     };
     init();
-  }, [charId, router]);
+  }, [routeId, router]);
 
   const handleImageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files[0]) {
@@ -162,7 +168,7 @@ export default function EditCharacterPage() {
         id: charId,
         userId: userId,
         name: name.trim(),
-        gender: gender || undefined,
+        gender: (gender || undefined) as Character['gender'],
         feeling: feeling.trim(),
         title: title.trim(),
         exampleChat: exampleChat.trim(),
@@ -170,6 +176,7 @@ export default function EditCharacterPage() {
         worldview: worldview.trim(),
         extra: extra.trim(),
         narrative: narrative.trim(),
+        createdAt: initialChar?.createdAt || Date.now(),
       };
       
       if (finalImgUrl) {
@@ -177,6 +184,8 @@ export default function EditCharacterPage() {
       }
 
       await saveCharacter(updatedChar);
+      clearUserCache(userId);
+      invalidateCharacterStore(userId);
       trackEvent('Settings_Changed', { type: 'character_profile', character_id: updatedChar.id });
       router.push('/mypage');
     } catch (err) {
@@ -195,7 +204,7 @@ export default function EditCharacterPage() {
   }
 
   return (
-    <div className="app-container" style={{ paddingBottom: '100px', backgroundColor: 'var(--gray-50)' }}>
+    <div className="app-container full-page fixed-cta-page" style={{ backgroundColor: 'var(--gray-50)' }}>
       <header className="header" style={{ borderBottomLeftRadius: 0, borderBottomRightRadius: 0, position: 'relative', display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
         <button onClick={handleBack} style={{ position: 'absolute', left: '20px', background: 'none', border: 'none', color: 'var(--foreground)', cursor: 'pointer', display: 'flex', alignItems: 'center' }}>
           <ChevronLeft size={28} color="var(--gray-800)" />
@@ -203,7 +212,7 @@ export default function EditCharacterPage() {
         <span style={{ fontSize: '1.2rem', fontWeight: 'bold' }}>{t('editChar.header')}</span>
       </header>
 
-      <main className="content" style={{ display: 'flex', flexDirection: 'column', gap: '30px' }}>
+      <main className="content fixed-cta-content" style={{ display: 'flex', flexDirection: 'column', gap: '30px' }}>
         
         {/* Profile Image */}
         <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
@@ -362,7 +371,7 @@ export default function EditCharacterPage() {
       </main>
 
       {/* Pinned Bottom Button */}
-      <div style={{ position: 'fixed', bottom: 0, left: '50%', transform: 'translateX(-50%)', width: '100%', maxWidth: '480px', padding: '5px 20px 15px', backgroundColor: 'white', borderTop: '1px solid var(--border-color)', zIndex: 100 }}>
+      <footer className="fixed-cta-footer">
         <button 
           onClick={handleSave}
           disabled={!hasChanges || saving || !name.trim() || !gender || !feeling.trim() || !title.trim() || !exampleChat.trim() || !negative.trim()}
@@ -371,7 +380,7 @@ export default function EditCharacterPage() {
         >
           {saving ? <Loader2 className="animate-spin" size={24} /> : t('common.save')}
         </button>
-      </div>
+      </footer>
       {showExitModal && (
         <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.5)', zIndex: 1000, display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
           <div style={{ backgroundColor: 'white', padding: '25px', borderRadius: '15px', width: '80%', maxWidth: '320px', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '20px' }}>

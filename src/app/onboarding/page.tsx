@@ -10,6 +10,10 @@ import { uploadImageToImgbb } from '@/lib/imgbb';
 import { ChevronLeft, Camera, Loader2, User } from 'lucide-react';
 import { trackEvent } from '@/lib/mixpanel';
 import { useLocale } from '@/lib/i18n';
+import { clearUserCache } from '@/lib/appCache';
+import { withTimeout } from '@/lib/async';
+import { invalidateCharacterStore } from '@/store/useAppStore';
+import { ensureInitialPing } from '@/lib/initialPing';
 
 function getJosa(word: string, josaType: '이/가' | '을/를' | '은/는' | '으로/로' | '과/와' | '아/야'): string {
   if (!word) return josaType.split('/')[0];
@@ -25,6 +29,8 @@ function applyJosa(word: string, josaType: '이/가' | '을/를' | '은/는' | '
   return word + getJosa(word, josaType);
 }
 
+const SAVE_TIMEOUT_MS = 15000;
+
 type Phase = 'character' | 'narrative-prompt' | 'narrative' | 'user' | 'saving';
 
 export default function OnboardingPage() {
@@ -35,10 +41,11 @@ export default function OnboardingPage() {
   const [charStep, setCharStep] = useState(1);
   const [narrativeStep, setNarrativeStep] = useState(1);
   const [userStep, setUserStep] = useState(1);
-  const [viewportStyle, setViewportStyle] = useState({ height: '100dvh', top: 0 });
   const [showUserModal, setShowUserModal] = useState(false);
   const [showUserBackModal, setShowUserBackModal] = useState(false);
   const [isNextEnabled, setIsNextEnabled] = useState(false);
+  const pendingCharacterIdRef = useRef<string | null>(null);
+  const pendingCharacterCreatedAtRef = useRef<number | null>(null);
 
   useEffect(() => {
     trackEvent('Onboarding_Started');
@@ -50,24 +57,6 @@ export default function OnboardingPage() {
       }
     }
 
-    // Handle mobile virtual keyboard to stay glued to the visual viewport
-    if (window.visualViewport) {
-      const handleResizeOrScroll = () => {
-        if (!window.visualViewport) return;
-        setViewportStyle({
-          height: `${window.visualViewport.height}px`,
-          top: window.visualViewport.pageTop
-        });
-      };
-      window.visualViewport.addEventListener('resize', handleResizeOrScroll);
-      window.visualViewport.addEventListener('scroll', handleResizeOrScroll);
-      handleResizeOrScroll();
-      
-      return () => {
-        window.visualViewport?.removeEventListener('resize', handleResizeOrScroll);
-        window.visualViewport?.removeEventListener('scroll', handleResizeOrScroll);
-      };
-    }
   }, []);
 
   useEffect(() => {
@@ -161,16 +150,31 @@ export default function OnboardingPage() {
       
       let charImgUrl = store.charImage;
       if (store.charImageFile) {
-        charImgUrl = await uploadImageToImgbb(store.charImageFile);
+        charImgUrl = await withTimeout(
+          uploadImageToImgbb(store.charImageFile),
+          SAVE_TIMEOUT_MS,
+          '이미지 업로드 시간이 초과되었습니다.'
+        );
       }
 
       let userImgUrl = store.userImage;
       if (store.userImageFile) {
-        userImgUrl = await uploadImageToImgbb(store.userImageFile);
+        userImgUrl = await withTimeout(
+          uploadImageToImgbb(store.userImageFile),
+          SAVE_TIMEOUT_MS,
+          '이미지 업로드 시간이 초과되었습니다.'
+        );
       }
 
+      // Keep the same document ID across retries. A timed-out Firestore write
+      // can still finish later; a fresh UUID would create a duplicate pair.
+      const pendingCharacterId = pendingCharacterIdRef.current || generateUUID();
+      const pendingCharacterCreatedAt = pendingCharacterCreatedAtRef.current || Date.now();
+      pendingCharacterIdRef.current = pendingCharacterId;
+      pendingCharacterCreatedAtRef.current = pendingCharacterCreatedAt;
+
       const newChar: any = {
-        id: generateUUID(),
+        id: pendingCharacterId,
         userId,
         name: store.charName,
         gender: store.charGender || undefined,
@@ -181,7 +185,7 @@ export default function OnboardingPage() {
         worldview: store.charWorldview,
         extra: store.charExtra,
         narrative: store.charNarrative,
-        createdAt: Date.now(),
+        createdAt: pendingCharacterCreatedAt,
         locale: locale
       };
       if (charImgUrl) {
@@ -189,7 +193,11 @@ export default function OnboardingPage() {
         newChar.homeBackgroundImage = charImgUrl;
       }
 
-      await saveCharacter(newChar as Character);
+      await withTimeout(
+        saveCharacter(newChar as Character),
+        SAVE_TIMEOUT_MS,
+        '캐릭터 저장 시간이 초과되었습니다.'
+      );
 
       let activeUserProfile: UserProfile;
 
@@ -203,7 +211,11 @@ export default function OnboardingPage() {
         };
         if (userImgUrl) newUser.image = userImgUrl;
         
-        await saveUserProfile(newUser as UserProfile);
+        await withTimeout(
+          saveUserProfile(newUser as UserProfile),
+          SAVE_TIMEOUT_MS,
+          '유저 정보 저장 시간이 초과되었습니다.'
+        );
         activeUserProfile = newUser as UserProfile;
       } else {
         // Save empty user profile
@@ -213,30 +225,31 @@ export default function OnboardingPage() {
           feeling: '',
           createdAt: Date.now()
         };
-        await saveUserProfile(emptyUser as UserProfile);
+        await withTimeout(
+          saveUserProfile(emptyUser as UserProfile),
+          SAVE_TIMEOUT_MS,
+          '유저 정보 저장 시간이 초과되었습니다.'
+        );
         activeUserProfile = emptyUser as UserProfile;
       }
 
-      // Trigger initial ping in the background
-      fetch('/api/chat', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          character: newChar,
-          userProfile: activeUserProfile,
-          messages: [],
-          isFirstPing: true,
-          userId
-        })
-      }).catch(err => console.error('Background ping failed:', err));
-
-      localStorage.setItem(`hasPinged_${newChar.id}`, 'true');
+      // Do not block character creation on AI generation. Home/chat will share
+      // this in-flight request and retry later if the server is temporarily down.
+      void ensureInitialPing({
+        character: newChar as Character,
+        userProfile: activeUserProfile,
+        userId,
+      }).catch(err => console.error('Initial ping failed:', err));
 
       store.reset();
       trackEvent('Character_Created', {
         character_name: newChar.name,
         has_image: !!charImgUrl
       });
+      clearUserCache(userId);
+      invalidateCharacterStore(userId);
+      pendingCharacterIdRef.current = null;
+      pendingCharacterCreatedAtRef.current = null;
       router.push('/');
     } catch (err: any) {
       console.error(err);
@@ -266,17 +279,12 @@ export default function OnboardingPage() {
   };
 
   return (
-    <div className="app-container" style={{ 
-      minHeight: viewportStyle.height, 
-      height: viewportStyle.height, 
-      position: 'relative', 
-      top: viewportStyle.top, 
-      width: '100%',
+    <div className="app-container full-page" style={{
       maxWidth: '480px'
     }}>
       {renderProgressBar()}
       
-      <header style={{ display: 'flex', alignItems: 'center', padding: '20px', paddingBottom: '10px', minHeight: '68px' }}>
+      <header className="full-page-header">
         {phase !== 'saving' && (
           <button onClick={handleBack} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '5px', display: 'flex', alignItems: 'center' }}>
             <ChevronLeft size={28} color="var(--gray-800)" />
@@ -295,7 +303,7 @@ export default function OnboardingPage() {
               <p style={{ color: 'var(--text-muted)', marginBottom: '0', lineHeight: '1.5', fontSize: '1rem' }} dangerouslySetInnerHTML={{ __html: t('onboarding.narrativePromptDesc').replace('{name}', store.charName) }} />
             </div>
             
-            <div style={{ width: '100%', paddingBottom: '20px' }}>
+            <div className="full-page-footer" style={{ width: 'calc(100% + 40px)', marginLeft: '-20px', marginRight: '-20px' }}>
               <p style={{ color: 'var(--gray-500)', fontSize: '14px', marginBottom: '15px', textAlign: 'center' }}>{t('onboarding.narrativePromptHint')}</p>
               <div style={{ display: 'flex', gap: '10px', width: '100%' }}>
                 <button onClick={() => setShowUserModal(true)} style={{ flex: 3, padding: '15px', borderRadius: '10px', border: 'none', backgroundColor: 'var(--gray-200)', color: 'var(--gray-800)', cursor: 'pointer', fontWeight: '500', fontSize: '16px' }}>
@@ -594,7 +602,7 @@ function CharacterStep({ step, store, onNext }: { step: number, store: any, onNe
         )}
       </div>
 
-      <div style={{ padding: '10px 20px 20px', backgroundColor: 'var(--card-bg)' }}>
+      <div className="full-page-footer">
         <button className="btn-primary" onClick={onNext} disabled={isNextDisabled()} style={{ marginTop: 0 }}>
           {isLast ? t('onboarding.nextBtn') : t('onboarding.nextBtn')}
         </button>
@@ -685,7 +693,7 @@ function NarrativeStep({ step, store, onNext }: { step: number, store: any, onNe
         )}
       </div>
 
-      <div style={{ padding: '10px 20px 20px', backgroundColor: 'var(--card-bg)' }}>
+      <div className="full-page-footer">
         <button className="btn-primary" onClick={onNext} style={{ marginTop: 0 }}>
           {t('onboarding.nextBtn')}
         </button>
@@ -739,7 +747,7 @@ function UserStep({ step, store, onNext }: { step: number, store: any, onNext: (
         )}
       </div>
 
-      <div style={{ padding: '10px 20px 20px', backgroundColor: 'var(--card-bg)' }}>
+      <div className="full-page-footer">
         <button className="btn-primary" onClick={onNext} disabled={isNextDisabled()} style={{ marginTop: 0 }}>
           {isLast ? t('onboarding.finishBtn') : t('onboarding.nextBtn')}
         </button>

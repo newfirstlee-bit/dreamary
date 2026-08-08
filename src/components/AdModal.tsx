@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from 'react';
+import { Loader2 } from 'lucide-react';
 import { trackEvent } from '@/lib/mixpanel';
 import { useLocale } from '@/lib/i18n';
 
@@ -11,6 +12,8 @@ interface AdModalProps {
 
 export default function AdModal({ isOpen, onConfirm }: AdModalProps) {
   const [mounted, setMounted] = useState(false);
+  const [isPressed, setIsPressed] = useState(false);
+  const [isLoading, setIsLoading] = useState(false);
   const { t } = useLocale();
   
   useEffect(() => {
@@ -21,9 +24,25 @@ export default function AdModal({ isOpen, onConfirm }: AdModalProps) {
     if (mounted && isOpen) {
       trackEvent('Ad_Shown');
     }
+    if (!isOpen) {
+      setIsPressed(false);
+      setIsLoading(false);
+    }
   }, [isOpen, mounted]);
 
   if (!mounted || !isOpen) return null;
+
+  const handleConfirm = () => {
+    if (isLoading) return;
+    setIsPressed(false);
+    setIsLoading(true);
+    try {
+      onConfirm();
+    } catch (error) {
+      setIsLoading(false);
+      throw error;
+    }
+  };
 
   return (
     <div style={{
@@ -61,24 +80,36 @@ export default function AdModal({ isOpen, onConfirm }: AdModalProps) {
         </p>
 
         <button
-          onClick={onConfirm}
+          onClick={handleConfirm}
+          disabled={isLoading}
           style={{
             width: '100%',
             padding: '14px',
-            backgroundColor: 'var(--point-color)',
+            minHeight: '50px',
+            backgroundColor: isPressed || isLoading ? 'var(--point-color-dark)' : 'var(--point-color)',
             color: 'white',
             border: 'none',
             borderRadius: '12px',
             fontSize: '1rem',
             fontWeight: 'bold',
-            cursor: 'pointer',
-            transition: 'transform 0.1s, opacity 0.2s'
+            cursor: isLoading ? 'wait' : 'pointer',
+            transition: 'transform 0.1s, opacity 0.2s, background-color 0.1s',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            opacity: isLoading ? 0.95 : 1,
+            transform: isPressed ? 'scale(0.96)' : 'scale(1)'
           }}
-          onMouseDown={(e) => e.currentTarget.style.transform = 'scale(0.96)'}
-          onMouseUp={(e) => e.currentTarget.style.transform = 'scale(1)'}
-          onMouseLeave={(e) => e.currentTarget.style.transform = 'scale(1)'}
+          onPointerDown={() => !isLoading && setIsPressed(true)}
+          onPointerUp={() => setIsPressed(false)}
+          onPointerCancel={() => setIsPressed(false)}
+          onPointerLeave={() => setIsPressed(false)}
         >
-          {t('common.confirm')}
+          {isLoading ? (
+            <Loader2 size={20} aria-label="광고 로딩 중" style={{ animation: 'adButtonSpin 0.9s linear infinite' }} />
+          ) : (
+            t('common.confirm')
+          )}
         </button>
       </div>
       
@@ -86,6 +117,9 @@ export default function AdModal({ isOpen, onConfirm }: AdModalProps) {
         @keyframes fadeInUp {
           from { opacity: 0; transform: translateY(20px); }
           to { opacity: 1; transform: translateY(0); }
+        }
+        @keyframes adButtonSpin {
+          100% { transform: rotate(360deg); }
         }
       `}</style>
     </div>

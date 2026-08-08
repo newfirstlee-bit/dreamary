@@ -9,6 +9,7 @@ import { uploadImageToImgbb } from '@/lib/imgbb';
 import { Loader2, ChevronLeft, Camera, User } from 'lucide-react';
 import { trackEvent } from '@/lib/mixpanel';
 import { useLocale } from '@/lib/i18n';
+import { resolveStaticEntityId } from '@/lib/navigation';
 
 function GenderSelect({ value, onChange }: { value: string, onChange: (v: string) => void }) {
   const { t } = useLocale();
@@ -42,6 +43,7 @@ function GenderSelect({ value, onChange }: { value: string, onChange: (v: string
 export default function EditUserPage({ params }: { params: { id: string } }) {
   const router = useRouter();
   const { t } = useLocale();
+  const [profileId, setProfileId] = useState('');
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   
@@ -57,7 +59,9 @@ export default function EditUserPage({ params }: { params: { id: string } }) {
   useEffect(() => {
     const init = async () => {
       try {
-        const profile = await getUserProfile(params.id);
+        const resolvedId = resolveStaticEntityId(params.id);
+        setProfileId(resolvedId);
+        const profile = await getUserProfile(resolvedId);
         
         if (profile) {
           setName(profile.name || '');
@@ -93,9 +97,9 @@ export default function EditUserPage({ params }: { params: { id: string } }) {
       }
 
       const updatedUser: UserProfile = {
-        id: params.id,
+        id: profileId,
         name: name.trim() || t('common.user'),
-        gender: gender || undefined,
+        gender: (gender || undefined) as UserProfile['gender'],
         feeling: feeling.trim(),
         extra: extra.trim(),
         createdAt: Date.now()
@@ -124,7 +128,7 @@ export default function EditUserPage({ params }: { params: { id: string } }) {
   }
 
   return (
-    <div className="app-container" style={{ paddingBottom: '100px', backgroundColor: 'var(--gray-50)' }}>
+    <div className="app-container full-page fixed-cta-page" style={{ backgroundColor: 'var(--gray-50)' }}>
       <header className="header" style={{ borderBottomLeftRadius: 0, borderBottomRightRadius: 0, position: 'relative', display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
         <button onClick={() => router.back()} style={{ position: 'absolute', left: '20px', background: 'none', border: 'none', color: 'var(--foreground)', cursor: 'pointer', display: 'flex', alignItems: 'center' }}>
           <ChevronLeft size={28} color="var(--gray-800)" />
@@ -132,7 +136,7 @@ export default function EditUserPage({ params }: { params: { id: string } }) {
         <span style={{ fontSize: '1.2rem', fontWeight: 'bold' }}>{t('editUser.header')}</span>
       </header>
 
-      <main className="content" style={{ display: 'flex', flexDirection: 'column', gap: '30px' }}>
+      <main className="content fixed-cta-content" style={{ display: 'flex', flexDirection: 'column', gap: '30px' }}>
         
         {/* Profile Image */}
         <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
@@ -206,16 +210,16 @@ export default function EditUserPage({ params }: { params: { id: string } }) {
       </main>
 
       {/* Pinned Bottom Button */}
-      <div style={{ position: 'fixed', bottom: 0, left: '50%', transform: 'translateX(-50%)', width: '100%', maxWidth: '480px', padding: '5px 20px 15px', backgroundColor: 'white', borderTop: '1px solid var(--border-color)', zIndex: 100 }}>
+      <footer className="fixed-cta-footer">
         <button 
           onClick={handleSave}
-          disabled={saving || !name.trim() || !gender || !feeling.trim()}
+          disabled={saving || !profileId || !name.trim() || !gender || !feeling.trim()}
           className="btn-primary"
           style={{ width: '100%', display: 'flex', justifyContent: 'center', alignItems: 'center' }}
         >
           {saving ? <Loader2 className="animate-spin" size={24} /> : t('common.save')}
         </button>
-      </div>
+      </footer>
       <style dangerouslySetInnerHTML={{__html: `
         @keyframes spin { 100% { transform: rotate(360deg); } }
       `}} />

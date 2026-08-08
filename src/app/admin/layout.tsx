@@ -4,8 +4,13 @@ import AdminLogin from './AdminLogin';
 import LogoutButton from './LogoutButton';
 
 export default function AdminLayout({ children }: { children: React.ReactNode }) {
-  const cookieStore = cookies();
-  const isAdmin = cookieStore.get('admin_auth')?.value === 'true';
+  const isAppBuild = process.env.NEXT_PUBLIC_BUILD_TARGET === 'app';
+  let isAdmin = false;
+  
+  if (!isAppBuild) {
+    const cookieStore = cookies();
+    isAdmin = cookieStore.get('admin_auth')?.value === 'true';
+  }
 
   if (!isAdmin) {
     return (

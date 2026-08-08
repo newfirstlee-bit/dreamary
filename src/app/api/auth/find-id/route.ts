@@ -1,20 +1,34 @@
 import { NextResponse } from 'next/server';
 import { Resend } from 'resend';
-import { adminDb } from '@/lib/firebase-admin';
 
 const resend = new Resend(process.env.RESEND_API_KEY);
 
+export const runtime = 'nodejs';
+export const dynamic = 'force-dynamic';
+
+async function getAdminDb() {
+  const [{ cert, getApps, initializeApp }, { getFirestore }] = await Promise.all([
+    import('firebase-admin/app'),
+    import('firebase-admin/firestore'),
+  ]);
+
+  if (!getApps().length) {
+    const rawServiceAccount = process.env.FIREBASE_SERVICE_ACCOUNT_KEY;
+    if (!rawServiceAccount) throw new Error('FIREBASE_SERVICE_ACCOUNT_KEY is not set');
+    initializeApp({ credential: cert(JSON.parse(rawServiceAccount)) });
+  }
+
+  return getFirestore();
+}
+
 export async function POST(req: Request) {
   try {
-    if (!adminDb) {
-      return NextResponse.json({ error: 'auth.serverConfigError' }, { status: 500 });
-    }
-
     const { email } = await req.json();
     if (!email) {
       return NextResponse.json({ error: 'auth.missingEmail' }, { status: 400 });
     }
 
+    const adminDb = await getAdminDb();
     const snapshot = await adminDb.collection('accounts').where('email', '==', email).get();
 
     if (snapshot.empty) {

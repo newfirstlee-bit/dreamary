@@ -7,6 +7,7 @@ import { getCharactersByUser, getDiariesByUserAndChar, getTopics, Character, Dia
 import { Loader2, ChevronLeft, ChevronRight } from 'lucide-react';
 import Link from 'next/link';
 import { useLocale } from '@/lib/i18n';
+import { buildStaticEntityRoute } from '@/lib/navigation';
 
 function DiaryHistoryContent() {
   const router = useRouter();
@@ -112,7 +113,7 @@ function DiaryHistoryContent() {
           </div>
         ) : (
           diaries.map(diary => (
-            <Link key={diary.id} href={`/diary/history/${diary.id}`} style={{ textDecoration: 'none', color: 'inherit' }}>
+            <Link key={diary.id} href={buildStaticEntityRoute('/diary/history', diary.id)} style={{ textDecoration: 'none', color: 'inherit' }}>
               <div style={{ 
                 backgroundColor: 'var(--white)', 
                 padding: '20px', 

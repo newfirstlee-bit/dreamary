@@ -1,10 +1,11 @@
 "use client";
+import { apiPostJson } from '@/lib/api';
 
 import { useEffect, useState } from 'react';
 import Image from 'next/image';
 import { useRouter } from 'next/navigation';
 import { useUserId } from '@/hooks/useUserId';
-import { getCharactersByUser, getUserProfile, Character, UserProfile, deleteCharacter } from '@/lib/db';
+import { getUserProfile, Character, UserProfile, deleteCharacter } from '@/lib/db';
 import { Loader2, Settings, User, Plus, Heart, X, Copy, LogIn, Key, Download, LogOut, Eye, EyeOff, ChevronLeft } from 'lucide-react';
 import Link from 'next/link';
 import { useLocale } from '@/lib/i18n';
@@ -12,16 +13,33 @@ import { useAuth } from '@/components/AuthContext';
 import { auth, db } from '@/lib/firebase';
 import { signOut, signInWithEmailAndPassword, updatePassword } from 'firebase/auth';
 import { doc, getDoc, updateDoc } from 'firebase/firestore';
+import { withTimeout } from '@/lib/async';
+import { clearUserCache, readUserCache, writeUserCache } from '@/lib/appCache';
+import { buildStaticEntityRoute } from '@/lib/navigation';
+import { getCharactersWithGuestRecovery } from '@/lib/ownership';
+import { invalidateCharacterStore, useAppStore } from '@/store/useAppStore';
+import { Capacitor } from '@capacitor/core';
+
+const TERMS_URL = 'https://pickled-shovel-787.notion.site/3b5278d76e0580768273f5e88a09c3fe?source=copy_link';
+const PRIVACY_URL = 'https://pickled-shovel-787.notion.site/3b5278d76e0580ba9269f3ed205b37f6?source=copy_link';
+
+interface MyPageCache {
+  characters: Character[];
+  userProfiles: Record<string, UserProfile | null>;
+}
 
 export default function MyPage() {
   const router = useRouter();
   const { t, locale, setLocale } = useLocale();
-  const { user } = useAuth();
+  const { user, status } = useAuth();
+  const isGuest = !user;
+  const isAppBuild = process.env.NEXT_PUBLIC_BUILD_TARGET === 'app';
   const [loading, setLoading] = useState(true);
   
   const [characters, setCharacters] = useState<Character[]>([]);
   const [userProfiles, setUserProfiles] = useState<Record<string, UserProfile | null>>({});
   const userId = useUserId();
+  const { loadCharacters } = useAppStore();
   
   const [selectedChar, setSelectedChar] = useState<Character | null>(null);
   const [deleteConfirmChar, setDeleteConfirmChar] = useState<Character | null>(null);
@@ -50,8 +68,19 @@ export default function MyPage() {
   const [editPasswordConfirm, setEditPasswordConfirm] = useState('');
   const [editPasswordError, setEditPasswordError] = useState('');
   const [isSavingInfo, setIsSavingInfo] = useState(false);
+  const [showDeleteAccountModal, setShowDeleteAccountModal] = useState(false);
+  const [isDeletingAccount, setIsDeletingAccount] = useState(false);
 
   const [viewportStyle, setViewportStyle] = useState({ height: '100dvh', top: 0 });
+
+  const openPolicyLink = async (url: string) => {
+    if (Capacitor.isNativePlatform()) {
+      const { Browser } = await import('@capacitor/browser');
+      await Browser.open({ url });
+      return;
+    }
+    window.open(url, '_blank', 'noopener,noreferrer');
+  };
 
   useEffect(() => {
     if (window.visualViewport) {
@@ -74,6 +103,12 @@ export default function MyPage() {
     }
   }, []);
 
+  useEffect(() => {
+    const hasFullPageOverlay = showPasswordConfirmModal || showEditInfoModal;
+    document.body.classList.toggle('has-full-page-overlay', hasFullPageOverlay);
+    return () => document.body.classList.remove('has-full-page-overlay');
+  }, [showPasswordConfirmModal, showEditInfoModal]);
+
   const truncate = (name: string) => name.length > 5 ? name.slice(0, 5) + '...' : name;
 
   const handleDeletePair = async () => {
@@ -86,6 +121,8 @@ export default function MyPage() {
       delete newProfiles[deleteConfirmChar.id];
       setUserProfiles(newProfiles);
       setDeleteConfirmChar(null);
+      if (userId) clearUserCache(userId);
+      if (userId) invalidateCharacterStore(userId);
     } catch (error) {
       console.error(error);
       alert('삭제 중 오류가 발생했습니다.');
@@ -95,13 +132,21 @@ export default function MyPage() {
   };
 
   useEffect(() => {
+    if (!userId) return;
+    const cachedMyPage = readUserCache<MyPageCache>(userId, 'mypage');
+    if (cachedMyPage) {
+      setCharacters(cachedMyPage.characters);
+      setUserProfiles(cachedMyPage.userProfiles);
+      setLoading(false);
+    }
+
     const init = async () => {
-      if (!userId) return;
       try {
-        const chars = await getCharactersByUser(userId);
+        const chars = await withTimeout(loadCharacters(userId, status === 'authenticated'));
+        setCharacters(chars);
+        setLoading(false);
 
-
-        const profiles = await Promise.all(chars.map(c => getUserProfile(c.id)));
+        const profiles = await withTimeout(Promise.all(chars.map(c => getUserProfile(c.id))));
         const profileMap: Record<string, UserProfile | null> = {};
         chars.forEach((c, i) => {
           profileMap[c.id] = profiles[i];
@@ -109,12 +154,23 @@ export default function MyPage() {
 
         setCharacters(chars);
         setUserProfiles(profileMap);
+        writeUserCache<MyPageCache>(userId, 'mypage', {
+          characters: chars,
+          userProfiles: profileMap
+        });
 
         if (user) {
           try {
-            const accountDoc = await getDoc(doc(db, 'accounts', user.uid));
+            const accountDoc = await withTimeout(getDoc(doc(db, 'accounts', user.uid)));
             if (accountDoc.exists()) {
               setAccountInfo(accountDoc.data());
+            } else {
+              setAccountInfo({
+                id: user.email?.replace('@dreamary.internal', '') || user.uid,
+                email: '',
+                gender: '',
+                birthdate: ''
+              });
             }
           } catch (e) {
             console.error("Failed to load account info", e);
@@ -122,7 +178,7 @@ export default function MyPage() {
         }
         
         // 백업코드 발급 내역 복원 (비로그인 시)
-        if (!user) {
+        if (isGuest) {
           const storedCode = localStorage.getItem('backupCode');
           const storedTime = localStorage.getItem('backupCodeTime');
           if (storedCode && storedTime && Date.now() - Number(storedTime) < 24 * 60 * 60 * 1000) {
@@ -140,21 +196,16 @@ export default function MyPage() {
     };
     // user 상태 변경 시 재조회되도록 의존성 추가
     if (user !== undefined && userId) init();
-  }, [router, user, userId]);
+  }, [router, user, userId, status]);
 
   const handleGenerateBackupCode = async () => {
     if (backupCode) {
       setShowBackupModal(true);
       return;
     }
+    if (!userId) return;
     try {
-      const res = await fetch('/api/backup/generate', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ sourceUUID: userId })
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error);
+      const data = await apiPostJson<{ code: string }>('/api/backup/generate', { sourceUUID: userId });
       
       setBackupCode(data.code);
       localStorage.setItem('backupCode', data.code);
@@ -166,19 +217,14 @@ export default function MyPage() {
   };
 
   const handleMigrate = async () => {
-    if (!inputBackupCode) return;
+    if (!inputBackupCode || !user?.uid) return;
     setIsMigrating(true);
     try {
-      const res = await fetch('/api/backup/migrate', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ code: inputBackupCode, uid: user?.uid })
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error);
+      await apiPostJson('/api/backup/migrate', { code: inputBackupCode, uid: user.uid });
       
       alert(t('mypage.migrateSuccess'));
       localStorage.setItem('migration_completed', 'true');
+      invalidateCharacterStore();
       setShowMigrateModal(false);
       // 홈 화면으로 이동
       router.push('/');
@@ -248,6 +294,32 @@ export default function MyPage() {
     }
   };
 
+  const handleDeleteAccount = async () => {
+    if (!user) return;
+    setIsDeletingAccount(true);
+    try {
+      const token = await user.getIdToken(true);
+      await apiPostJson('/api/account/delete', { uid: user.uid }, {
+        headers: { Authorization: `Bearer ${token}` },
+        readTimeout: 120000,
+      });
+
+      clearUserCache(user.uid);
+      invalidateCharacterStore(user.uid);
+      await signOut(auth).catch(() => undefined);
+      setShowDeleteAccountModal(false);
+      setShowEditInfoModal(false);
+      window.location.href = '/';
+    } catch (err: any) {
+      console.error(err);
+      alert(err?.message || t('mypage.deleteFailed'));
+    } finally {
+      setIsDeletingAccount(false);
+    }
+  };
+
+  const hasCreatedCharacter = characters.some(character => character.id !== 'dummy');
+
   if (loading) {
     return (
       <div className="app-container" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
@@ -257,7 +329,7 @@ export default function MyPage() {
   }
 
   return (
-    <div className="app-container diary-bg" style={{ paddingBottom: '65px' }}>
+    <div className="app-container tab-page diary-bg status-surface-check">
       <header className="header" style={{ borderBottomLeftRadius: 0, borderBottomRightRadius: 0, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <span>{t('mypage.header')}</span>
         <select
@@ -285,7 +357,7 @@ export default function MyPage() {
 
       <main className="content" style={{ display: 'flex', flexDirection: 'column', gap: '30px' }}>
         {/* Account Section (Top if logged in) */}
-        {user && accountInfo && (
+        {!isGuest && accountInfo && (
           <section>
             <div style={{ backgroundColor: 'white', padding: '20px', borderRadius: '15px', border: '1px solid var(--border-color)', display: 'flex', flexDirection: 'column', gap: '15px' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -376,7 +448,7 @@ export default function MyPage() {
         </section>
 
         {/* 로그인 섹션 (비로그인) */}
-        {!user && (
+        {isGuest && (
           <section style={{ marginTop: '30px' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '15px' }}>
               <h2 style={{ fontSize: '1.2rem', fontWeight: 'bold' }}>
@@ -390,18 +462,25 @@ export default function MyPage() {
               >
                 <LogIn size={20} /> {t('mypage.loginRegisterBtn')}
               </button>
-              <button 
-                onClick={handleGenerateBackupCode}
-                style={{ width: '100%', padding: '15px', borderRadius: '12px', border: '1px solid var(--point-color)', backgroundColor: 'white', color: 'var(--point-color)', fontWeight: 'bold', fontSize: '1rem', display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '8px', cursor: 'pointer' }}
-              >
-                <Download size={20} /> {t('mypage.backupChatBtn')}
-              </button>
+              {hasCreatedCharacter && (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                  <button 
+                    onClick={handleGenerateBackupCode}
+                    style={{ width: '100%', padding: '15px', borderRadius: '12px', border: '1px solid var(--point-color)', backgroundColor: 'white', color: 'var(--point-color)', fontWeight: 'bold', fontSize: '1rem', display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '8px', cursor: 'pointer' }}
+                  >
+                    <Download size={20} /> {t('mypage.backupChatBtn')}
+                  </button>
+                  <p style={{ fontSize: '0.8rem', lineHeight: '1.45', color: 'var(--gray-500)', textAlign: 'center', padding: '0 8px', wordBreak: 'keep-all' }}>
+                    {t('mypage.backupLoginHint')}
+                  </p>
+                </div>
+              )}
             </div>
           </section>
         )}
 
-        {/* My Info Section (UUID) - Only for non-logged-in users */}
-        {!user && (
+        {/* My Info Section (UUID) - Only for non-logged-in web users */}
+        {isGuest && !isAppBuild && (
           <section style={{ marginTop: '30px' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '15px' }}>
             <h2 style={{ fontSize: '1.2rem', color: 'var(--foreground)', fontWeight: 'bold' }}>{t('mypage.myInfo')}</h2>
@@ -414,7 +493,7 @@ export default function MyPage() {
                 <span style={{ fontSize: '1rem', color: 'var(--gray-800)', fontWeight: 'bold' }}>{t('mypage.uuid')}</span>
                 <button 
                   onClick={() => {
-                    navigator.clipboard.writeText(userId);
+                    navigator.clipboard.writeText(userId || '');
                     alert(t('common.copied'));
                   }} 
                   style={{ display: 'flex', alignItems: 'center', gap: '4px', background: 'var(--gray-100)', border: 'none', borderRadius: '6px', padding: '6px 10px', cursor: 'pointer', fontSize: '0.8rem', color: 'var(--gray-700)', fontWeight: 'bold' }}
@@ -433,11 +512,11 @@ export default function MyPage() {
           </section>
         )}
 
-        {/* Developer Account Section */}
+        {/* App Information Section */}
         <section style={{ marginTop: '30px' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '15px' }}>
             <h2 style={{ fontSize: '1.2rem', fontWeight: 'bold' }}>
-              {locale === 'ja' ? '公式アカウント' : '개발자 계정'}
+              {t('mypage.appInfo')}
             </h2>
           </div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
@@ -457,10 +536,24 @@ export default function MyPage() {
             >
               {locale === 'ja' ? 'フィードバックを送る' : '피드백 쓰기'}
             </a>
+            <button
+              type="button"
+              onClick={() => openPolicyLink(TERMS_URL)}
+              style={{ width: '100%', padding: '15px', borderRadius: '12px', border: '1px solid var(--gray-400)', backgroundColor: 'white', color: 'var(--gray-700)', fontWeight: 'bold', fontSize: '1rem', display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '8px', cursor: 'pointer' }}
+            >
+              {t('mypage.termsOfService')}
+            </button>
+            <button
+              type="button"
+              onClick={() => openPolicyLink(PRIVACY_URL)}
+              style={{ width: '100%', padding: '15px', borderRadius: '12px', border: '1px solid var(--gray-400)', backgroundColor: 'white', color: 'var(--gray-700)', fontWeight: 'bold', fontSize: '1rem', display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '8px', cursor: 'pointer' }}
+            >
+              {t('mypage.privacyPolicy')}
+            </button>
           </div>
         </section>
 
-        {user && (
+        {!isGuest && (
           <section style={{ marginTop: '30px' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '15px' }}>
               <h2 style={{ fontSize: '1.2rem', fontWeight: 'bold' }}>
@@ -476,9 +569,10 @@ export default function MyPage() {
           </section>
         )}
 
-        {user && (
+        {!isGuest && (
           <button 
             onClick={async () => {
+              if (user?.uid) clearUserCache(user.uid);
               await signOut(auth);
               window.location.reload();
             }}
@@ -508,7 +602,11 @@ export default function MyPage() {
           />
           <div style={{ 
             position: 'fixed', bottom: 0, left: '50%', transform: 'translateX(-50%)', width: '100%', maxWidth: '480px', 
-            backgroundColor: 'white', borderTopLeftRadius: '20px', borderTopRightRadius: '20px', padding: '25px 20px 40px', zIndex: 2001,
+            backgroundColor: 'white', borderTopLeftRadius: '20px', borderTopRightRadius: '20px',
+            padding: '25px 20px calc(24px + var(--safe-bottom))',
+            maxHeight: 'calc(var(--app-viewport-height, 100dvh) - var(--safe-top) - 24px)',
+            overflowY: 'auto',
+            zIndex: 2001,
             display: 'flex', flexDirection: 'column', gap: '15px'
           }}>
             <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', marginBottom: '10px' }}>
@@ -517,7 +615,7 @@ export default function MyPage() {
             
             <button 
               onClick={() => {
-                router.push(`/mypage/edit-pairname/${selectedChar.id}`);
+                router.push(buildStaticEntityRoute('/mypage/edit-pairname', selectedChar.id));
                 setSelectedChar(null);
               }}
               style={{ height: '68px', padding: '16px', backgroundColor: 'var(--gray-50)', border: '1px solid var(--border-color)', borderRadius: '12px', fontSize: '1rem', fontWeight: 'bold', color: 'var(--foreground)', cursor: 'pointer', textAlign: 'left', display: 'flex', alignItems: 'center', gap: '12px' }}
@@ -526,7 +624,7 @@ export default function MyPage() {
             </button>
             <button 
               onClick={() => {
-                router.push(`/mypage/edit-character/${selectedChar.id}`);
+                router.push(buildStaticEntityRoute('/mypage/edit-character', selectedChar.id));
                 setSelectedChar(null);
               }}
               style={{ height: '68px', padding: '16px', backgroundColor: 'var(--gray-50)', border: '1px solid var(--border-color)', borderRadius: '12px', fontSize: '1rem', fontWeight: 'bold', color: 'var(--foreground)', cursor: 'pointer', textAlign: 'left', display: 'flex', alignItems: 'center', gap: '12px' }}
@@ -538,13 +636,13 @@ export default function MyPage() {
             </button>
             <button 
               onClick={() => {
-                router.push(`/mypage/edit-user/${selectedChar.id}`);
+                router.push(buildStaticEntityRoute('/mypage/edit-user', selectedChar.id));
                 setSelectedChar(null);
               }}
               style={{ height: '68px', padding: '16px', backgroundColor: 'var(--gray-50)', border: '1px solid var(--border-color)', borderRadius: '12px', fontSize: '1rem', fontWeight: 'bold', color: 'var(--foreground)', cursor: 'pointer', textAlign: 'left', display: 'flex', alignItems: 'center', gap: '12px' }}
             >
               <div style={{ width: '36px', height: '36px', borderRadius: '50%', backgroundColor: 'var(--gray-200)', overflow: 'hidden', position: 'relative', display: 'flex', justifyContent: 'center', alignItems: 'center', flexShrink: 0 }}>
-                {userProfiles[selectedChar.id]?.image ? <Image src={userProfiles[selectedChar.id]?.image} alt="user" fill style={{ objectFit: 'cover' }} /> : <User size={20} color="var(--gray-500)" />}
+                {userProfiles[selectedChar.id]?.image ? <Image src={userProfiles[selectedChar.id]!.image!} alt="user" fill style={{ objectFit: 'cover' }} /> : <User size={20} color="var(--gray-500)" />}
               </div>
               {userProfiles[selectedChar.id]?.name || t('common.user')}
             </button>
@@ -687,7 +785,7 @@ export default function MyPage() {
 
       {/* 비밀번호 확인 모달 (풀스크린) */}
       {showPasswordConfirmModal && (
-        <div style={{ 
+        <div className="account-full-page" style={{
           position: 'absolute', 
           top: viewportStyle.top, 
           height: viewportStyle.height,
@@ -695,7 +793,7 @@ export default function MyPage() {
           backgroundColor: 'white', zIndex: 4000,
           display: 'flex', flexDirection: 'column'
         }}>
-          <header style={{ display: 'flex', alignItems: 'center', padding: '20px', paddingTop: 'calc(20px + env(safe-area-inset-top))', borderBottom: '1px solid var(--border-color)', flexShrink: 0 }}>
+          <header className="account-full-page-header">
             <button onClick={() => setShowPasswordConfirmModal(false)} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '5px', display: 'flex', alignItems: 'center', marginLeft: '-5px' }}>
               <ChevronLeft size={28} color="var(--gray-800)" />
             </button>
@@ -715,6 +813,8 @@ export default function MyPage() {
                 style={{ width: '100%', padding: '16px', paddingRight: '45px', borderRadius: '12px', border: `1px solid ${verifyError ? 'red' : 'var(--border-color)'}`, fontSize: '1.1rem', outline: 'none' }}
               />
               <button
+              onClick={() => setShowPassword(value => !value)}
+              type="button"
               style={{ position: 'absolute', right: '15px', top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', padding: 0, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--gray-500)' }}
               >
                 {showPassword ? <EyeOff size={22} /> : <Eye size={22} />}
@@ -733,7 +833,7 @@ export default function MyPage() {
             </button>
           </div>
 
-          <div style={{ padding: '15px 20px 20px 20px', backgroundColor: 'white', borderTop: '1px solid var(--border-color)', flexShrink: 0 }}>
+          <div className="account-full-page-footer">
             <button 
               onClick={handleVerifyPassword}
               disabled={isVerifying || !verifyPassword}
@@ -747,7 +847,7 @@ export default function MyPage() {
 
       {/* 정보 수정 모달 (풀스크린) */}
       {showEditInfoModal && (
-        <div style={{ 
+        <div className="account-full-page" style={{
           position: 'absolute', 
           top: viewportStyle.top, 
           height: viewportStyle.height,
@@ -755,7 +855,7 @@ export default function MyPage() {
           backgroundColor: 'white', zIndex: 4000,
           display: 'flex', flexDirection: 'column'
         }}>
-          <header style={{ display: 'flex', alignItems: 'center', padding: '20px', paddingTop: 'calc(20px + env(safe-area-inset-top))', borderBottom: '1px solid var(--border-color)', flexShrink: 0 }}>
+          <header className="account-full-page-header">
             <button onClick={() => setShowEditInfoModal(false)} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '5px', display: 'flex', alignItems: 'center', marginLeft: '-5px' }}>
               <ChevronLeft size={28} color="var(--gray-800)" />
             </button>
@@ -825,10 +925,28 @@ export default function MyPage() {
                 </div>
                 {editPasswordError && <p style={{ color: 'red', fontSize: '0.85rem', marginTop: '6px' }}>{editPasswordError}</p>}
               </div>
+              <button
+                type="button"
+                onClick={() => setShowDeleteAccountModal(true)}
+                style={{
+                  width: '100%',
+                  padding: '16px',
+                  marginTop: '10px',
+                  borderRadius: '12px',
+                  border: 'none',
+                  backgroundColor: '#FFF0F0',
+                  color: 'red',
+                  fontSize: '1rem',
+                  fontWeight: 'bold',
+                  cursor: 'pointer'
+                }}
+              >
+                {t('mypage.deleteAccount')}
+              </button>
             </div>
           </div>
 
-          <div style={{ padding: '15px 20px 20px 20px', backgroundColor: 'white', borderTop: '1px solid var(--border-color)', flexShrink: 0 }}>
+          <div className="account-full-page-footer">
             <button 
               onClick={handleSaveInfo}
               disabled={isSavingInfo}
@@ -842,6 +960,54 @@ export default function MyPage() {
               {isSavingInfo ? t('common.saving') : t('common.save')}
             </button>
           </div>
+
+          {showDeleteAccountModal && (
+            <>
+              <div
+                onClick={() => !isDeletingAccount && setShowDeleteAccountModal(false)}
+                style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.5)', zIndex: 5000 }}
+              />
+              <div style={{
+                position: 'fixed',
+                top: '50%',
+                left: '50%',
+                transform: 'translate(-50%, -50%)',
+                width: '90%',
+                maxWidth: '340px',
+                backgroundColor: 'white',
+                borderRadius: '20px',
+                padding: '30px 20px 20px',
+                zIndex: 5001,
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'center',
+                textAlign: 'center'
+              }}>
+                <h2 style={{ fontSize: '1.2rem', fontWeight: 'bold', marginBottom: '10px', lineHeight: 1.4 }}>
+                  {t('mypage.deleteAccountTitle')}
+                </h2>
+                <p style={{ fontSize: '0.9rem', color: 'var(--gray-500)', marginBottom: '25px', lineHeight: 1.5 }}>
+                  {t('mypage.deleteAccountDesc')}
+                </p>
+                <div style={{ display: 'flex', gap: '10px', width: '100%' }}>
+                  <button
+                    onClick={handleDeleteAccount}
+                    disabled={isDeletingAccount}
+                    style={{ flex: 3, padding: '15px', backgroundColor: '#FFF0F0', color: 'red', border: 'none', borderRadius: '12px', fontSize: '1rem', fontWeight: 'bold', cursor: isDeletingAccount ? 'not-allowed' : 'pointer' }}
+                  >
+                    {isDeletingAccount ? '...' : t('mypage.deleteAccountConfirm')}
+                  </button>
+                  <button
+                    onClick={() => setShowDeleteAccountModal(false)}
+                    disabled={isDeletingAccount}
+                    style={{ flex: 7, padding: '15px', backgroundColor: 'var(--gray-200)', color: 'var(--gray-800)', border: 'none', borderRadius: '12px', fontSize: '1rem', fontWeight: 'bold', cursor: isDeletingAccount ? 'not-allowed' : 'pointer' }}
+                  >
+                    {isDeletingAccount ? t('mypage.deleteAccountProcessing') : t('mypage.deleteAccountCancel')}
+                  </button>
+                </div>
+              </div>
+            </>
+          )}
         </div>
       )}
 

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from 'react';
+import { useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { ChevronLeft } from 'lucide-react';
 import { useLocale } from '@/lib/i18n';
@@ -9,29 +9,9 @@ import { trackEvent } from '@/lib/mixpanel';
 export default function GuideChatPage() {
   const router = useRouter();
   const { locale } = useLocale();
-  const [viewportStyle, setViewportStyle] = useState({ height: '100dvh', top: 0 });
 
   useEffect(() => {
     trackEvent('Guide_Chat_Viewed');
-    
-    // Handle mobile virtual keyboard to stay glued to the visual viewport
-    if (window.visualViewport) {
-      const handleResizeOrScroll = () => {
-        if (!window.visualViewport) return;
-        setViewportStyle({
-          height: `${window.visualViewport.height}px`,
-          top: window.visualViewport.pageTop
-        });
-      };
-      window.visualViewport.addEventListener('resize', handleResizeOrScroll);
-      window.visualViewport.addEventListener('scroll', handleResizeOrScroll);
-      handleResizeOrScroll();
-      
-      return () => {
-        window.visualViewport?.removeEventListener('resize', handleResizeOrScroll);
-        window.visualViewport?.removeEventListener('scroll', handleResizeOrScroll);
-      };
-    }
   }, []);
 
   const titleText = locale === 'ja' 
@@ -54,23 +34,16 @@ export default function GuideChatPage() {
   const ctaNoticeText = locale === 'ja' ? 'たった1分で十分です' : '1분이면 충분해요';
 
   return (
-    <div className="app-container" style={{ 
-      minHeight: viewportStyle.height, 
-      height: viewportStyle.height, 
-      position: 'relative', 
-      top: viewportStyle.top, 
-      width: '100%',
+    <div className="app-container full-page guide-chat-page" style={{
       backgroundColor: 'var(--background-color)',
-      display: 'flex',
-      flexDirection: 'column'
     }}>
-      <header style={{ display: 'flex', alignItems: 'center', padding: '20px', paddingBottom: '10px', minHeight: '68px' }}>
+      <header className="full-page-header">
         <button onClick={() => router.back()} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '5px', display: 'flex', alignItems: 'center', marginLeft: '-5px' }}>
           <ChevronLeft size={32} color="var(--gray-800)" />
         </button>
       </header>
 
-      <main style={{ flex: 1, display: 'flex', flexDirection: 'column', padding: '0 20px', overflowY: 'auto' }}>
+      <main className="guide-chat-content">
         <h1 
           style={{ 
             fontSize: '1.6rem', 
@@ -147,7 +120,10 @@ export default function GuideChatPage() {
           </div>
         </div>
 
-        <div style={{ paddingBottom: '20px', paddingTop: '20px', display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+      </main>
+
+      <footer className="full-page-footer">
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
           <span style={{ fontSize: '0.85rem', color: 'var(--gray-500)', marginBottom: '10px' }}>
             {ctaNoticeText}
           </span>
@@ -165,7 +141,7 @@ export default function GuideChatPage() {
             {ctaText}
           </button>
         </div>
-      </main>
+      </footer>
 
       <style dangerouslySetInnerHTML={{__html: `
         @keyframes fadeInBubble {

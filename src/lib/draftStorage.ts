@@ -7,25 +7,28 @@ interface DraftData {
 
 const DRAFT_PREFIX = 'dreamary_draft_';
 const MAX_AGE_MS = 3 * 24 * 60 * 60 * 1000; // 3 days
+export type DraftScope = 'diary' | 'chat';
 
-export const saveDraft = (characterId: string, text: string) => {
+const getDraftKey = (characterId: string, scope: DraftScope) => `${DRAFT_PREFIX}${scope}_${characterId}`;
+
+export const saveDraft = (characterId: string, text: string, scope: DraftScope = 'diary') => {
   if (typeof window === 'undefined') return;
   const data: DraftData = {
     text,
     savedAt: Date.now()
   };
-  localStorage.setItem(DRAFT_PREFIX + characterId, JSON.stringify(data));
+  localStorage.setItem(getDraftKey(characterId, scope), JSON.stringify(data));
 };
 
-export const loadDraft = (characterId: string): string | null => {
+export const loadDraft = (characterId: string, scope: DraftScope = 'diary'): string | null => {
   if (typeof window === 'undefined') return null;
-  const raw = localStorage.getItem(DRAFT_PREFIX + characterId);
+  const raw = localStorage.getItem(getDraftKey(characterId, scope));
   if (!raw) return null;
   
   try {
     const data = JSON.parse(raw) as DraftData;
     if (Date.now() - data.savedAt > MAX_AGE_MS) {
-      clearDraft(characterId);
+      clearDraft(characterId, scope);
       return null;
     }
     return data.text;
@@ -34,7 +37,7 @@ export const loadDraft = (characterId: string): string | null => {
   }
 };
 
-export const clearDraft = (characterId: string) => {
+export const clearDraft = (characterId: string, scope: DraftScope = 'diary') => {
   if (typeof window === 'undefined') return;
-  localStorage.removeItem(DRAFT_PREFIX + characterId);
+  localStorage.removeItem(getDraftKey(characterId, scope));
 };

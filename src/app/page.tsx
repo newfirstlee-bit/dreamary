@@ -6,18 +6,42 @@ import { useRouter } from 'next/navigation';
 import { useUserId } from '@/hooks/useUserId';
 import { useAuth } from '@/components/AuthContext';
 import { useLocale, getDateLocale } from '@/lib/i18n';
-import { getCharactersByUser, Character, updateCharacter, getDiariesByUserAndChar, getTopics, Topic, getUserProfile, UserProfile, getChatMessages, ChatMessage } from '@/lib/db';
+import { Character, getTodayDiaryByUserAndChar, getDiaryCountByUserAndChar, getTopics, Topic, getUserProfile, UserProfile, getLatestChatMessage, ChatMessage } from '@/lib/db';
 import { uploadImageToImgbb } from '@/lib/imgbb';
 import { Loader2, User, Settings, Camera, Image as ImageIcon, ChevronRight } from 'lucide-react';
 import { trackEvent } from '@/lib/mixpanel';
+import { readUserCache, writeUserCache } from '@/lib/appCache';
+import { getRecentCharacterIds, sortCharactersByRecent, touchRecentCharacter } from '@/lib/characterOrder';
+import { getCharactersWithGuestRecovery } from '@/lib/ownership';
+import { useAppStore } from '@/store/useAppStore';
+import { buildStaticEntityRoute } from '@/lib/navigation';
+import { INITIAL_PING_EVENT, ensureInitialPing, isInitialPingPending } from '@/lib/initialPing';
 
+interface HomeCache {
+  characters: Character[];
+  selectedCharId: string | null;
+  unwrittenCharIds: string[];
+  charTopics: Record<string, Topic | null>;
+  userProfiles: Record<string, UserProfile | null>;
+}
 
-class ErrorBoundary extends React.Component {
-  constructor(props) {
+const withTimeout = <T,>(promise: Promise<T>, timeoutMs = 12000): Promise<T> =>
+  Promise.race([
+    promise,
+    new Promise<T>((_, reject) =>
+      setTimeout(() => reject(new Error('데이터 요청 시간이 초과되었습니다.')), timeoutMs)
+    ),
+  ]);
+
+interface ErrorBoundaryProps { children: React.ReactNode }
+interface ErrorBoundaryState { hasError: boolean; errorMsg: string }
+
+class ErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoundaryState> {
+  constructor(props: ErrorBoundaryProps) {
     super(props);
     this.state = { hasError: false, errorMsg: '' };
   }
-  static getDerivedStateFromError(error) {
+  static getDerivedStateFromError(error: Error) {
     return { hasError: true, errorMsg: error.toString() + '\n' + error.stack };
   }
   render() {
@@ -31,14 +55,19 @@ class ErrorBoundary extends React.Component {
 export default function Home() {
   const router = useRouter();
   const { t, locale } = useLocale();
-  const { loading: authLoading } = useAuth();
+  const { user, loading: authLoading, error: authError, status } = useAuth();
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [retryCount, setRetryCount] = useState(0);
   const [characters, setCharacters] = useState<Character[]>([]);
   const [selectedCharId, setSelectedCharId] = useState<string | null>(null);
   const [unwrittenChars, setUnwrittenChars] = useState<Set<string>>(new Set());
   const [charTopics, setCharTopics] = useState<Record<string, Topic | null>>({});
   const [userProfiles, setUserProfiles] = useState<Record<string, UserProfile | null>>({});
   const [latestChat, setLatestChat] = useState<ChatMessage | null>(null);
+  const [initialPingCharIds, setInitialPingCharIds] = useState<Set<string>>(new Set());
+
+  const { loadCharacters, loadTopics } = useAppStore();
 
   const baseUserId = useUserId();
   const userId = typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('demo') === 'true' 
@@ -47,10 +76,30 @@ export default function Home() {
 
   useEffect(() => {
     if (authLoading || !userId) return;
-    
+
+    // 첫 실행만 교환일기에서 시작하고, 사용자가 홈을 누른 뒤에는 홈 이동을 존중합니다.
+    if (!user && !sessionStorage.getItem('has_redirected_to_diary')) {
+      sessionStorage.setItem('has_redirected_to_diary', 'true');
+      router.replace('/diary');
+      return;
+    }
+
+    const cachedHome = readUserCache<HomeCache>(userId, 'home');
+    if (cachedHome) {
+      setCharacters(cachedHome.characters);
+      setSelectedCharId(cachedHome.selectedCharId);
+      setUnwrittenChars(new Set(cachedHome.unwrittenCharIds));
+      setCharTopics(cachedHome.charTopics);
+      setUserProfiles(cachedHome.userProfiles);
+      setLoading(false);
+      setLoadError(null);
+    }
+
     const init = async () => {
 
       try {
+        if (!cachedHome) setLoading(true);
+        setLoadError(null);
         // 데모 링크 처리 (?demo=true)
         if (typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('demo') === 'true') {
           localStorage.setItem('dreamary_user_id', userId);
@@ -58,7 +107,8 @@ export default function Home() {
           document.cookie = "dreamary_user_id=" + userId + "; path=/; max-age=31536000";
         }
 
-        const chars = await getCharactersByUser(userId);
+        const rawChars = await withTimeout(loadCharacters(userId, status === 'authenticated'));
+        const chars = sortCharactersByRecent(rawChars, userId);
         
         const hasCharacter = chars.length > 0 && chars[0]?.id !== 'dummy';
         trackEvent('main_screen_view', {
@@ -85,25 +135,39 @@ export default function Home() {
             setCharacters([dummyChar]);
             setSelectedCharId('dummy');
             setUnwrittenChars(new Set(['dummy']));
+            setLoading(false);
             
             let topics: Topic[] = [];
             try {
-              topics = await getTopics();
+              topics = await withTimeout(loadTopics());
             } catch (err) {
               console.error("Failed to fetch topics for dummy:", err);
             }
             if (topics.length > 0) {
               setCharTopics({ dummy: topics[0] });
+              writeUserCache<HomeCache>(userId, 'home', {
+                characters: [dummyChar],
+                selectedCharId: 'dummy',
+                unwrittenCharIds: ['dummy'],
+                charTopics: { dummy: topics[0] },
+                userProfiles: {}
+              });
             } else {
-              setCharTopics({ dummy: { id: 'dummy', order: 1, content: t('dummy.firstTopic') || '오늘 하루는 어땠어?' } as Topic });
+              const dummyTopic = { id: 'dummy', order: 1, content: t('dummy.firstTopic') || '오늘 하루는 어땠어?' } as Topic;
+              setCharTopics({ dummy: dummyTopic });
+              writeUserCache<HomeCache>(userId, 'home', {
+                characters: [dummyChar],
+                selectedCharId: 'dummy',
+                unwrittenCharIds: ['dummy'],
+                charTopics: { dummy: dummyTopic },
+                userProfiles: {}
+              });
             }
-            
-            setLoading(false);
           }
         } else {
           setCharacters(chars);
           
-          const recentHistory: string[] = JSON.parse(localStorage.getItem(`recentChars_${userId}`) || '[]');
+          const recentHistory = getRecentCharacterIds(userId);
           let initialCharId = chars[0].id;
           
           if (recentHistory.length > 0) {
@@ -113,32 +177,35 @@ export default function Home() {
             }
           }
           setSelectedCharId(initialCharId);
+          setLoading(false);
 
           const now = new Date();
           const dateString = now.toISOString().split('T')[0];
           const unwritten = new Set<string>();
-          const topics = await getTopics();
+          const topics = await withTimeout(loadTopics());
           const newCharTopics: Record<string, Topic | null> = {};
           const newUserProfiles: Record<string, UserProfile | null> = {};
 
-          const [diariesArrays, profilesArrays] = await Promise.all([
-            Promise.all(chars.map(c => getDiariesByUserAndChar(userId, c.id))),
-            Promise.all(chars.map(c => getUserProfile(userId, c.id)))
-          ]);
+          const todayDiaries = await withTimeout(Promise.all(
+            chars.map(c => getTodayDiaryByUserAndChar(userId, c.id, dateString))
+          ));
+          const diaryCounts = await withTimeout(Promise.all(
+            chars.map((c, index) => todayDiaries[index] ? Promise.resolve(0) : getDiaryCountByUserAndChar(userId, c.id))
+          ));
+          const selectedProfile = await withTimeout(getUserProfile(initialCharId));
+          newUserProfiles[initialCharId] = selectedProfile;
+
           for (let i = 0; i < chars.length; i++) {
             const char = chars[i];
-            const diaries = diariesArrays[i];
-            const todayD = diaries.find(d => d.dateString === dateString);
+            const todayD = todayDiaries[i];
             if (!todayD) unwritten.add(char.id);
-
-            newUserProfiles[char.id] = profilesArrays[i];
 
             if (topics.length > 0) {
               if (todayD) {
                 const matchedTopic = topics.find(t => t.id === todayD.topicId);
                 newCharTopics[char.id] = matchedTopic || topics[0];
               } else {
-                const nextIdx = diaries.length % topics.length;
+                const nextIdx = diaryCounts[i] % topics.length;
                 newCharTopics[char.id] = topics[nextIdx] || topics[0];
               }
             }
@@ -146,17 +213,55 @@ export default function Home() {
           setUnwrittenChars(unwritten);
           setCharTopics(newCharTopics);
           setUserProfiles(newUserProfiles);
-
-          setLoading(false);
+          writeUserCache<HomeCache>(userId, 'home', {
+            characters: chars,
+            selectedCharId: initialCharId,
+            unwrittenCharIds: Array.from(unwritten),
+            charTopics: newCharTopics,
+            userProfiles: newUserProfiles
+          });
         }
       } catch (err) {
         console.error("Failed to load user data:", err);
+        if (cachedHome) {
+          setLoading(false);
+          return;
+        }
+        if (!user) {
+          const dummyChar: Character = {
+            id: 'dummy',
+            userId,
+            name: t('dummy.charName') || '드림캐',
+            feeling: '',
+            title: '',
+            exampleChat: '',
+            negative: '',
+            createdAt: Date.now(),
+            dDayStartDate: Date.now()
+          };
+          setCharacters([dummyChar]);
+          setSelectedCharId('dummy');
+          setUnwrittenChars(new Set(['dummy']));
+          setCharTopics({
+            dummy: { id: 'dummy', order: 1, content: t('dummy.firstTopic') || '오늘 하루는 어땠어?' } as Topic
+          });
+          writeUserCache<HomeCache>(userId, 'home', {
+            characters: [dummyChar],
+            selectedCharId: 'dummy',
+            unwrittenCharIds: ['dummy'],
+            charTopics: { dummy: { id: 'dummy', order: 1, content: t('dummy.firstTopic') || '오늘 하루는 어땠어?' } as Topic },
+            userProfiles: {}
+          });
+          setLoading(false);
+          return;
+        }
+        setLoadError('데이터를 불러오지 못했습니다. 네트워크를 확인하고 다시 시도해 주세요.');
         setLoading(false);
       }
     };
     
     init();
-  }, [authLoading, userId]);
+  }, [authLoading, user, userId, status, retryCount, router]);
 
   
   useEffect(() => {
@@ -176,53 +281,134 @@ export default function Home() {
 
       const fetchLatestChat = async () => {
         try {
-          const msgs = await getChatMessages(userId!, selectedCharId);
-          if (msgs.length > 0) {
-            setLatestChat(msgs[msgs.length - 1]);
+          if (isInitialPingPending(userId!, selectedCharId)) {
+            setInitialPingCharIds(prev => new Set(prev).add(selectedCharId));
+          }
+          const latestMessage = await getLatestChatMessage(userId!, selectedCharId);
+          if (latestMessage) {
+            setLatestChat(latestMessage);
+            setInitialPingCharIds(prev => {
+              const next = new Set(prev);
+              next.delete(selectedCharId);
+              return next;
+            });
           } else {
             setLatestChat(null);
-            if (!localStorage.getItem(`hasPinged_${selectedCharId}`)) {
-              localStorage.setItem(`hasPinged_${selectedCharId}`, 'true');
-              
-              const char = characters.find(c => c.id === selectedCharId);
-              const profile = userProfiles[selectedCharId] || null;
-              
-              if (char) {
-                const res = await fetch('/api/chat', {
-                  method: 'POST',
-                  headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify({
-                    character: char,
-                    userProfile: profile,
-                    messages: [],
-                    isFirstPing: true,
-                    userId: userId!
-                  })
-                });
-                const data = await res.json();
-                if (res.ok && data.reply) {
-                  const newMsg = {
-                    id: data.savedId || Date.now().toString(),
-                    userId: userId!,
-                    characterId: selectedCharId,
-                    role: 'assistant',
-                    content: data.reply,
-                    createdAt: Date.now()
-                  };
-                  setLatestChat(newMsg as ChatMessage);
-                }
-              }
+            const char = characters.find(c => c.id === selectedCharId);
+            const profile = userProfiles[selectedCharId] || null;
+
+            if (char) {
+              setInitialPingCharIds(prev => new Set(prev).add(selectedCharId));
+              const data = await ensureInitialPing({
+                character: char,
+                userProfile: profile,
+                userId: userId!,
+              });
+              setLatestChat({
+                id: data.savedId || Date.now().toString(),
+                userId: userId!,
+                characterId: selectedCharId,
+                role: 'assistant',
+                content: data.reply,
+                createdAt: Date.now()
+              } as ChatMessage);
+              setInitialPingCharIds(prev => {
+                const next = new Set(prev);
+                next.delete(selectedCharId);
+                return next;
+              });
             }
           }
         } catch (e) {
           console.error("Failed to fetch latest chat", e);
+          setInitialPingCharIds(prev => {
+            const next = new Set(prev);
+            next.delete(selectedCharId);
+            return next;
+          });
         }
       };
       fetchLatestChat();
     }
   }, [selectedCharId, userId]);
 
+  useEffect(() => {
+    if (!userId) return;
+
+    const handleInitialPingState = (event: Event) => {
+      const detail = (event as CustomEvent<{
+        status: 'started' | 'completed' | 'failed';
+        userId: string;
+        characterId: string;
+        reply?: string;
+        savedId?: string;
+      }>).detail;
+
+      if (!detail || detail.userId !== userId) return;
+
+      if (detail.status === 'started') {
+        setInitialPingCharIds(prev => new Set(prev).add(detail.characterId));
+        return;
+      }
+
+      setInitialPingCharIds(prev => {
+        const next = new Set(prev);
+        next.delete(detail.characterId);
+        return next;
+      });
+
+      if (detail.status === 'completed' && detail.characterId === selectedCharId && detail.reply) {
+        setLatestChat({
+          id: detail.savedId || Date.now().toString(),
+          userId,
+          characterId: detail.characterId,
+          role: 'assistant',
+          content: detail.reply,
+          createdAt: Date.now(),
+          locale
+        } as ChatMessage);
+      }
+    };
+
+    window.addEventListener(INITIAL_PING_EVENT, handleInitialPingState);
+    return () => window.removeEventListener(INITIAL_PING_EVENT, handleInitialPingState);
+  }, [locale, selectedCharId, userId]);
+
+  useEffect(() => {
+    if (!selectedCharId || !userId || selectedCharId === 'dummy') return;
+    if (Object.prototype.hasOwnProperty.call(userProfiles, selectedCharId)) return;
+
+    let cancelled = false;
+    getUserProfile(selectedCharId)
+      .then(profile => {
+        if (cancelled) return;
+        setUserProfiles(prev => ({ ...prev, [selectedCharId]: profile }));
+      })
+      .catch(error => console.warn('Failed to load selected profile:', error));
+
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedCharId, userId, userProfiles]);
+
   const selectedChar = characters.find(c => c.id === selectedCharId) || characters[0];
+
+  if (authError || loadError) {
+    return (
+      <div className="app-container" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '24px', textAlign: 'center', gap: '16px' }}>
+        <p style={{ color: 'var(--gray-700)', lineHeight: 1.6 }}>{authError || loadError}</p>
+        <button
+          onClick={() => {
+            if (authError) window.location.reload();
+            else setRetryCount(count => count + 1);
+          }}
+          style={{ border: 'none', borderRadius: '12px', padding: '14px 24px', background: 'var(--point-color)', color: 'white', fontWeight: 'bold', cursor: 'pointer' }}
+        >
+          다시 시도
+        </button>
+      </div>
+    );
+  }
 
   if (loading) {
     return (
@@ -248,8 +434,9 @@ export default function Home() {
   const isLightMode = selectedChar?.homeTheme === 'light';
   const textColor = hasBg ? (isLightMode ? 'var(--gray-800)' : 'white') : 'var(--gray-800)';
   const textShadow = hasBg ? (isLightMode ? 'none' : '0 2px 10px rgba(0,0,0,0.5)') : 'none';
-      const todayTopic = charTopics[selectedCharId] || null;
+  const todayTopic = selectedCharId ? charTopics[selectedCharId] || null : null;
   const userProfile = selectedCharId ? userProfiles[selectedCharId] : null;
+  const isInitialPingTyping = Boolean(selectedCharId && selectedCharId !== 'dummy' && initialPingCharIds.has(selectedCharId) && !latestChat);
 
   let formattedContent = (locale === 'ja' && todayTopic?.contentJa) ? todayTopic.contentJa : (todayTopic?.content || '');
   if (formattedContent && selectedChar) {
@@ -261,9 +448,8 @@ export default function Home() {
   return (
     <ErrorBoundary>
     <div 
-      className={`app-container ${!hasBg ? 'diary-bg' : ''}`}
+      className={`app-container tab-page home-page ${!hasBg ? 'diary-bg status-surface-check' : 'status-surface-home-bg'}`}
       style={{ 
-        paddingBottom: '65px',
         position: 'relative',
         ...(hasBg ? {
           backgroundImage: `url(${bgImage})`,
@@ -283,11 +469,11 @@ export default function Home() {
         }} />
       )}
 
-      <div style={{ position: 'relative', zIndex: 10, display: 'flex', flexDirection: 'column', height: '100%' }}>
+      <div className="home-shell" style={{ position: 'relative', zIndex: 10, display: 'flex', flexDirection: 'column' }}>
         {/* Character Selector (Horizontal Scroll) */}
-        <div style={{ display: 'flex', gap: '15px', overflowX: 'auto', padding: '25px', scrollbarWidth: 'none' }}>
+        <div className="home-character-selector" style={{ display: 'flex', gap: '15px', overflowX: 'auto', padding: '25px', scrollbarWidth: 'none', flexShrink: 0 }}>
             {[...characters].sort((a, b) => {
-              const history: string[] = JSON.parse(localStorage.getItem(`recentChars_${userId}`) || '[]');
+              const history = getRecentCharacterIds(userId);
               
               // Ensure currently selected is ALWAYS first (index -1 artificially)
               const idxA = a.id === selectedCharId ? -1 : (history.indexOf(a.id) === -1 ? 999 : history.indexOf(a.id));
@@ -301,10 +487,9 @@ export default function Home() {
                   key={char.id} 
                   onClick={() => {
                     setSelectedCharId(char.id);
-                    const history: string[] = JSON.parse(localStorage.getItem(`recentChars_${userId}`) || '[]');
-                    const newHistory = [char.id, ...history.filter(id => id !== char.id)];
-                    localStorage.setItem(`recentChars_${userId}`, JSON.stringify(newHistory));
+                    touchRecentCharacter(userId, char.id);
                   }}
+                  className="home-character-card"
                   style={{ 
                     display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '8px', flexShrink: 0, cursor: 'pointer',
                     backgroundColor: hasBg ? (isLightMode ? 'rgba(255, 255, 255, 0.3)' : 'rgba(255, 255, 255, 0.15)') : 'white',
@@ -316,7 +501,7 @@ export default function Home() {
                     transition: 'all 0.2s'
                   }}
                 >
-                  <div style={{ 
+                  <div className="home-character-avatar" style={{
                     width: '70px', height: '70px', borderRadius: '15px', overflow: 'hidden', backgroundColor: 'var(--gray-200)', position: 'relative'
                   }}>
                     {char.image ? (
@@ -344,7 +529,7 @@ export default function Home() {
           </div>
 
                 {/* Main Content Area */}
-        <main className="content" style={{ display: 'flex', flexDirection: 'column', gap: '14px', padding: '0 25px 25px 25px' }}>
+        <main className="content home-main" style={{ display: 'flex', flexDirection: 'column', gap: '14px', padding: '0 25px 25px 25px' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
             <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', paddingTop: '5px' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
@@ -357,7 +542,7 @@ export default function Home() {
                       trackEvent('locked_feature_tapped', { feature_name: 'settings', screen: 'home' });
                       router.push('/onboarding?skip=true&entry_point=home_settings');
                   } else {
-                      router.push(`/home-settings/${selectedChar.id}`);
+                      router.push(buildStaticEntityRoute('/home-settings', selectedChar.id));
                     }
                   }}
                   style={{ 
@@ -386,15 +571,15 @@ export default function Home() {
             </h2>
           </div>
           
-          <div style={{ marginTop: 'auto', display: 'flex', flexDirection: 'column', gap: '14px' }}>
-            {latestChat && (
+          <div className="home-bottom-cards" style={{ marginTop: 'auto', display: 'flex', flexDirection: 'column', gap: '14px', flexShrink: 0 }}>
+            {(latestChat || isInitialPingTyping) && (
               <div 
                 onClick={() => {
                   if (selectedChar?.id === 'dummy') {
                     trackEvent('locked_feature_tapped', { feature_name: 'chat', screen: 'home' });
                     router.push('/guide/chat');
                   } else {
-                    router.push('/chat/' + selectedCharId);
+                    router.push(buildStaticEntityRoute('/chat', selectedCharId!));
                   }
                 }}
                 style={{ 
@@ -413,7 +598,7 @@ export default function Home() {
                 }}
               >
                 <div style={{ width: '42px', height: '42px', borderRadius: '50%', overflow: 'hidden', backgroundColor: selectedCharId === 'dummy' ? 'white' : 'var(--gray-200)', flexShrink: 0, position: 'relative' }}>
-                  {latestChat.role === 'assistant' ? (
+                  {isInitialPingTyping || latestChat?.role === 'assistant' ? (
                     selectedChar?.image ? (
                       <Image src={selectedChar.image} alt={selectedChar.name} fill style={{ objectFit: 'cover' }} />
                     ) : (
@@ -431,21 +616,29 @@ export default function Home() {
                   <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '4px' }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
                       <p style={{ color: hasBg ? (isLightMode ? 'var(--gray-900)' : 'white') : 'var(--foreground)', fontSize: '0.9rem', fontWeight: 'bold' }}>
-                        {latestChat.role === 'assistant' ? selectedChar?.name : (userProfiles[selectedCharId || '']?.name || '나')}
+                        {isInitialPingTyping || latestChat?.role === 'assistant' ? selectedChar?.name : (userProfiles[selectedCharId || '']?.name || '나')}
                       </p>
-                      {(typeof window !== 'undefined' && ((latestChat.role === 'assistant' && latestChat.id !== localStorage.getItem('chat_read_' + selectedCharId)) || !latestChat)) && (
+                      {(isInitialPingTyping || (typeof window !== 'undefined' && latestChat?.role === 'assistant' && latestChat.id !== localStorage.getItem('chat_read_' + selectedCharId))) && (
                         <div style={{ width: '16px', height: '16px', borderRadius: '50%', backgroundColor: '#FF3B30', color: 'white', fontSize: '0.6rem', fontWeight: 'bold', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                           N
                         </div>
                       )}
                     </div>
                     <span style={{ fontSize: '0.75rem', color: selectedCharId === 'dummy' ? 'var(--gray-600)' : (hasBg ? (isLightMode ? 'var(--gray-600)' : 'rgba(255,255,255,0.7)') : 'var(--gray-400)') }}>
-                      {new Date((latestChat as any).createdAt || (latestChat as any).timestamp || Date.now()).toLocaleTimeString(getDateLocale(locale), { hour: 'numeric', minute: '2-digit', hour12: true })}
+                      {isInitialPingTyping ? (locale === 'ja' ? '作成中' : '작성 중') : new Date((latestChat as any).createdAt || (latestChat as any).timestamp || Date.now()).toLocaleTimeString(getDateLocale(locale), { hour: 'numeric', minute: '2-digit', hour12: true })}
                     </span>
                   </div>
-                  <p style={{ color: hasBg ? (isLightMode ? 'var(--gray-800)' : 'rgba(255,255,255,0.9)') : 'var(--gray-600)', fontSize: '0.85rem', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                    {(latestChat.content || '').split('\n')[0]}
-                  </p>
+                  {isInitialPingTyping ? (
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '5px', height: '18px' }}>
+                      <span className="typing-dot" style={{ animationDelay: '0s' }} />
+                      <span className="typing-dot" style={{ animationDelay: '0.2s' }} />
+                      <span className="typing-dot" style={{ animationDelay: '0.4s' }} />
+                    </div>
+                  ) : (
+                    <p style={{ color: hasBg ? (isLightMode ? 'var(--gray-800)' : 'rgba(255,255,255,0.9)') : 'var(--gray-600)', fontSize: '0.85rem', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                      {(latestChat?.content || '').split('\n')[0]}
+                    </p>
+                  )}
                 </div>
               </div>
             )}

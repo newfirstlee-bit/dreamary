@@ -6,6 +6,9 @@ import { getCharacter, updateCharacter, Character } from '@/lib/db';
 import { uploadImageToImgbb } from '@/lib/imgbb';
 import { Loader2, ChevronLeft, Image as ImageIcon } from 'lucide-react';
 import { useLocale } from '@/lib/i18n';
+import { resolveStaticEntityId } from '@/lib/navigation';
+import { clearUserCache } from '@/lib/appCache';
+import { invalidateCharacterStore } from '@/store/useAppStore';
 
 export default function HomeSettingsPage({ params }: { params: { id: string } }) {
   const router = useRouter();
@@ -14,11 +17,12 @@ export default function HomeSettingsPage({ params }: { params: { id: string } })
   const [character, setCharacter] = useState<Character | null>(null);
   const [uploadingBg, setUploadingBg] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const characterId = resolveStaticEntityId(params.id);
 
   useEffect(() => {
     const init = async () => {
       try {
-        const char = await getCharacter(params.id);
+        const char = await getCharacter(characterId);
         setCharacter(char);
       } catch (err) {
         console.error("Failed to load character:", err);
@@ -27,7 +31,7 @@ export default function HomeSettingsPage({ params }: { params: { id: string } })
       }
     };
     init();
-  }, [params.id]);
+  }, [characterId]);
 
   const handleBgUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     if (!e.target.files || !e.target.files[0] || !character) return;
@@ -35,6 +39,8 @@ export default function HomeSettingsPage({ params }: { params: { id: string } })
     try {
       const url = await uploadImageToImgbb(e.target.files[0]);
       await updateCharacter(character.id, { homeBackgroundImage: url });
+      clearUserCache(character.userId);
+      invalidateCharacterStore(character.userId);
       setCharacter({ ...character, homeBackgroundImage: url });
       alert(t('homeSettings.bgSuccess'));
     } catch (err: any) {
@@ -50,12 +56,16 @@ export default function HomeSettingsPage({ params }: { params: { id: string } })
     const date = new Date(e.target.value);
     const ts = date.getTime();
     await updateCharacter(character.id, { dDayStartDate: ts });
+    clearUserCache(character.userId);
+    invalidateCharacterStore(character.userId);
     setCharacter({ ...character, dDayStartDate: ts });
   };
 
   const handleThemeChange = async (theme: 'dark' | 'light') => {
     if (!character) return;
     await updateCharacter(character.id, { homeTheme: theme });
+    clearUserCache(character.userId);
+    invalidateCharacterStore(character.userId);
     setCharacter({ ...character, homeTheme: theme });
   };
 
@@ -73,7 +83,7 @@ export default function HomeSettingsPage({ params }: { params: { id: string } })
   }
 
   return (
-    <div className="app-container">
+    <div className="app-container full-page">
       <header className="header" style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
         <button onClick={() => router.back()} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '0', display: 'flex' }}>
           <ChevronLeft size={28} color="var(--gray-800)" />

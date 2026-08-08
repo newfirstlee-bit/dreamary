@@ -33,6 +33,11 @@ function getCookie(name: string) {
 
 import { auth } from './firebase';
 
+export function getStoredGuestUserId(): string | null {
+  if (typeof window === 'undefined') return null;
+  return localStorage.getItem(USER_ID_KEY) || getCookie(USER_ID_KEY);
+}
+
 export function getUserId(): string {
   if (typeof window === 'undefined') return ''; // SSR 대응
 

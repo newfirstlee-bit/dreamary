@@ -1,16 +1,34 @@
 import type { Config } from "@netlify/functions";
-import { adminAuth, adminDb } from '../../src/lib/firebase-admin';
 import { corsHeaders } from './cors';
 
 export const config: Config = {
   path: "/api/account/delete"
 };
 
-async function deleteSnapshotDocs(firestore: FirebaseFirestore.Firestore, docs: FirebaseFirestore.QueryDocumentSnapshot[]) {
+async function getFirebaseAdmin() {
+  const [{ cert, getApps, initializeApp }, { getAuth }, { getFirestore }] = await Promise.all([
+    import('firebase-admin/app'),
+    import('firebase-admin/auth'),
+    import('firebase-admin/firestore'),
+  ]);
+
+  if (!getApps().length) {
+    const rawServiceAccount = process.env.FIREBASE_SERVICE_ACCOUNT_KEY;
+    if (!rawServiceAccount) throw new Error('FIREBASE_SERVICE_ACCOUNT_KEY is not set');
+    initializeApp({ credential: cert(JSON.parse(rawServiceAccount)) });
+  }
+
+  return {
+    auth: getAuth(),
+    firestore: getFirestore(),
+  };
+}
+
+async function deleteSnapshotDocs(firestore: any, docs: any[]) {
   const BATCH_LIMIT = 450;
   for (let start = 0; start < docs.length; start += BATCH_LIMIT) {
     const batch = firestore.batch();
-    docs.slice(start, start + BATCH_LIMIT).forEach((item) => batch.delete(item.ref));
+    docs.slice(start, start + BATCH_LIMIT).forEach((item: any) => batch.delete(item.ref));
     await batch.commit();
   }
 }
@@ -25,10 +43,6 @@ export default async function reqHandler(req: Request) {
   }
 
   try {
-    if (!adminAuth || !adminDb) {
-      return new Response(JSON.stringify({ error: '서버 설정이 완료되지 않았습니다.' }), { status: 500, headers: corsHeaders });
-    }
-
     const authorization = req.headers.get('authorization') || '';
     const idToken = authorization.startsWith('Bearer ') ? authorization.slice('Bearer '.length) : '';
     if (!idToken) {
@@ -36,41 +50,42 @@ export default async function reqHandler(req: Request) {
     }
 
     const { uid } = await req.json();
-    const decoded = await adminAuth.verifyIdToken(idToken);
+    const { auth, firestore } = await getFirebaseAdmin();
+    const decoded = await auth.verifyIdToken(idToken);
     if (!uid || decoded.uid !== uid) {
       return new Response(JSON.stringify({ error: '본인 계정만 탈퇴할 수 있습니다.' }), { status: 403, headers: corsHeaders });
     }
 
     // 사용자 관련 데이터 조회
     const [charactersSnap, chatMessagesSnap, diariesSnap, reportsSnap, usedBackupCodesSnap, ownedBackupCodesSnap] = await Promise.all([
-      adminDb.collection('characters').where('userId', '==', uid).get(),
-      adminDb.collection('chatMessages').where('userId', '==', uid).get(),
-      adminDb.collection('diaries').where('userId', '==', uid).get(),
-      adminDb.collection('reports').where('userId', '==', uid).get(),
-      adminDb.collection('backupCodes').where('usedByUserId', '==', uid).get(),
-      adminDb.collection('backupCodes').where('sourceUUID', '==', uid).get(),
+      firestore.collection('characters').where('userId', '==', uid).get(),
+      firestore.collection('chatMessages').where('userId', '==', uid).get(),
+      firestore.collection('diaries').where('userId', '==', uid).get(),
+      firestore.collection('reports').where('userId', '==', uid).get(),
+      firestore.collection('backupCodes').where('usedByUserId', '==', uid).get(),
+      firestore.collection('backupCodes').where('sourceUUID', '==', uid).get(),
     ]);
 
     // 캐릭터별 users 프로필 문서 참조
-    const userProfileRefs = charactersSnap.docs.map((characterDoc) => adminDb!.collection('users').doc(characterDoc.id));
-    const accountRef = adminDb.collection('accounts').doc(uid);
+    const userProfileRefs = charactersSnap.docs.map((characterDoc: any) => firestore.collection('users').doc(characterDoc.id));
+    const accountRef = firestore.collection('accounts').doc(uid);
 
     // 순서대로 삭제: 신고 → 백업코드 → 채팅 → 일기 → 프로필 → 캐릭터 → 계정 → Auth
-    await deleteSnapshotDocs(adminDb, reportsSnap.docs);
-    await deleteSnapshotDocs(adminDb, usedBackupCodesSnap.docs);
-    await deleteSnapshotDocs(adminDb, ownedBackupCodesSnap.docs);
-    await deleteSnapshotDocs(adminDb, chatMessagesSnap.docs);
-    await deleteSnapshotDocs(adminDb, diariesSnap.docs);
+    await deleteSnapshotDocs(firestore, reportsSnap.docs);
+    await deleteSnapshotDocs(firestore, usedBackupCodesSnap.docs);
+    await deleteSnapshotDocs(firestore, ownedBackupCodesSnap.docs);
+    await deleteSnapshotDocs(firestore, chatMessagesSnap.docs);
+    await deleteSnapshotDocs(firestore, diariesSnap.docs);
 
     for (let start = 0; start < userProfileRefs.length; start += 450) {
-      const batch = adminDb.batch();
-      userProfileRefs.slice(start, start + 450).forEach((ref) => batch.delete(ref));
+      const batch = firestore.batch();
+      userProfileRefs.slice(start, start + 450).forEach((ref: any) => batch.delete(ref));
       await batch.commit();
     }
 
-    await deleteSnapshotDocs(adminDb, charactersSnap.docs);
+    await deleteSnapshotDocs(firestore, charactersSnap.docs);
     await accountRef.delete();
-    await adminAuth.deleteUser(uid);
+    await auth.deleteUser(uid);
 
     return new Response(JSON.stringify({ success: true }), { headers: corsHeaders });
   } catch (error: any) {

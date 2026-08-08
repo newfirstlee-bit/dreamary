@@ -8,10 +8,17 @@ interface AdStats {
   chatCount: number;
 }
 
+interface ChatAdStats {
+  date: string;
+  chatCount: number;
+}
+
+const todayKey = () => new Date().toLocaleDateString('ko-KR', { timeZone: 'Asia/Seoul' });
+
 export const getAdStats = (): AdStats => {
   const userId = getUserId();
   const key = `dreamary_ad_stats_${userId}`;
-  const today = new Date().toLocaleDateString('ko-KR', { timeZone: 'Asia/Seoul' }); // YYYY. MM. DD. format
+  const today = todayKey();
   
   try {
     const raw = localStorage.getItem(key);
@@ -51,15 +58,45 @@ export const trackDiaryAndCheckAd = (): boolean => {
 };
 
 export const trackChatAndCheckAd = (): boolean => {
+  console.warn('trackChatAndCheckAd() is deprecated. Use shouldShowChatAd() before send and recordSuccessfulChatTurn() after AI reply success.');
+  return shouldShowChatAd();
+};
+
+const getChatAdStats = (): ChatAdStats => {
+  const userId = getUserId();
+  const key = `dreamary_chat_ad_stats_v2_${userId}`;
+  const today = todayKey();
+
+  try {
+    const raw = localStorage.getItem(key);
+    if (raw) {
+      const stats = JSON.parse(raw) as ChatAdStats;
+      if (stats.date === today) return stats;
+    }
+  } catch (e) {
+    console.error(e);
+  }
+
+  return { date: today, chatCount: 0 };
+};
+
+const saveChatAdStats = (stats: ChatAdStats) => {
+  const userId = getUserId();
+  const key = `dreamary_chat_ad_stats_v2_${userId}`;
+  localStorage.setItem(key, JSON.stringify(stats));
+};
+
+export const shouldShowChatAd = (): boolean => {
   if (typeof window !== 'undefined' && localStorage.getItem('dev_force_ads') === 'true') {
     return true;
   }
 
-  const stats = getAdStats();
-  stats.chatCount += 1;
-  saveAdStats(stats);
-  
-  // Chat: 3rd time, then every 3rd time (3, 6, 9...)
-  if (stats.chatCount >= 3 && stats.chatCount % 3 === 0) return true;
-  return false;
+  const stats = getChatAdStats();
+  const nextChatCount = stats.chatCount + 1;
+  return nextChatCount >= 3 && nextChatCount % 3 === 0;
+};
+
+export const recordSuccessfulChatTurn = () => {
+  const stats = getChatAdStats();
+  saveChatAdStats({ ...stats, chatCount: stats.chatCount + 1 });
 };

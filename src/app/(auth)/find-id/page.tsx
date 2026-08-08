@@ -1,4 +1,5 @@
 "use client";
+import { apiFetch } from '@/lib/api';
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
@@ -20,7 +21,7 @@ export default function FindIdPage() {
     setSuccess(false);
 
     try {
-      const res = await fetch('/api/auth/find-id', {
+      const res = await apiFetch('/api/auth/find-id', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email })
@@ -40,7 +41,7 @@ export default function FindIdPage() {
   };
 
   return (
-    <div className="app-container" style={{ padding: '20px', display: 'flex', flexDirection: 'column', height: '100vh', backgroundColor: 'var(--bg-color)' }}>
+    <div className="app-container full-page auth-page" style={{ backgroundColor: 'var(--bg-color)' }}>
       <header style={{ marginBottom: '40px', marginTop: '20px', position: 'relative', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
         <button onClick={() => router.back()} style={{ position: 'absolute', left: 0, background: 'none', border: 'none', cursor: 'pointer', padding: '5px', display: 'flex', alignItems: 'center' }}>
           <ChevronLeft size={28} color="var(--gray-800)" />

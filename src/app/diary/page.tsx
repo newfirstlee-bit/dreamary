@@ -1,24 +1,53 @@
 "use client";
+import { showAd } from "@/lib/ads";
+import { apiPostJson } from '@/lib/api';
 
-import { useEffect, useState, Suspense } from 'react';
+import { useCallback, useEffect, useState, Suspense } from 'react';
 import Image from 'next/image';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useUserId } from '@/hooks/useUserId';
-import { getCharactersByUser, getUserProfile, getTopics, getDiariesByUserAndChar, subscribeDiaries, saveDiary, Character, UserProfile, Topic, Diary, unlockDiaryAd } from '@/lib/db';
+import { getUserProfile, getTopics, getTodayDiaryByUserAndChar, getDiaryCountByUserAndChar, subscribeTodayDiary, saveDiary, Character, UserProfile, Topic, Diary, unlockDiaryAd } from '@/lib/db';
 import { Loader2, Send, ChevronDown, User, Lock } from 'lucide-react';
 import Link from 'next/link';
 import AdModal from '@/components/AdModal';
 import ErrorModal from '@/components/ErrorModal';
+import ReportModal, { ReportSubmitPayload } from '@/components/ReportModal';
 import { trackDiaryAndCheckAd } from '@/lib/adTracker';
 import { trackEvent } from '@/lib/mixpanel';
 import { saveDraft, loadDraft, clearDraft } from '@/lib/draftStorage';
 import { useRef } from 'react';
 import { useLocale } from '@/lib/i18n';
+import { clearUserCache, readUserCache, writeUserCache } from '@/lib/appCache';
+import { sortCharactersByRecent, touchRecentCharacter } from '@/lib/characterOrder';
+import { getCharactersWithGuestRecovery } from '@/lib/ownership';
+import { useAuth } from '@/components/AuthContext';
+import { useAppStore } from '@/store/useAppStore';
+import { buildStaticEntityRoute } from '@/lib/navigation';
+import { logAdDiagnostic } from '@/lib/adDiagnostics';
+
+interface DiaryCache {
+  dateString: string;
+  characters: Character[];
+  activeCharId: string;
+  userProfiles: Record<string, UserProfile | null>;
+  allTopics: Topic[];
+  todayTopic: Topic | null;
+  todayDiary: Diary | null;
+}
+
+const withTimeout = <T,>(promise: Promise<T>, timeoutMs = 10000): Promise<T> =>
+  Promise.race([
+    promise,
+    new Promise<T>((_, reject) =>
+      setTimeout(() => reject(new Error('Diary data request timed out')), timeoutMs)
+    ),
+  ]);
 
 function DiaryContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const userId = useUserId();
+  const { status } = useAuth();
   const { t, locale } = useLocale();
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -26,23 +55,48 @@ function DiaryContent() {
   
   const [adModalOpen, setAdModalOpen] = useState(false);
   const [errorModalOpen, setErrorModalOpen] = useState(false);
-  const [modalResolver, setModalResolver] = useState<(() => void) | null>(null);
+  const [adFailureMessage, setAdFailureMessage] = useState('');
+  const [modalResolver, setModalResolver] = useState<((didOpen: boolean) => void) | null>(null);
+  const [reportModalOpen, setReportModalOpen] = useState(false);
+  const diaryInputRef = useRef<HTMLTextAreaElement>(null);
+
+  const { loadCharacters, loadTopics } = useAppStore();
 
   const confirmAd = () => {
-    window.open('https://www.effectivecpmnetwork.com/rk8wuv0t?key=d9c3569d98ad59723168cace64459dd2', '_blank');
-    setAdModalOpen(false);
-    if (modalResolver) {
-      modalResolver();
-      setModalResolver(null);
-    }
+    showAd((result) => {
+      setAdModalOpen(false);
+      if (modalResolver) {
+        if (!result.didOpen && result.message) {
+          setAdFailureMessage(result.message);
+        }
+        modalResolver(result.didOpen);
+      }
+    });
+    setModalResolver(null);
   };
 
   const closeAdModal = () => {
     setAdModalOpen(false);
     if (modalResolver) {
-      modalResolver();
+      modalResolver(false);
       setModalResolver(null);
     }
+  };
+
+  const submitDiaryReport = async ({ reasons, otherText }: ReportSubmitPayload) => {
+    if (!todayDiary || !activeChar || !userId || !todayDiary.charReply) return;
+    await apiPostJson('/api/reports/create', {
+      userId,
+      characterId: activeChar.id,
+      characterName: activeChar.name,
+      source: 'diary',
+      targetId: todayDiary.id,
+      content: todayDiary.charReply,
+      reasons,
+      otherText,
+      locale,
+    });
+    alert(t('report.success'));
   };
   
   const [characters, setCharacters] = useState<Character[]>([]);
@@ -54,28 +108,22 @@ function DiaryContent() {
   const [todayDiary, setTodayDiary] = useState<Diary | null>(null);
   const [userEntry, setUserEntry] = useState('');
 
-  const loadInitialData = async () => {
-    if (!userId) return;
+  const resizeDiaryInput = useCallback((textarea: HTMLTextAreaElement | null) => {
+    if (!textarea) return;
+    textarea.style.height = 'auto';
+    textarea.style.height = `${Math.max(120, textarea.scrollHeight)}px`;
+    textarea.style.overflowY = 'hidden';
+  }, []);
+
+  const refreshActiveDiary = async () => {
+    if (!userId || !activeCharId) return;
     const now = new Date();
     const dateString = now.toISOString().split('T')[0];
-    const [chars, topics] = await Promise.all([
-      getCharactersByUser(userId),
-      getTopics()
-    ]);
-    const profiles = await Promise.all(chars.map(c => getUserProfile(c.id)));
-    const profileMap: Record<string, UserProfile | null> = {};
-    chars.forEach((c, idx) => {
-      profileMap[c.id] = profiles[idx];
-    });
-    setCharacters(chars);
-    setUserProfiles(profileMap);
-    setAllTopics(topics);
-    
-    if (activeCharId) {
-       const diaries = await getDiariesByUserAndChar(userId, activeCharId);
-       const todayD = diaries.find(d => d.dateString === dateString);
-       // We use subscribeDiaries in a separate useEffect for real-time updates.
-       // setTodayDiary(todayD || null); is handled by subscription now.
+    const todayD = await getTodayDiaryByUserAndChar(userId, activeCharId, dateString);
+    setTodayDiary(todayD);
+    if (todayD) {
+      const matchedTopic = allTopics.find(t => t.id === todayD.topicId);
+      setTodayTopic(matchedTopic || allTopics[0] || null);
     }
   };
 
@@ -84,22 +132,34 @@ function DiaryContent() {
     const now = new Date();
     const dateString = now.toISOString().split('T')[0];
     
-    const unsubscribe = subscribeDiaries(userId, activeCharId, (diaries) => {
-      const todayD = diaries.find(d => d.dateString === dateString);
-      setTodayDiary(todayD || null);
-    });
+    const unsubscribe = subscribeTodayDiary(userId, activeCharId, dateString, setTodayDiary);
     
     return () => unsubscribe();
   }, [activeCharId, userId]);
 
   useEffect(() => {
+    if (!userId) return;
+    const dateString = new Date().toISOString().split('T')[0];
+    const cachedDiary = readUserCache<DiaryCache>(userId, 'diary');
+    const hasUsableCache = cachedDiary?.dateString === dateString;
+
+    if (cachedDiary && hasUsableCache) {
+      setCharacters(cachedDiary.characters);
+      setActiveCharId(cachedDiary.activeCharId);
+      setUserProfiles(cachedDiary.userProfiles);
+      setAllTopics(cachedDiary.allTopics);
+      setTodayTopic(cachedDiary.todayTopic);
+      setTodayDiary(cachedDiary.todayDiary);
+      setLoading(false);
+    }
+
     const init = async () => {
-      if (!userId) return;
       try {
-        const [chars, topics] = await Promise.all([
-          getCharactersByUser(userId),
-          getTopics()
-        ]);
+        const [loadedChars, topics] = await withTimeout(Promise.all([
+          loadCharacters(userId, status === 'authenticated'),
+          loadTopics()
+        ]));
+        const chars = sortCharactersByRecent(loadedChars, userId);
 
         if (chars.length === 0) {
           const dummyChar: Character = {
@@ -124,30 +184,31 @@ function DiaryContent() {
             setAllTopics([dummyTopic]);
             setTodayTopic(dummyTopic);
           }
+          writeUserCache<DiaryCache>(userId, 'diary', {
+            dateString,
+            characters: [dummyChar],
+            activeCharId: 'dummy',
+            userProfiles: {},
+            allTopics: topics.length > 0 ? topics : [{ id: 'dummy', order: 1, content: t('dummy.firstTopic') || '오늘 하루는 어땠어?' } as Topic],
+            todayTopic: topics.length > 0 ? topics[0] : ({ id: 'dummy', order: 1, content: t('dummy.firstTopic') || '오늘 하루는 어땠어?' } as Topic),
+            todayDiary: null
+          });
           setLoading(false);
           return;
         }
 
-        const profiles = await Promise.all(chars.map(c => getUserProfile(c.id)));
-        const profileMap: Record<string, UserProfile | null> = {};
-        chars.forEach((c, idx) => {
-          profileMap[c.id] = profiles[idx];
-        });
-
-        setCharacters(chars);
-        setUserProfiles(profileMap);
-        
-        const now = new Date();
-        const dateString = now.toISOString().split('T')[0];
+        setAllTopics(topics);
+        if (topics.length > 0) setTodayTopic(topics[0]);
 
         let initialCharId = chars[0].id;
         let allAnswered = true;
 
-        const diariesArrays = await Promise.all(chars.map(c => getDiariesByUserAndChar(userId, c.id)));
+        const todayDiaries = await withTimeout(Promise.all(
+          chars.map(c => getTodayDiaryByUserAndChar(userId, c.id, dateString))
+        ));
         for (let i = 0; i < chars.length; i++) {
           const char = chars[i];
-          const hasToday = diariesArrays[i].some(d => d.dateString === dateString);
-          if (!hasToday) {
+          if (!todayDiaries[i]) {
             initialCharId = char.id;
             allAnswered = false;
             break;
@@ -166,22 +227,32 @@ function DiaryContent() {
         }
 
         setActiveCharId(initialCharId);
+        setCharacters(chars);
+        setLoading(false);
+
+        let resolvedTopic: Topic | null = topics[0] || null;
+        let resolvedDiary: Diary | null = null;
+        const profileMap: Record<string, UserProfile | null> = {};
 
         // Pick topic based on day of year
         if (topics.length > 0) {
           setAllTopics(topics);
-          const diaries = await getDiariesByUserAndChar(userId, initialCharId);
-          const todayD = diaries.find(d => d.dateString === dateString);
+          const selectedCharIndex = chars.findIndex(c => c.id === initialCharId);
+          const todayD = selectedCharIndex >= 0 ? todayDiaries[selectedCharIndex] : null;
           
           if (todayD) {
             setTodayDiary(todayD);
             const matchedTopic = topics.find(t => t.id === todayD.topicId);
-            setTodayTopic(matchedTopic || topics[0]);
+            resolvedDiary = todayD;
+            resolvedTopic = matchedTopic || topics[0];
+            setTodayTopic(resolvedTopic);
           } else {
-            const nextIdx = diaries.length % topics.length;
-            setTodayTopic(topics[nextIdx]);
+            const diaryCount = await withTimeout(getDiaryCountByUserAndChar(userId, initialCharId));
+            const nextIdx = diaryCount % topics.length;
+            resolvedTopic = topics[nextIdx];
+            setTodayTopic(resolvedTopic);
             
-            const draft = loadDraft(initialCharId);
+            const draft = loadDraft(initialCharId, 'diary');
             if (draft) {
               setUserEntry(draft);
               draftLoaded.current = true;
@@ -189,18 +260,51 @@ function DiaryContent() {
           }
         }
 
+        profileMap[initialCharId] = await withTimeout(getUserProfile(initialCharId));
+        setUserProfiles(profileMap);
+
+        writeUserCache<DiaryCache>(userId, 'diary', {
+          dateString,
+          characters: chars,
+          activeCharId: initialCharId,
+          userProfiles: profileMap,
+          allTopics: topics,
+          todayTopic: resolvedTopic,
+          todayDiary: resolvedDiary
+        });
         setLoading(false);
       } catch (err) {
         console.error("Failed to load diary data:", err);
+        if (hasUsableCache) {
+          setLoading(false);
+          return;
+        }
+        // 첫 조회 실패가 앱 진입을 막지 않도록 비로그인 체험 화면을 표시합니다.
+        const dummyChar: Character = {
+          id: 'dummy',
+          userId,
+          name: t('dummy.charName') || '드림캐',
+          feeling: '',
+          title: '',
+          exampleChat: '',
+          negative: '',
+          createdAt: Date.now(),
+          dDayStartDate: Date.now()
+        };
+        const dummyTopic = {
+          id: 'dummy',
+          order: 1,
+          content: t('dummy.firstTopic') || '오늘 하루는 어땠어?'
+        } as Topic;
+        setCharacters([dummyChar]);
+        setActiveCharId('dummy');
+        setAllTopics([dummyTopic]);
+        setTodayTopic(dummyTopic);
         setLoading(false);
       }
     };
     init();
-  }, [router, userId]);
-
-  useEffect(() => {
-    loadInitialData();
-  }, [userId]);
+  }, [router, userId, status]);
 
   useEffect(() => {
     if (todayDiary && !todayDiary.isAdLocked && todayDiary.charReply) {
@@ -216,7 +320,18 @@ function DiaryContent() {
     }
   }, [todayDiary, activeCharId]);
 
+  useEffect(() => {
+    resizeDiaryInput(diaryInputRef.current);
+  }, [userEntry, resizeDiaryInput]);
+
+  useEffect(() => {
+    if (!adFailureMessage) return;
+    const timer = window.setTimeout(() => setAdFailureMessage(''), 3500);
+    return () => window.clearTimeout(timer);
+  }, [adFailureMessage]);
+
   const handleCharSelect = async (charId: string) => {
+    if (!userId) return;
     setActiveCharId(charId);
     setUserEntry('');
     setTodayDiary(null);
@@ -226,17 +341,17 @@ function DiaryContent() {
 
       const now = new Date();
       const dateString = now.toISOString().split('T')[0];
-      const diaries = await getDiariesByUserAndChar(userId, charId);
-      const todayD = diaries.find(d => d.dateString === dateString);
+      const todayD = await getTodayDiaryByUserAndChar(userId, charId, dateString);
       if (todayD) {
         setTodayDiary(todayD);
         const matchedTopic = allTopics.find(t => t.id === todayD.topicId);
         setTodayTopic(matchedTopic || allTopics[0]);
       } else {
-        const nextIdx = diaries.length % allTopics.length;
+        const diaryCount = await getDiaryCountByUserAndChar(userId, charId);
+        const nextIdx = allTopics.length > 0 ? diaryCount % allTopics.length : 0;
         setTodayTopic(allTopics[nextIdx] || allTopics[0]);
         
-        const draft = loadDraft(charId);
+        const draft = loadDraft(charId, 'diary');
         if (draft) {
           setUserEntry(draft);
           draftLoaded.current = true;
@@ -248,27 +363,51 @@ function DiaryContent() {
     setLoading(false);
   };
 
+  useEffect(() => {
+    if (!activeCharId || activeCharId === 'dummy') return;
+    if (Object.prototype.hasOwnProperty.call(userProfiles, activeCharId)) return;
+
+    let cancelled = false;
+    getUserProfile(activeCharId)
+      .then(profile => {
+        if (cancelled) return;
+        setUserProfiles(prev => ({ ...prev, [activeCharId]: profile }));
+      })
+      .catch(error => console.warn('Failed to load active profile:', error));
+
+    return () => {
+      cancelled = true;
+    };
+  }, [activeCharId, userProfiles]);
+
   const handleSend = async () => {
-    if (!userEntry.trim() || !todayTopic || !activeCharId) return;
+    if (!userEntry.trim() || !todayTopic || !activeCharId || !userId) return;
 
     setSaving(true);
+    let attemptedAdTurn = false;
+    let requestId = '';
     try {
 
       const char = characters.find(c => c.id === activeCharId);
+      if (!char) {
+        setSaving(false);
+        return;
+      }
       const activeProfile = userProfiles[activeCharId];
       const dateString = new Date().toISOString().split('T')[0];
       
       const isAdTurn = trackDiaryAndCheckAd();
+      attemptedAdTurn = isAdTurn;
       
-      let adWaitPromise = Promise.resolve();
+      let adWaitPromise = Promise.resolve(true);
       if (isAdTurn) {
         setAdModalOpen(true);
-        adWaitPromise = new Promise<void>((resolve) => {
-          setModalResolver(() => () => resolve());
+        adWaitPromise = new Promise<boolean>((resolve) => {
+          setModalResolver(() => (didOpen: boolean) => resolve(didOpen));
         });
       }
 
-      const requestId = typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+      requestId = typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
         ? crypto.randomUUID()
         : 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => { const r = (Math.random() * 16) | 0; return (c === 'x' ? r : (r & 0x3) | 0x8).toString(16); });
       
@@ -281,29 +420,34 @@ function DiaryContent() {
             throw new Error('Forced error for testing');
           }
 
-          const res = await fetch('/api/diary', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              character: char,
-              userProfile: activeProfile,
-              topic: todayTopic.content,
-              userEntry,
-              userId,
-              topicId: todayTopic.id,
-              dateString,
-              isAdTurn,
-              requestId
-            })
+          if (isAdTurn && attempt === 1) {
+            const adOpened = await adWaitPromise;
+            if (!adOpened) {
+              logAdDiagnostic('diary', 'ad_open_failed', { characterId: char.id, requestId });
+              throw new Error('AD_OPEN_FAILED');
+            }
+            logAdDiagnostic('diary', 'ad_completed', { characterId: char.id, requestId });
+          }
+
+          const data = await apiPostJson<{ reply?: string; savedId?: string }>('/api/diary', {
+            character: char,
+            userProfile: activeProfile,
+            topic: todayTopic.content,
+            userEntry,
+            userId,
+            topicId: todayTopic.id,
+            dateString,
+            isAdTurn: false,
+            requestId
           });
 
-          const data = await res.json();
-          if (res.ok && !data.error) {
+          if (data.reply || data.savedId) {
             success = true;
-            savedId = data.savedId;
+            savedId = data.savedId || '';
             break;
           }
         } catch (e) {
+          if ((e as Error)?.message === 'AD_OPEN_FAILED') throw e;
           console.error(`Attempt ${attempt} failed:`, e);
         }
 
@@ -314,11 +458,6 @@ function DiaryContent() {
 
       if (!success) {
         throw new Error('All 3 attempts failed');
-      }
-
-      if (isAdTurn) {
-        await adWaitPromise;
-        await unlockDiaryAd(savedId);
       }
 
       trackEvent('Diary_Written', {
@@ -334,14 +473,20 @@ function DiaryContent() {
       }
 
       setUserEntry('');
-      clearDraft(char!.id);
-      // subscribeDiaries가 실시간으로 Firestore 업데이트를 감지하므로 별도 재조회 불필요
+      clearDraft(char!.id, 'diary');
+      if (userId) clearUserCache(userId, ['home', 'diary']);
+      // 오늘 일기 구독이 Firestore 업데이트를 감지하므로 별도 전체 재조회 불필요
 
     } catch (err) {
       console.error(err);
       closeAdModal();
-      saveDraft(activeCharId, userEntry);
-      setErrorModalOpen(true);
+      saveDraft(activeCharId, userEntry, 'diary');
+      if ((err as Error)?.message !== 'AD_OPEN_FAILED') {
+        if (attemptedAdTurn) {
+          logAdDiagnostic('diary', 'app_server_request_failed', { characterId: activeCharId, requestId }, err);
+        }
+        setErrorModalOpen(true);
+      }
     }
     setSaving(false);
   };
@@ -356,6 +501,7 @@ function DiaryContent() {
 
   const activeChar = characters.find(c => c.id === activeCharId);
   const userProfile = activeCharId ? userProfiles[activeCharId] : null;
+  const hasPair = characters.some(character => character.id !== 'dummy');
 
   let formattedContent = (locale === 'ja' && todayTopic?.contentJa) ? todayTopic.contentJa : (todayTopic?.content || '');
   if (formattedContent && activeChar) {
@@ -370,21 +516,15 @@ function DiaryContent() {
   };
 
   return (
-    <div className="app-container diary-bg" style={{ paddingBottom: '65px' }}>
+    <div className="app-container tab-page diary-page diary-bg status-surface-check">
       <header className="header" style={{ borderBottomLeftRadius: 0, borderBottomRightRadius: 0, position: 'relative', display: 'flex', justifyContent: 'flex-start', alignItems: 'center' }}>
         <span>{t('diary.header')}</span>
       </header>
 
       {/* Character Selector (Horizontal Scroll) */}
-      {characters.length > 0 && (
-        <div style={{ display: 'flex', gap: '15px', overflowX: 'auto', padding: '15px 20px', scrollbarWidth: 'none', backgroundColor: '#F5F0FF' }}>
-          {[...characters].sort((a, b) => {
-      
-            const history: string[] = JSON.parse(localStorage.getItem(`recentChars_${userId}`) || '[]');
-            const idxA = a.id === activeCharId ? -1 : (history.indexOf(a.id) === -1 ? 999 : history.indexOf(a.id));
-            const idxB = b.id === activeCharId ? -1 : (history.indexOf(b.id) === -1 ? 999 : history.indexOf(b.id));
-            return idxA - idxB;
-          }).map(char => {
+      {hasPair && (
+        <div className="diary-character-selector" style={{ display: 'flex', gap: '15px', overflowX: 'auto', padding: '15px 20px', scrollbarWidth: 'none', backgroundColor: '#F5F0FF', flexShrink: 0 }}>
+          {characters.map(char => {
             const isSelected = char.id === activeCharId;
             return (
               <div 
@@ -392,10 +532,9 @@ function DiaryContent() {
                 onClick={() => {
                   handleCharSelect(char.id);
             
-                  const history: string[] = JSON.parse(localStorage.getItem(`recentChars_${userId}`) || '[]');
-                  const newHistory = [char.id, ...history.filter(id => id !== char.id)];
-                  localStorage.setItem(`recentChars_${userId}`, JSON.stringify(newHistory));
+                  touchRecentCharacter(userId, char.id);
                 }}
+                className="diary-character-card"
                 style={{ 
                   display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '8px', flexShrink: 0, cursor: 'pointer',
                   backgroundColor: 'white',
@@ -406,7 +545,7 @@ function DiaryContent() {
                   transition: 'all 0.2s'
                 }}
               >
-                <div style={{ 
+                <div className="diary-character-avatar" style={{
                   width: '60px', height: '60px', borderRadius: '15px', overflow: 'hidden', backgroundColor: 'var(--gray-200)', position: 'relative'
                 }}>
                   {char.image ? (
@@ -426,11 +565,11 @@ function DiaryContent() {
         </div>
       )}
 
-      <main className="content" style={{ display: 'flex', flexDirection: 'column' }}>
+      <main className="content diary-content" style={{ display: 'flex', flexDirection: 'column' }}>
         
         {/* Topic Display */}
         {todayTopic && (
-          <div style={{ backgroundColor: 'white', padding: '20px', borderRadius: '15px', border: '1px solid var(--border-color)', marginBottom: '20px', boxShadow: '0 4px 10px rgba(0,0,0,0.02)' }}>
+          <div className="diary-topic-card" style={{ backgroundColor: 'white', padding: '20px', borderRadius: '15px', border: '1px solid var(--border-color)', marginBottom: '20px', boxShadow: '0 4px 10px rgba(0,0,0,0.02)' }}>
             <div style={{ flex: 1, paddingRight: '15px' }}>
               <p style={{ color: 'var(--point-color)', fontSize: '0.85rem', fontWeight: 'bold', marginBottom: '8px' }}>
                 {todayTopic.order}{t('common.nthQuestion')}
@@ -469,17 +608,28 @@ function DiaryContent() {
               )}
               <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', flex: 1 }}>
                 <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: '8px', marginLeft: '5px' }}>{activeChar?.name}</span>
-                <div className="notebook-paper" style={{ width: '100%', maxWidth: '85%', lineHeight: '1.6', fontSize: '0.95rem', minHeight: '100px' }}>
+                <div className="notebook-paper" style={{ width: '100%', maxWidth: '100%', lineHeight: '1.6', fontSize: '0.95rem', minHeight: '100px' }}>
                   {todayDiary.isAdLocked ? (
                     <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '15px', padding: '10px 0' }}>
                       <div style={{ filter: 'blur(5px)', opacity: 0.5, userSelect: 'none' }}>
                         (부드럽게 미소지으며 네 머리카락을 넘겨준다. 심장이 요동친다.) 정말 보고 싶었어. 오늘 하루 어땠어?
                       </div>
                       <button 
-                        onClick={async () => {
-                          window.open('https://www.effectivecpmnetwork.com/rk8wuv0t?key=d9c3569d98ad59723168cace64459dd2', '_blank');
-                          await unlockDiaryAd(todayDiary.id);
-                          loadInitialData();
+                        onClick={() => {
+                          showAd(async (result) => {
+                            if (!result.didOpen) {
+                              if (result.message) setAdFailureMessage(result.message);
+                              logAdDiagnostic('diary', 'ad_open_failed', { characterId: activeCharId, diaryId: todayDiary.id, action: 'unlock_existing_diary' });
+                              return;
+                            }
+                            try {
+                              await unlockDiaryAd(todayDiary.id);
+                              logAdDiagnostic('diary', 'ad_completed', { characterId: activeCharId, diaryId: todayDiary.id, action: 'unlock_existing_diary' });
+                            } catch (e) {
+                              logAdDiagnostic('diary', 'ad_unlock_failed', { characterId: activeCharId, diaryId: todayDiary.id, action: 'unlock_existing_diary' }, e);
+                            }
+                            refreshActiveDiary();
+                          });
                         }}
                         style={{
                           display: 'flex', alignItems: 'center', gap: '8px',
@@ -494,11 +644,29 @@ function DiaryContent() {
                     <>{todayDiary.charReply}</>
                   )}
                 </div>
+                {!todayDiary.isAdLocked && todayDiary.charReply && (
+                  <button
+                    onClick={() => setReportModalOpen(true)}
+                    style={{
+                      marginTop: '8px',
+                      marginLeft: '5px',
+                      padding: '4px 0',
+                      background: 'none',
+                      border: 'none',
+                      color: 'var(--gray-500)',
+                      fontSize: '0.75rem',
+                      cursor: 'pointer',
+                      textDecoration: 'underline'
+                    }}
+                  >
+                    {t('report.button')}
+                  </button>
+                )}
               </div>
             </div>
             
             <p style={{ fontSize: '0.75rem', color: 'var(--gray-600)', textAlign: 'center', marginTop: '20px' }}>
-              {t('diary.breakHintPre')}<Link href={`/mypage/edit-character/${activeChar?.id}`} style={{ color: 'var(--point-color)', textDecoration: 'underline' }}>{t('nav.mypage')}</Link>{t('diary.breakHintPost')}
+              {t('diary.breakHintPre')}<Link href={buildStaticEntityRoute('/mypage/edit-character', activeChar?.id || '')} style={{ color: 'var(--point-color)', textDecoration: 'underline' }}>{t('nav.mypage')}</Link>{t('diary.breakHintPost')}
             </p>
             <button 
               onClick={() => router.push('/diary/history?charId=' + activeCharId)}
@@ -527,6 +695,7 @@ function DiaryContent() {
               <>
                 <div 
                   onClick={handleDummyClick}
+                  className="diary-dummy-flow"
                   style={{ flex: 1, display: 'flex', flexDirection: 'column', justifyContent: 'center', gap: '27px', padding: '20px 10px', marginTop: '-10px', cursor: 'pointer' }}
                 >
                   {/* User Message */}
@@ -537,7 +706,7 @@ function DiaryContent() {
                   </div>
 
                   {/* Character Message */}
-                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', opacity: 0, animation: 'fadeInUp 0.6s ease 1.2s forwards' }}>
+                  <div className="diary-dummy-message" style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', opacity: 0, animation: 'fadeInUp 0.6s ease 1.2s forwards' }}>
                     <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: '8px', marginLeft: '5px' }}>{t('dummy.charName') || '드림캐'}</span>
                     <div className="notebook-paper" style={{ maxWidth: '85%', lineHeight: '1.6', fontSize: '1rem' }} dangerouslySetInnerHTML={{ __html: t('dummy.diaryCharMsg') }}>
                     </div>
@@ -545,12 +714,14 @@ function DiaryContent() {
                 </div>
                 <p 
                   onClick={handleDummyClick}
+                  className="diary-guide"
                   style={{ fontSize: '16px', color: 'var(--gray-500)', textAlign: 'center', marginBottom: '20px', lineHeight: '1.5', cursor: 'pointer' }} 
                   dangerouslySetInnerHTML={{ __html: t('dummy.diaryGuide') }}
                 >
                 </p>
                 <button 
                   onClick={handleDummyClick}
+                  className="diary-cta"
                   style={{
                     marginTop: 'auto',
                     padding: '15px',
@@ -573,20 +744,22 @@ function DiaryContent() {
               </>
             ) : (
               <>
-                <div style={{ position: 'relative', flex: 1, display: 'flex', flexDirection: 'column', marginBottom: '15px' }}>
+                <div className="diary-writing-input-wrap" style={{ position: 'relative', display: 'flex', flexDirection: 'column', marginBottom: '15px' }}>
                   <textarea 
+                    ref={diaryInputRef}
+                    className="diary-entry-textarea"
                     value={userEntry}
                     onChange={e => {
                       setUserEntry(e.target.value.slice(0, 500));
                       if (draftLoaded.current) {
-                        clearDraft(activeCharId);
+                        clearDraft(activeCharId, 'diary');
                         draftLoaded.current = false;
                       }
+                      resizeDiaryInput(e.target);
                     }}
+                    onFocus={() => window.setTimeout(() => diaryInputRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' }), 150)}
                     placeholder={t('diary.placeholder')}
                     style={{
-                      flex: 1,
-                      minHeight: '60px',
                       padding: '15px',
                       paddingBottom: '30px',
                       borderRadius: '15px',
@@ -595,6 +768,7 @@ function DiaryContent() {
                       resize: 'none',
                       fontSize: '1rem',
                       lineHeight: '1.5',
+                      overflowY: 'hidden',
                     }}
                     disabled={saving}
                   />
@@ -658,7 +832,17 @@ function DiaryContent() {
         )}
         
         <AdModal isOpen={adModalOpen} onConfirm={confirmAd} />
+        {adFailureMessage && (
+          <div style={{ position: 'fixed', left: '50%', bottom: 'calc(var(--safe-bottom) + 16px)', transform: 'translateX(-50%)', zIndex: 4000, width: 'calc(100% - 32px)', maxWidth: '448px', backgroundColor: 'var(--gray-900)', color: 'white', borderRadius: '12px', padding: '12px 14px', fontSize: '0.9rem', textAlign: 'center', lineHeight: 1.4 }}>
+            {adFailureMessage}
+          </div>
+        )}
         <ErrorModal isOpen={errorModalOpen} onConfirm={() => setErrorModalOpen(false)} />
+        <ReportModal
+          isOpen={reportModalOpen}
+          onClose={() => setReportModalOpen(false)}
+          onSubmit={submitDiaryReport}
+        />
       </main>
       
       <style dangerouslySetInnerHTML={{__html: `

@@ -1,5 +1,25 @@
 import { db } from './firebase';
-import { collection, doc, getDocs, setDoc, updateDoc, deleteDoc, getDoc, query, where, orderBy, getCountFromServer, onSnapshot } from 'firebase/firestore';
+import { collection, doc, getDocs, setDoc, updateDoc, deleteDoc, getDoc, query, where, orderBy, limit, getCountFromServer, onSnapshot, writeBatch, DocumentReference } from 'firebase/firestore';
+
+export interface OwnershipMigration {
+  refs: DocumentReference[];
+}
+
+export const prepareOwnershipMigration = async (sourceUserId: string): Promise<OwnershipMigration> => {
+  const collections = ['characters', 'diaries', 'chatMessages'];
+  const snapshots = await Promise.all(
+    collections.map(name => getDocs(query(collection(db, name), where('userId', '==', sourceUserId))))
+  );
+  return { refs: snapshots.flatMap(snapshot => snapshot.docs.map(item => item.ref)) };
+};
+
+export const completeOwnershipMigration = async (migration: OwnershipMigration, targetUserId: string) => {
+  for (let start = 0; start < migration.refs.length; start += 500) {
+    const batch = writeBatch(db);
+    migration.refs.slice(start, start + 500).forEach(ref => batch.update(ref, { userId: targetUserId }));
+    await batch.commit();
+  }
+};
 
 export interface Character {
   id: string;
@@ -39,6 +59,7 @@ export interface ChatMessage {
   role: 'user' | 'assistant';
   content: string;
   createdAt: number;
+  timestamp?: number;
   isAdLocked?: boolean;
   requestId?: string;
 }
@@ -140,6 +161,45 @@ export const getDiariesByUserAndChar = async (userId: string, characterId: strin
   return snapshot.docs.map(doc => doc.data() as Diary).sort((a, b) => b.createdAt - a.createdAt);
 };
 
+export const getTodayDiaryByUserAndChar = async (
+  userId: string,
+  characterId: string,
+  dateString: string
+): Promise<Diary | null> => {
+  try {
+    const q = query(
+      collection(db, 'diaries'),
+      where('userId', '==', userId),
+      where('characterId', '==', characterId),
+      where('dateString', '==', dateString),
+      limit(1)
+    );
+    const snapshot = await getDocs(q);
+    if (snapshot.empty) return null;
+    return snapshot.docs[0].data() as Diary;
+  } catch (error) {
+    console.warn('Today diary optimized query failed; falling back to full diary list.', error);
+    const diaries = await getDiariesByUserAndChar(userId, characterId);
+    return diaries.find(d => d.dateString === dateString) || null;
+  }
+};
+
+export const getDiaryCountByUserAndChar = async (userId: string, characterId: string): Promise<number> => {
+  try {
+    const q = query(
+      collection(db, 'diaries'),
+      where('userId', '==', userId),
+      where('characterId', '==', characterId)
+    );
+    const snapshot = await getCountFromServer(q);
+    return snapshot.data().count;
+  } catch (error) {
+    console.warn('Diary count optimized query failed; falling back to full diary list.', error);
+    const diaries = await getDiariesByUserAndChar(userId, characterId);
+    return diaries.length;
+  }
+};
+
 export const subscribeDiaries = (userId: string, characterId: string, callback: (diaries: Diary[]) => void) => {
   const q = query(
     collection(db, 'diaries'),
@@ -151,6 +211,34 @@ export const subscribeDiaries = (userId: string, characterId: string, callback: 
     d.sort((a, b) => b.createdAt - a.createdAt);
     callback(d);
   });
+};
+
+export const subscribeTodayDiary = (
+  userId: string,
+  characterId: string,
+  dateString: string,
+  callback: (diary: Diary | null) => void
+) => {
+  const q = query(
+    collection(db, 'diaries'),
+    where('userId', '==', userId),
+    where('characterId', '==', characterId),
+    where('dateString', '==', dateString),
+    limit(1)
+  );
+
+  return onSnapshot(
+    q,
+    (snapshot) => {
+      callback(snapshot.empty ? null : (snapshot.docs[0].data() as Diary));
+    },
+    (error) => {
+      console.warn('Today diary subscription failed; falling back to one-time full diary read.', error);
+      getDiariesByUserAndChar(userId, characterId)
+        .then(diaries => callback(diaries.find(d => d.dateString === dateString) || null))
+        .catch(() => callback(null));
+    }
+  );
 };
 
 export const saveDiary = async (diary: Diary) => {
@@ -202,6 +290,25 @@ export const getChatMessages = async (userId: string, characterId: string): Prom
   const snapshot = await getDocs(q);
   const msgs = snapshot.docs.map(doc => doc.data() as ChatMessage);
   return msgs.sort((a: any, b: any) => (a.createdAt || a.timestamp || 0) - (b.createdAt || b.timestamp || 0));
+};
+
+export const getLatestChatMessage = async (userId: string, characterId: string): Promise<ChatMessage | null> => {
+  try {
+    const q = query(
+      collection(db, 'chatMessages'),
+      where('userId', '==', userId),
+      where('characterId', '==', characterId),
+      orderBy('createdAt', 'desc'),
+      limit(1)
+    );
+    const snapshot = await getDocs(q);
+    if (snapshot.empty) return null;
+    return snapshot.docs[0].data() as ChatMessage;
+  } catch (error) {
+    console.warn('Latest chat optimized query failed; falling back to full chat history.', error);
+    const msgs = await getChatMessages(userId, characterId);
+    return msgs.length > 0 ? msgs[msgs.length - 1] : null;
+  }
 };
 
 export const subscribeChatMessages = (userId: string, characterId: string, callback: (msgs: ChatMessage[]) => void) => {
