@@ -22,7 +22,7 @@ export default function ResetPasswordPage() {
     setSuccess(false);
 
     try {
-      const res = await apiFetch('/api/auth/reset-password', {
+      const res = await apiFetch('/.netlify/functions/reset-password', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ id, email })
