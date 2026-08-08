@@ -15,9 +15,11 @@ import { signOut, signInWithEmailAndPassword, updatePassword } from 'firebase/au
 import { doc, getDoc, updateDoc } from 'firebase/firestore';
 import { withTimeout } from '@/lib/async';
 import { clearUserCache, readUserCache, writeUserCache } from '@/lib/appCache';
+import { copyRecentCharacterOrder } from '@/lib/characterOrder';
 import { buildStaticEntityRoute } from '@/lib/navigation';
 import { getCharactersWithGuestRecovery } from '@/lib/ownership';
 import { invalidateCharacterStore, useAppStore } from '@/store/useAppStore';
+import { Browser } from '@capacitor/browser';
 import { Capacitor } from '@capacitor/core';
 
 const TERMS_URL = 'https://pickled-shovel-787.notion.site/3b5278d76e0580768273f5e88a09c3fe?source=copy_link';
@@ -74,9 +76,13 @@ export default function MyPage() {
   const [viewportStyle, setViewportStyle] = useState({ height: '100dvh', top: 0 });
 
   const openPolicyLink = async (url: string) => {
-    if (Capacitor.isNativePlatform()) {
-      const { Browser } = await import('@capacitor/browser');
-      await Browser.open({ url });
+    if (typeof window !== 'undefined' && Capacitor.isNativePlatform()) {
+      try {
+        await Browser.open({ url });
+      } catch (err) {
+        console.error('Browser error:', err);
+        window.open(url, '_system');
+      }
       return;
     }
     window.open(url, '_blank', 'noopener,noreferrer');

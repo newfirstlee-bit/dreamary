@@ -8,6 +8,7 @@ import { apiPostJson } from '@/lib/api';
 import { clearUserCache } from '@/lib/appCache';
 import { invalidateCharacterStore } from '@/store/useAppStore';
 import styles from './page.module.css';
+import { Capacitor } from '@capacitor/core';
 
 const TERMS_URL = 'https://pickled-shovel-787.notion.site/3b5278d76e0580768273f5e88a09c3fe';
 const PRIVACY_URL = 'https://pickled-shovel-787.notion.site/3b5278d76e0580ba9269f3ed205b37f6';
@@ -144,8 +145,22 @@ export default function AccountDeletionPage() {
         </form>
 
         <nav className={styles.links} aria-label="관련 문서">
-          <a href={TERMS_URL} target="_blank" rel="noreferrer">서비스 이용약관</a>
-          <a href={PRIVACY_URL} target="_blank" rel="noreferrer">개인정보처리방침</a>
+          <a href={TERMS_URL} onClick={(e) => {
+            e.preventDefault();
+            if (typeof window !== 'undefined' && Capacitor.isNativePlatform()) {
+              import('@capacitor/browser').then(({ Browser }) => Browser.open({ url: TERMS_URL })).catch(() => window.open(TERMS_URL, '_system'));
+            } else {
+              window.open(TERMS_URL, '_blank', 'noopener,noreferrer');
+            }
+          }}>서비스 이용약관</a>
+          <a href={PRIVACY_URL} onClick={(e) => {
+            e.preventDefault();
+            if (typeof window !== 'undefined' && Capacitor.isNativePlatform()) {
+              import('@capacitor/browser').then(({ Browser }) => Browser.open({ url: PRIVACY_URL })).catch(() => window.open(PRIVACY_URL, '_system'));
+            } else {
+              window.open(PRIVACY_URL, '_blank', 'noopener,noreferrer');
+            }
+          }}>개인정보처리방침</a>
           <a href="mailto:seaweed8927@gmail.com">문의하기</a>
         </nav>
       </div>
