@@ -1,34 +1,46 @@
 import type { Context } from "@netlify/functions";
 import { Resend } from 'resend';
+import { GoogleAuth } from 'google-auth-library';
 
 const resend = new Resend(process.env.RESEND_API_KEY);
 
-// Cache adminDb and adminAuth
 let adminDb: FirebaseFirestore.Firestore | null = null;
-let adminAuth: any = null;
+let googleAuth: GoogleAuth | null = null;
+let projectId: string = '';
 
 async function getFirebaseAdmin() {
-  if (adminDb && adminAuth) return { adminDb, adminAuth };
+  if (adminDb && googleAuth) return { adminDb, googleAuth, projectId };
 
   const [
     { cert, getApps, initializeApp },
-    { getFirestore },
-    { getAuth }
+    { getFirestore }
   ] = await Promise.all([
     import('firebase-admin/app'),
-    import('firebase-admin/firestore'),
-    import('firebase-admin/auth')
+    import('firebase-admin/firestore')
   ]);
 
+  const rawServiceAccount = process.env.FIREBASE_SERVICE_ACCOUNT_KEY;
+  if (!rawServiceAccount) throw new Error('FIREBASE_SERVICE_ACCOUNT_KEY is not set');
+  const serviceAccount = JSON.parse(rawServiceAccount);
+  projectId = serviceAccount.project_id;
+
   if (!getApps().length) {
-    const rawServiceAccount = process.env.FIREBASE_SERVICE_ACCOUNT_KEY;
-    if (!rawServiceAccount) throw new Error('FIREBASE_SERVICE_ACCOUNT_KEY is not set');
-    initializeApp({ credential: cert(JSON.parse(rawServiceAccount)) });
+    initializeApp({ credential: cert(serviceAccount) });
   }
 
   adminDb = getFirestore();
-  adminAuth = getAuth();
-  return { adminDb, adminAuth };
+
+  // Initialize Google Auth for REST API calls
+  googleAuth = new GoogleAuth({
+    credentials: {
+      client_email: serviceAccount.client_email,
+      private_key: serviceAccount.private_key,
+    },
+    scopes: ['https://www.googleapis.com/auth/identitytoolkit', 'https://www.googleapis.com/auth/cloud-platform'],
+    projectId: serviceAccount.project_id
+  });
+
+  return { adminDb, googleAuth, projectId };
 }
 
 export default async (req: Request, context: Context) => {
@@ -56,7 +68,7 @@ export default async (req: Request, context: Context) => {
       });
     }
 
-    const { adminDb, adminAuth } = await getFirebaseAdmin();
+    const { adminDb, googleAuth, projectId } = await getFirebaseAdmin();
     
     // Check if account exists
     const snapshot = await adminDb.collection('accounts').where('id', '==', id).where('email', '==', email).get();
@@ -69,13 +81,32 @@ export default async (req: Request, context: Context) => {
     }
 
     const account = snapshot.docs[0].data();
-    const uid = account.uid; // Firebase Auth UID
+    const uid = account.uid;
 
     // Generate random 8-character password
     const tempPassword = Math.random().toString(36).slice(-8);
 
-    // Update password in Firebase Auth
-    await adminAuth.updateUser(uid, { password: tempPassword });
+    // Update password in Firebase Auth using Google Identity Toolkit REST API
+    const client = await googleAuth.getClient();
+    const accessToken = await client.getAccessToken();
+
+    const updateRes = await fetch(`https://identitytoolkit.googleapis.com/v1/projects/${projectId}/accounts:update`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${accessToken.token}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        localId: uid,
+        password: tempPassword
+      })
+    });
+
+    if (!updateRes.ok) {
+      const errorData = await updateRes.json();
+      console.error('Identity Toolkit Error:', errorData);
+      throw new Error('Failed to update password in Firebase Auth');
+    }
 
     // Send email
     if (process.env.RESEND_API_KEY) {
