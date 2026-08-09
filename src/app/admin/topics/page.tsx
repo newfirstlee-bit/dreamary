@@ -25,8 +25,7 @@ export default function AdminTopics() {
       
       const counts: Record<string, number> = {};
       
-      // Chunk requests to avoid rate limits (20 concurrent requests max)
-      const chunkSize = 20;
+      const chunkSize = 10;
       for (let i = 0; i < data.length; i += chunkSize) {
         const chunk = data.slice(i, i + chunkSize);
         await Promise.all(
@@ -34,7 +33,6 @@ export default function AdminTopics() {
             try {
               counts[t.id] = await getTopicAnswerCount(t.id);
             } catch (e) {
-              console.warn(`Failed to fetch count for topic ${t.id}`, e);
               counts[t.id] = 0;
             }
           })

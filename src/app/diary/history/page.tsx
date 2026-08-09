@@ -141,7 +141,7 @@ function DiaryHistoryContent() {
                 <h3 style={{ fontSize: '1.05rem', lineHeight: '1.4', overflow: 'hidden', textOverflow: 'ellipsis', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' }}>
                   {(() => {
                     const matchedTopic = topics.find(t => t.id === diary.topicId);
-                    const rawTopic = (locale === 'ja' && matchedTopic?.contentJa) ? matchedTopic.contentJa : diary.topicContent;
+                    const rawTopic = (locale === 'ja' && matchedTopic?.contentJa) ? matchedTopic.contentJa : (diary.topicContent || '');
                     const activeChar = characters.find(c => c.id === activeCharId);
                     return rawTopic
                       .replace(/{유저}/g, userProfile?.name || (locale === 'ja' ? t('common.user') : '유저'))
