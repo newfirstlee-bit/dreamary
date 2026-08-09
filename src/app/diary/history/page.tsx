@@ -19,7 +19,19 @@ function DiaryHistoryContent() {
   const [activeCharId, setActiveCharId] = useState<string>('');
   const [diaries, setDiaries] = useState<Diary[]>([]);
   const [topics, setTopics] = useState<Topic[]>([]);
+  const [userProfile, setUserProfile] = useState<any>(null);
   const userId = useUserId();
+
+  const fetchDiaries = async (userId: string, charId: string) => {
+    const [data, profile] = await Promise.all([
+      getDiariesByUserAndChar(userId, charId),
+      getUserProfile(`${userId}_${charId}`)
+    ]);
+    // Sort newest first
+    data.sort((a, b) => b.createdAt - a.createdAt);
+    setDiaries(data);
+    setUserProfile(profile);
+  };
 
   useEffect(() => {
     if (!userId) return;
@@ -50,19 +62,6 @@ function DiaryHistoryContent() {
     };
     init();
   }, [router, userId]);
-
-  const [userProfile, setUserProfile] = useState<any>(null);
-
-  const fetchDiaries = async (userId: string, charId: string) => {
-    const [data, profile] = await Promise.all([
-      getDiariesByUserAndChar(userId, charId),
-      getUserProfile(`${userId}_${charId}`)
-    ]);
-    // Sort newest first
-    data.sort((a, b) => b.createdAt - a.createdAt);
-    setDiaries(data);
-    setUserProfile(profile);
-  };
 
   const handleCharSelect = async (charId: string) => {
     setActiveCharId(charId);
@@ -135,7 +134,7 @@ function DiaryHistoryContent() {
                     {(topics.find(t => t.id === diary.topicId)?.order || 1)}{t('common.nthQuestion')}
                   </span>
                   <span style={{ color: 'var(--gray-500)', fontSize: '0.8rem', fontWeight: 500 }}>
-                    {diary.dateString.replace(/-/g, '.')}
+                    {(diary.dateString || '').replace(/-/g, '.')}
                   </span>
                 </div>
                 <h3 style={{ fontSize: '1.05rem', lineHeight: '1.4', overflow: 'hidden', textOverflow: 'ellipsis', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' }}>

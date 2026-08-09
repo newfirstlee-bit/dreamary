@@ -88,7 +88,7 @@ function DiaryHistoryDetailContent() {
         <button onClick={() => router.push('/diary/history')} style={{ position: 'absolute', left: '20px', background: 'none', border: 'none', color: 'white', cursor: 'pointer', display: 'flex', alignItems: 'center' }}>
           <ChevronLeft size={28} color="var(--gray-800)" />
         </button>
-        <span>{diary.dateString.replace(/-/g, '.')} {t('common.diary')}</span>
+        <span>{(diary?.dateString || '').replace(/-/g, '.')} {t('common.diary')}</span>
       </header>
 
       <main className="content" style={{ display: 'flex', flexDirection: 'column', paddingBottom: '100px' }}>
