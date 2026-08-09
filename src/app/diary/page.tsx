@@ -505,9 +505,12 @@ function DiaryContent() {
 
   let formattedContent = (locale === 'ja' && todayTopic?.contentJa) ? todayTopic.contentJa : (todayTopic?.content || '');
   if (formattedContent && activeChar) {
+    const userName = userProfile?.name || (locale === 'ja' ? t('common.user') : '유저');
     formattedContent = formattedContent
-      .replace(/{유저}/g, userProfile?.name || (locale === 'ja' ? t('common.user') : '유저'))
-      .replace(/{캐릭터}/g, activeChar.name);
+      .replace(/{유저}/g, userName)
+      .replace(/{캐릭터}/g, activeChar.name)
+      .replace(/{ユーザー}/g, userName)
+      .replace(/{キャラクター}/g, activeChar.name);
   }
 
   const handleDummyClick = () => {

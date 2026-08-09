@@ -98,7 +98,11 @@ function DiaryHistoryDetailContent() {
             {topic ? `${topic.order}${t('common.nthQuestion')}` : t('common.question')}
           </p>
           <h3 style={{ fontSize: '1.2rem', lineHeight: '1.4' }}>
-            {(locale === 'ja' && topic?.contentJa) ? topic.contentJa : diary.topicContent}
+            {((locale === 'ja' && topic?.contentJa) ? topic.contentJa : (diary?.topicContent || ''))
+              .replace(/{유저}/g, userProfile?.name || (locale === 'ja' ? t('common.user') : '유저'))
+              .replace(/{캐릭터}/g, character?.name || '')
+              .replace(/{ユーザー}/g, userProfile?.name || (locale === 'ja' ? t('common.user') : '유저'))
+              .replace(/{キャラクター}/g, character?.name || '')}
           </h3>
         </div>
 

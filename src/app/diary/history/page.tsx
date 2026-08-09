@@ -51,11 +51,17 @@ function DiaryHistoryContent() {
     init();
   }, [router, userId]);
 
+  const [userProfile, setUserProfile] = useState<any>(null);
+
   const fetchDiaries = async (userId: string, charId: string) => {
-    const data = await getDiariesByUserAndChar(userId, charId);
+    const [data, profile] = await Promise.all([
+      getDiariesByUserAndChar(userId, charId),
+      getUserProfile(userId, charId)
+    ]);
     // Sort newest first
     data.sort((a, b) => b.createdAt - a.createdAt);
     setDiaries(data);
+    setUserProfile(profile);
   };
 
   const handleCharSelect = async (charId: string) => {
@@ -135,7 +141,13 @@ function DiaryHistoryContent() {
                 <h3 style={{ fontSize: '1.05rem', lineHeight: '1.4', overflow: 'hidden', textOverflow: 'ellipsis', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' }}>
                   {(() => {
                     const matchedTopic = topics.find(t => t.id === diary.topicId);
-                    return (locale === 'ja' && matchedTopic?.contentJa) ? matchedTopic.contentJa : diary.topicContent;
+                    const rawTopic = (locale === 'ja' && matchedTopic?.contentJa) ? matchedTopic.contentJa : diary.topicContent;
+                    const activeChar = characters.find(c => c.id === activeCharId);
+                    return rawTopic
+                      .replace(/{유저}/g, userProfile?.name || (locale === 'ja' ? t('common.user') : '유저'))
+                      .replace(/{캐릭터}/g, activeChar?.name || '')
+                      .replace(/{ユーザー}/g, userProfile?.name || (locale === 'ja' ? t('common.user') : '유저'))
+                      .replace(/{キャラクター}/g, activeChar?.name || '');
                   })()}
                 </h3>
               </div>
