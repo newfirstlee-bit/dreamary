@@ -15,7 +15,7 @@ import { shouldShowBottomNav } from '@/lib/navigation';
 
 function isEditableElement(element: Element | null): boolean {
   if (!(element instanceof HTMLElement)) return false;
-  return element.matches('input, textarea, select, [contenteditable="true"]');
+  return element.matches('input, textarea, [contenteditable="true"]');
 }
 
 export default function ClientLayoutWrapper({ children }: { children: React.ReactNode }) {

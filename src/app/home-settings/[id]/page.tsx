@@ -94,15 +94,14 @@ export default function HomeSettingsPage({ params }: { params: { id: string } })
       <div className="content" style={{ padding: '20px', display: 'flex', flexDirection: 'column', gap: '20px' }}>
         <div style={{ padding: '20px', backgroundColor: 'var(--gray-50)', borderRadius: '15px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
           <div>
-            <div style={{ fontWeight: 'bold', color: 'var(--foreground)', marginBottom: '5px' }}>{t('homeSettings.bgChange')}</div>
-            <div style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>{t('homeSettings.bgHint')}</div>
+            <div style={{ fontWeight: 'bold', color: 'var(--foreground)' }}>{t('homeSettings.bgChange')}</div>
           </div>
           <button 
             onClick={() => fileInputRef.current?.click()}
             disabled={uploadingBg}
             style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '8px 16px', backgroundColor: 'var(--point-color)', color: 'white', border: 'none', borderRadius: '10px', fontWeight: 'bold', cursor: 'pointer' }}
           >
-            {uploadingBg ? <Loader2 size={16} className="animate-spin" /> : <ImageIcon size={16} />}
+            {uploadingBg && <Loader2 size={16} className="animate-spin" />}
             {uploadingBg ? t('common.uploading') : t('common.upload')}
           </button>
           <input type="file" accept="image/*" ref={fileInputRef} onChange={handleBgUpload} style={{ display: 'none' }} />

@@ -91,7 +91,7 @@ function DiaryHistoryDetailContent() {
         <span>{diary.dateString.replace(/-/g, '.')} {t('common.diary')}</span>
       </header>
 
-      <main className="content" style={{ display: 'flex', flexDirection: 'column' }}>
+      <main className="content" style={{ display: 'flex', flexDirection: 'column', paddingBottom: '100px' }}>
         {/* Topic Display */}
         <div style={{ backgroundColor: 'white', padding: '20px', borderRadius: '15px', border: '1px solid var(--border-color)', marginBottom: '20px', boxShadow: '0 4px 10px rgba(0,0,0,0.02)' }}>
           <p style={{ color: 'var(--point-color)', fontSize: '0.85rem', fontWeight: 'bold', marginBottom: '8px' }}>
@@ -134,49 +134,44 @@ function DiaryHistoryDetailContent() {
               </div>
             </div>
           )}
-        </div>
+            {/* Prev/Next Navigation moved inside main to flow naturally and not overlap */}
+            <div style={{ 
+              display: 'flex', 
+              justifyContent: 'center',
+              alignItems: 'center',
+              gap: '30px',
+              marginTop: '60px' // Margin above buttons (below char reply)
+            }}>
+              <button 
+                onClick={() => prevDiaryId && router.push(buildStaticEntityRoute('/diary/history', prevDiaryId))}
+                disabled={!prevDiaryId}
+                style={{ 
+                  display: 'flex', alignItems: 'center', gap: '4px', background: 'none', border: 'none', 
+                  cursor: prevDiaryId ? 'pointer' : 'default', 
+                  color: prevDiaryId ? 'var(--gray-700)' : 'var(--gray-400)', 
+                  fontWeight: 'bold', fontSize: '1.05rem', padding: '10px' 
+                }}
+              >
+                <ChevronLeft size={20} />
+                <span>{locale === 'ja' ? '前へ' : '이전'}</span>
+              </button>
+              
+              <button 
+                onClick={() => nextDiaryId && router.push(buildStaticEntityRoute('/diary/history', nextDiaryId))}
+                disabled={!nextDiaryId}
+                style={{ 
+                  display: 'flex', alignItems: 'center', gap: '4px', background: 'none', border: 'none', 
+                  cursor: nextDiaryId ? 'pointer' : 'default', 
+                  color: nextDiaryId ? 'var(--gray-700)' : 'var(--gray-400)', 
+                  fontWeight: 'bold', fontSize: '1.05rem', padding: '10px' 
+                }}
+              >
+                <span>{locale === 'ja' ? '次へ' : '다음'}</span>
+                <ChevronRight size={20} />
+              </button>
+            </div>
+          </div>
       </main>
-
-      {/* Prev/Next Navigation */}
-      <div style={{ 
-        position: 'fixed', 
-        bottom: '90px', 
-        left: '50%', 
-        transform: 'translateX(-50%)', 
-        display: 'flex', 
-        justifyContent: 'center',
-        alignItems: 'center',
-        gap: '30px',
-        zIndex: 100
-      }}>
-        <button 
-          onClick={() => prevDiaryId && router.push(buildStaticEntityRoute('/diary/history', prevDiaryId))}
-          disabled={!prevDiaryId}
-          style={{ 
-            display: 'flex', alignItems: 'center', gap: '4px', background: 'none', border: 'none', 
-            cursor: prevDiaryId ? 'pointer' : 'default', 
-            color: prevDiaryId ? 'var(--gray-700)' : 'var(--gray-400)', 
-            fontWeight: 'bold', fontSize: '1.05rem', padding: '10px' 
-          }}
-        >
-          <ChevronLeft size={20} />
-          <span>{locale === 'ja' ? '前へ' : '이전'}</span>
-        </button>
-        
-        <button 
-          onClick={() => nextDiaryId && router.push(buildStaticEntityRoute('/diary/history', nextDiaryId))}
-          disabled={!nextDiaryId}
-          style={{ 
-            display: 'flex', alignItems: 'center', gap: '4px', background: 'none', border: 'none', 
-            cursor: nextDiaryId ? 'pointer' : 'default', 
-            color: nextDiaryId ? 'var(--gray-700)' : 'var(--gray-400)', 
-            fontWeight: 'bold', fontSize: '1.05rem', padding: '10px' 
-          }}
-        >
-          <span>{locale === 'ja' ? '次へ' : '다음'}</span>
-          <ChevronRight size={20} />
-        </button>
-      </div>
 
       <style dangerouslySetInnerHTML={{__html: `
         @keyframes spin { 100% { transform: rotate(360deg); } }

@@ -35,7 +35,7 @@
 - 로그인 사용자의 데이터 기준 ID는 Firebase `uid`다. 화면·저장·캐시 로직은 로그인 세션 유무만 확인하고, 로그인 정보가 없어도 비로그인 UUID로 홈/일기/채팅/마이페이지가 동작해야 한다.
 - `CapacitorHttp.enabled`는 반드시 `false`로 유지한다. 전역 fetch/XHR 패치는 Firestore WebChannel 스트림을 잘라 읽기·쓰기를 무한 재시도하게 만든다.
 - 네이티브 단발성 JSON API는 필요한 경우에만 명시적 `CapacitorHttp.request/post()`를 사용할 수 있다. Firestore와 스트리밍 채팅에는 사용하지 않는다.
-- 네이티브 앱의 일반 채팅 전송은 스트리밍 fetch가 아니라 `preferJsonResponse: true`를 포함한 단발성 JSON 요청으로 처리한다. 웹에서는 기존 스트리밍 채팅을 유지한다.
+
 - iOS·Android Firebase 연결 안정화를 위해 `src/lib/firebase.ts`의 Firestore long-polling 자동 감지 설정을 임의로 제거하지 않는다.
 - `server.iosScheme`을 바꾸거나 Firebase 네트워크 설정을 바꾼 뒤에는 `npm run build:app` 후 `npx cap sync ios`로 iOS 프로젝트에 반영한다.
 - 탭 이동 화면은 캐시 화면을 먼저 보여주고 Firebase 재조회로 화면 전환을 막지 않는다.

@@ -67,10 +67,13 @@ export default function LoginPage() {
           <input
             type="text"
             value={id}
-            onChange={(e) => setId(e.target.value)}
+            onChange={(e) => setId(e.target.value.toLowerCase().replace(/[^a-z0-9]/g, ''))}
             placeholder={t('auth.idPlaceholder')}
+            autoCapitalize="none"
+            autoCorrect="off"
+            spellCheck={false}
             required
-            style={{ width: '100%', padding: '15px', borderRadius: '12px', border: '1px solid var(--border-color)', fontSize: '1rem', outline: 'none' }}
+            style={{ width: '100%', padding: '15px', borderRadius: '12px', border: '1px solid var(--border-color)', fontSize: '1rem', outline: 'none', textTransform: 'lowercase' }}
           />
         </div>
 

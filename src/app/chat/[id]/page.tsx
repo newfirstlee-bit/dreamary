@@ -310,6 +310,7 @@ function ChatDetailContent({ params }: { params: { id: string } }) {
     
     if (inputRef.current) {
       inputRef.current.style.height = 'auto';
+      inputRef.current.blur();
     }
 
     setIsTyping(true);
@@ -345,75 +346,54 @@ function ChatDetailContent({ params }: { params: { id: string } }) {
       // Get recent 10 messages for context
       const contextMessages = [...messages, userMsg].slice(-10);
 
-      if (isNativeChat) {
-        const data = await apiPostJson<{ reply?: string; savedId?: string }>('/api/chat', {
+      const res = await apiFetch('/api/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
           character,
           userProfile,
           messages: contextMessages,
           isFirstPing: false,
           userId: userId,
           isAdTurn: false,
-          preferJsonResponse: true,
           requestId
-        });
+        })
+      });
 
-        savedId = data.savedId || '';
-        if (data.reply && !savedId) {
-          setStreamingContent(data.reply);
-          await new Promise(resolve => setTimeout(resolve, 300));
-          setStreamingContent('');
-        }
-        success = true;
-      } else {
-        const res = await apiFetch('/api/chat', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            character,
-            userProfile,
-            messages: contextMessages,
-            isFirstPing: false,
-            userId: userId,
-            isAdTurn: false,
-            requestId
-          })
-        });
+      if (!res.ok) {
+        throw new Error('Failed to fetch from API');
+      }
 
-        if (!res.ok) {
-          throw new Error('Failed to fetch from API');
-        }
+      const reader = res.body?.getReader();
+      if (!reader) throw new Error('Streaming not supported');
 
-        const reader = res.body?.getReader();
-        if (!reader) throw new Error('Streaming not supported');
+      savedId = res.headers.get('X-Message-Id') || '';
+      if (savedId) {
+        setStreamingMessageId(savedId);
+      }
 
-        savedId = res.headers.get('X-Message-Id') || '';
-        if (savedId) {
-          setStreamingMessageId(savedId);
-        }
+      const decoder = new TextDecoder('utf-8');
+      let done = false;
+      let assistantReply = '';
 
-        const decoder = new TextDecoder('utf-8');
-        let done = false;
-        let assistantReply = '';
+      while (!done) {
+        const { value, done: readerDone } = await reader.read();
+        done = readerDone;
+        if (value) {
+          const chunk = decoder.decode(value, { stream: true });
+          const pieces = chunk.match(/.{1,3}/g) || [];
 
-        while (!done) {
-          const { value, done: readerDone } = await reader.read();
-          done = readerDone;
-          if (value) {
-            const chunk = decoder.decode(value, { stream: true });
-            const pieces = chunk.match(/.{1,3}/g) || [];
-
-            for (const piece of pieces) {
-              assistantReply += piece;
-              setStreamingContent(assistantReply);
-              await new Promise(resolve => setTimeout(resolve, 50));
-            }
+          for (const piece of pieces) {
+            assistantReply += piece;
+            setStreamingContent(assistantReply);
+            await new Promise(resolve => setTimeout(resolve, 50));
           }
         }
-
-        setStreamingContent('');
-        setStreamingMessageId(null);
-        success = true;
       }
+
+      setStreamingContent('');
+      setStreamingMessageId(null);
+      success = true;
       
       if (success) {
         recordSuccessfulChatTurn();

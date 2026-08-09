@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { useLocale } from '@/lib/i18n';
+import { Keyboard } from '@capacitor/keyboard';
 
 export interface ReportSubmitPayload {
   reasons: string[];
@@ -26,7 +27,9 @@ export default function ReportModal({ isOpen, onClose, onSubmit }: ReportModalPr
   const [selectedReasons, setSelectedReasons] = useState<string[]>([]);
   const [otherText, setOtherText] = useState('');
   const [submitting, setSubmitting] = useState(false);
+  const [viewportStyle, setViewportStyle] = useState<any>({ top: 0, left: 0, width: '100%', height: '100dvh' });
   const otherInputRef = useRef<HTMLInputElement>(null);
+  const modalContentRef = useRef<HTMLDivElement>(null);
 
   const isOtherSelected = selectedReasons.includes('other');
   const canSubmit = selectedReasons.length > 0 && !submitting;
@@ -36,12 +39,77 @@ export default function ReportModal({ isOpen, onClose, onSubmit }: ReportModalPr
       setSelectedReasons([]);
       setOtherText('');
       setSubmitting(false);
+      setViewportStyle({ top: 0, left: 0, width: '100%', height: '100dvh' });
     }
   }, [isOpen]);
 
   useEffect(() => {
+    if (window.visualViewport) {
+      const handleResize = () => {
+        if (!window.visualViewport) return;
+        setViewportStyle({
+          top: window.visualViewport.offsetTop,
+          left: window.visualViewport.offsetLeft,
+          height: window.visualViewport.height,
+          width: window.visualViewport.width,
+        });
+        
+        // Ensure scrolling happens during and after keyboard animation
+        if (isOtherSelected && modalContentRef.current) {
+          modalContentRef.current.scrollTo({
+            top: modalContentRef.current.scrollHeight,
+            behavior: 'smooth'
+          });
+        }
+      };
+
+      window.visualViewport.addEventListener('resize', handleResize);
+      window.visualViewport.addEventListener('scroll', handleResize);
+      handleResize();
+
+      return () => {
+        window.visualViewport?.removeEventListener('resize', handleResize);
+        window.visualViewport?.removeEventListener('scroll', handleResize);
+      };
+    } else {
+      const handleResize = () => {
+        setViewportStyle({
+          top: 0,
+          left: 0,
+          height: window.innerHeight,
+          width: window.innerWidth,
+        });
+        
+        if (isOtherSelected && modalContentRef.current) {
+          modalContentRef.current.scrollTo({
+            top: modalContentRef.current.scrollHeight,
+            behavior: 'smooth'
+          });
+        }
+      };
+      
+      window.addEventListener('resize', handleResize);
+      handleResize();
+      return () => {
+        window.removeEventListener('resize', handleResize);
+      };
+    }
+  }, [isOpen, isOtherSelected]);
+
+  useEffect(() => {
     if (!isOpen || !isOtherSelected) return;
-    window.setTimeout(() => otherInputRef.current?.focus(), 100);
+    window.setTimeout(() => {
+      otherInputRef.current?.focus();
+    }, 100);
+    // Initial scroll trigger just in case keyboard is already up
+    window.setTimeout(() => {
+      if (modalContentRef.current) {
+        modalContentRef.current.scrollTo({
+          top: modalContentRef.current.scrollHeight,
+          behavior: 'smooth'
+        });
+      }
+    }, 150);
   }, [isOpen, isOtherSelected]);
 
   if (!isOpen) return null;
@@ -74,23 +142,34 @@ export default function ReportModal({ isOpen, onClose, onSubmit }: ReportModalPr
       <div
         style={{
           position: 'fixed',
-          left: '50%',
-          top: '50%',
-          transform: 'translate(-50%, -50%)',
-          width: '90%',
-          maxWidth: '360px',
-          maxHeight: '85vh',
-          overflowY: 'auto',
-          backgroundColor: 'white',
-          borderRadius: '20px',
-          padding: '28px 20px 20px',
-          zIndex: 5001,
+          top: viewportStyle.top,
+          left: viewportStyle.left,
+          width: viewportStyle.width,
+          height: viewportStyle.height,
           display: 'flex',
-          flexDirection: 'column',
-          gap: '18px',
-          boxShadow: '0 12px 34px rgba(0,0,0,0.18)'
+          alignItems: 'center',
+          justifyContent: 'center',
+          zIndex: 5001,
+          pointerEvents: 'none'
         }}
       >
+        <div
+          ref={modalContentRef}
+          style={{
+            pointerEvents: 'auto',
+            width: '90%',
+            maxWidth: '360px',
+            maxHeight: '85%',
+            overflowY: 'auto',
+            backgroundColor: 'white',
+            borderRadius: '20px',
+            padding: '28px 20px 20px',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '18px',
+            boxShadow: '0 12px 34px rgba(0,0,0,0.18)'
+          }}
+        >
         <h2 style={{ fontSize: '1.25rem', fontWeight: 'bold', textAlign: 'center', color: 'var(--gray-900)', lineHeight: 1.4 }}>
           {t('report.title')}
         </h2>
@@ -166,6 +245,7 @@ export default function ReportModal({ isOpen, onClose, onSubmit }: ReportModalPr
             {submitting ? t('report.submitting') : t('report.submit')}
           </button>
         </div>
+      </div>
       </div>
     </>
   );

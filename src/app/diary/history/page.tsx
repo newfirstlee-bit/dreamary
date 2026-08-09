@@ -106,7 +106,7 @@ function DiaryHistoryContent() {
         </div>
       )}
 
-      <main className="content" style={{ display: 'flex', flexDirection: 'column', gap: '15px' }}>
+      <main className="content" style={{ display: 'flex', flexDirection: 'column', gap: '15px', paddingBottom: '100px' }}>
         {diaries.length === 0 ? (
           <div style={{ textAlign: 'center', marginTop: '50px', color: 'var(--text-muted)' }}>
             <p>{t('diary.noDiaries')}</p>

@@ -1,21 +1,19 @@
-import { useState, useEffect } from 'react';
 import { getUserId } from '@/lib/auth';
 import { useAuth } from '@/components/AuthContext';
 
 export function useUserId() {
   const { user, status } = useAuth();
-  const [activeUserId, setActiveUserId] = useState<string | null>(null);
 
-  useEffect(() => {
-    if (status === 'guest') setActiveUserId(getUserId());
-    if (status === 'authenticated' && user) setActiveUserId(user.uid);
-  }, [status, user]);
+  if (status === 'authenticated' && user) {
+    return user.uid;
+  }
 
-  if (status === 'checking') {
-    if (typeof window !== 'undefined') {
+  if (typeof window !== 'undefined') {
+    if (status === 'checking') {
       return localStorage.getItem('last_active_user_id') || getUserId();
     }
-    return null;
+    return getUserId();
   }
-  return user?.uid || activeUserId;
+
+  return null;
 }

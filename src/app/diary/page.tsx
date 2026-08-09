@@ -565,7 +565,7 @@ function DiaryContent() {
         </div>
       )}
 
-      <main className="content diary-content" style={{ display: 'flex', flexDirection: 'column' }}>
+      <main className="content diary-content" style={{ display: 'flex', flexDirection: 'column', paddingBottom: '100px' }}>
         
         {/* Topic Display */}
         {todayTopic && (
@@ -696,7 +696,7 @@ function DiaryContent() {
                 <div 
                   onClick={handleDummyClick}
                   className="diary-dummy-flow"
-                  style={{ flex: 1, display: 'flex', flexDirection: 'column', justifyContent: 'center', gap: '27px', padding: '20px 10px', marginTop: '-10px', cursor: 'pointer' }}
+                  style={{ flex: 1, display: 'flex', flexDirection: 'column', justifyContent: 'center', gap: '15px', padding: '20px 10px', marginTop: '-10px', cursor: 'pointer' }}
                 >
                   {/* User Message */}
                   <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', opacity: 0, animation: 'fadeInUp 0.6s ease 0.5s forwards' }}>
@@ -723,6 +723,7 @@ function DiaryContent() {
                   onClick={handleDummyClick}
                   className="diary-cta"
                   style={{
+                    position: 'relative',
                     marginTop: 'auto',
                     padding: '15px',
                     backgroundColor: 'var(--point-color)',

@@ -98,10 +98,26 @@ export default function ChatList() {
           messagesObj[char.id] = await getLatestChatMessage(userId, char.id);
         })));
 
-        setCharacters(chars);
+        const sortedChars = [...chars].sort((a, b) => {
+          const msgA = messagesObj[a.id];
+          const msgB = messagesObj[b.id];
+          // Use message time if exists, otherwise 0
+          const timeA = msgA ? new Date(msgA.timestamp || msgA.createdAt).getTime() : 0;
+          const timeB = msgB ? new Date(msgB.timestamp || msgB.createdAt).getTime() : 0;
+          
+          if (timeA !== timeB && !isNaN(timeA) && !isNaN(timeB)) {
+            return timeB - timeA;
+          }
+          // Secondary sort by character creation date if both have no messages or same time
+          const createdA = a.createdAt ? new Date(a.createdAt).getTime() : 0;
+          const createdB = b.createdAt ? new Date(b.createdAt).getTime() : 0;
+          return createdB - createdA;
+        });
+
+        setCharacters(sortedChars);
         setLastMessages(messagesObj);
         writeUserCache<ChatListCache>(userId, 'chat', {
-          characters: chars,
+          characters: sortedChars,
           lastMessages: messagesObj
         });
       } catch (error) {

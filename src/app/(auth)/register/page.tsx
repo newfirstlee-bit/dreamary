@@ -38,14 +38,16 @@ export default function RegisterPage() {
   const handleIdChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const val = e.target.value;
     setIsIdAvailable(null);
-    // 영소문자/숫자 외 문자가 포함되어 있는지 확인
-    if (/[^a-z0-9]/.test(val)) {
+    
+    const lowerVal = val.toLowerCase();
+    
+    if (/[^a-z0-9]/.test(lowerVal)) {
       setIdError(true);
     } else {
       setIdError(false);
     }
-    // 소문자 변환, 정규식으로 제거 후 최대 10자까지만 설정
-    setId(val.toLowerCase().replace(/[^a-z0-9]/g, '').slice(0, 10));
+    
+    setId(lowerVal.replace(/[^a-z0-9]/g, '').slice(0, 10));
   };
 
   const checkDuplicateId = async () => {
@@ -130,11 +132,13 @@ export default function RegisterPage() {
             <input
               type="text"
               value={id}
-              onChange={handleIdChange}
+              onChange={(e) => setId(e.target.value.toLowerCase().replace(/[^a-z0-9]/g, '').slice(0, 10))}
               placeholder={t('auth.idHint')}
-              maxLength={10}
+              autoCapitalize="none"
+              autoCorrect="off"
+              spellCheck={false}
               required
-              style={{ flex: 1, minWidth: 0, padding: '15px', borderRadius: '12px', border: `1px solid ${idError ? 'red' : 'var(--border-color)'}`, fontSize: '1rem', outline: 'none' }}
+              style={{ flex: 1, minWidth: 0, padding: '15px', borderRadius: '12px', border: `1px solid ${idError ? 'red' : 'var(--border-color)'}`, fontSize: '1rem', outline: 'none', textTransform: 'lowercase' }}
             />
             <button
               type="button"

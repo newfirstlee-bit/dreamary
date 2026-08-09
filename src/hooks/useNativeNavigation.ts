@@ -134,12 +134,37 @@ export function useNativeNavigation(options: NativeNavigationOptions = {}) {
       swipeStart.time = Date.now();
     };
 
+    const handleTouchMove = (event: TouchEvent) => {
+      if (!swipeStart.active) return;
+      const touch = event.touches[0];
+      if (!touch) return;
+      
+      const deltaX = touch.clientX - swipeStart.x;
+      const deltaY = touch.clientY - swipeStart.y;
+      
+      // If the user starts scrolling vertically more than horizontally, cancel the swipe
+      if (Math.abs(deltaY) > Math.abs(deltaX) && deltaX < 20) {
+        swipeStart.active = false;
+        document.body.style.transform = '';
+        return;
+      }
+      
+      if (deltaX > 0) {
+        document.body.style.transform = `translateX(${deltaX}px)`;
+      }
+    };
+
     const handleTouchEnd = (event: TouchEvent) => {
       if (!swipeStart.active) return;
       swipeStart.active = false;
 
       const touch = event.changedTouches[0];
-      if (!touch) return;
+      if (!touch) {
+        document.body.style.transition = 'transform 0.2s ease-out';
+        document.body.style.transform = '';
+        setTimeout(() => { document.body.style.transition = ''; }, 200);
+        return;
+      }
 
       const deltaX = touch.clientX - swipeStart.x;
       const deltaY = touch.clientY - swipeStart.y;
@@ -147,16 +172,32 @@ export function useNativeNavigation(options: NativeNavigationOptions = {}) {
       const isBackSwipe = deltaX >= 80 && Math.abs(deltaY) <= 70 && deltaX > Math.abs(deltaY) * 1.5 && elapsed <= 700;
 
       if (isBackSwipe) {
-        handleBackNavigation(false);
+        document.body.style.transition = 'transform 0.25s cubic-bezier(0.25, 1, 0.5, 1)';
+        document.body.style.transform = 'translateX(100%)';
+        
+        setTimeout(() => {
+          handleBackNavigation(false);
+          
+          setTimeout(() => {
+            document.body.style.transition = '';
+            document.body.style.transform = '';
+          }, 50);
+        }, 250);
+      } else {
+        document.body.style.transition = 'transform 0.2s ease-out';
+        document.body.style.transform = '';
+        setTimeout(() => { document.body.style.transition = ''; }, 200);
       }
     };
 
     document.addEventListener('touchstart', handleTouchStart, { passive: true });
+    document.addEventListener('touchmove', handleTouchMove, { passive: true });
     document.addEventListener('touchend', handleTouchEnd, { passive: true });
 
     return () => {
       removeBackButtonListener?.();
       document.removeEventListener('touchstart', handleTouchStart);
+      document.removeEventListener('touchmove', handleTouchMove);
       document.removeEventListener('touchend', handleTouchEnd);
     };
   }, [pathname, navigateBack, navigateHome]);

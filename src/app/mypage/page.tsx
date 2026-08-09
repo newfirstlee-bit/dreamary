@@ -94,7 +94,7 @@ export default function MyPage() {
         if (!window.visualViewport) return;
         setViewportStyle({
           height: `${window.visualViewport.height}px`,
-          top: window.visualViewport.pageTop
+          top: window.visualViewport.offsetTop
         });
       };
       
@@ -792,10 +792,11 @@ export default function MyPage() {
       {/* 비밀번호 확인 모달 (풀스크린) */}
       {showPasswordConfirmModal && (
         <div className="account-full-page" style={{
-          position: 'absolute', 
+          position: 'fixed', 
           top: viewportStyle.top, 
           height: viewportStyle.height,
           left: 0, right: 0, 
+          width: '100%',
           backgroundColor: 'white', zIndex: 4000,
           display: 'flex', flexDirection: 'column'
         }}>
@@ -854,10 +855,11 @@ export default function MyPage() {
       {/* 정보 수정 모달 (풀스크린) */}
       {showEditInfoModal && (
         <div className="account-full-page" style={{
-          position: 'absolute', 
+          position: 'fixed', 
           top: viewportStyle.top, 
           height: viewportStyle.height,
           left: 0, right: 0, 
+          width: '100%',
           backgroundColor: 'white', zIndex: 4000,
           display: 'flex', flexDirection: 'column'
         }}>

@@ -201,7 +201,7 @@
   "homeSettings.dDayHint": "{name} 페어의 1일",
   "homeSettings.themeTitle": "홈 화면 텍스트 테마",
   "homeSettings.themeHint": "배경화면 밝기에 맞춰 글자색을 변경하세요",
-  "homeSettings.themeDark": "어두운 배경용 (기본)",
+  "homeSettings.themeDark": "어두운 배경용",
   "homeSettings.themeLight": "밝은 배경용",
   "homeSettings.loadFailed": "캐릭터 정보를 불러올 수 없습니다.",
   "homeSettings.homeTitle": "홈화면 설정",

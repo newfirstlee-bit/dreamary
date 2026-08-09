@@ -173,33 +173,78 @@ ${(userName === '유저' || userName === '나' || userName === 'ユーザー') ?
         ],
         temperature: 0.8,
         max_tokens: isFirstPing ? 100 : 2000,
-        stream: !(isFirstPing || preferJsonResponse) // 첫 인사와 네이티브 앱 채팅 답장은 JSON으로 처리
+        stream: true // Always stream from OpenRouter to prevent Netlify timeout
       })
     });
 
     if (isFirstPing || preferJsonResponse) {
-      const data = await response.json();
       if (!response.ok) {
-        console.error('OpenRouter API Error:', data);
-        return new Response(JSON.stringify({ error: data.error?.message || 'Failed to generate reply' }), { status: response.status, headers: corsHeaders });
+        const errData = await response.json().catch(() => ({}));
+        return new Response(JSON.stringify({ error: errData.error?.message || 'Failed to generate reply' }), { status: response.status, headers: corsHeaders });
       }
 
-      const charReply = data.choices[0]?.message?.content || "";
-      const newMsg: ChatMessage = {
-        id: crypto.randomUUID(),
-        userId: userId || 'unknown',
-        characterId: character.id,
-        role: 'assistant',
-        content: charReply,
-        createdAt: Date.now(),
-        isAdLocked: isAdTurn === true,
-        ...(requestId ? { requestId } : {}),
-      };
-      
-      if (userId) {
-        await saveChatMessage(newMsg);
-      }
-      return new Response(JSON.stringify({ reply: charReply, savedId: newMsg.id }), { headers: corsHeaders });
+      const stream = new ReadableStream({
+        async start(controller) {
+          let isClientConnected = true;
+          let fullReply = '';
+          const newMsgId = crypto.randomUUID();
+          
+          // Keep-alive interval
+          const keepAlive = setInterval(() => {
+            if (isClientConnected) {
+              try {
+                controller.enqueue(new TextEncoder().encode(' '));
+              } catch (e) {
+                isClientConnected = false;
+              }
+            }
+          }, 2000);
+
+          try {
+            if (response.body) {
+              for await (const chunk of parseOpenRouterStream(response.body)) {
+                fullReply += chunk;
+              }
+            }
+          } catch (err) {
+            console.error('Streaming error:', err);
+          } finally {
+            clearInterval(keepAlive);
+            try {
+              const newMsg: ChatMessage = {
+                id: newMsgId,
+                userId: userId || 'unknown',
+                characterId: character.id,
+                role: 'assistant',
+                content: fullReply,
+                createdAt: Date.now(),
+                isAdLocked: isAdTurn === true,
+                ...(requestId ? { requestId } : {}),
+              };
+              if (userId && fullReply) {
+                await saveChatMessage(newMsg);
+              }
+              if (isClientConnected) {
+                const finalJson = JSON.stringify({ reply: fullReply, savedId: newMsgId });
+                controller.enqueue(new TextEncoder().encode(finalJson));
+              }
+            } catch (dbErr) {
+              console.error('DB save failed:', dbErr);
+            }
+            controller.close();
+          }
+        }
+      });
+
+      return new Response(stream, {
+        headers: {
+          ...corsHeaders,
+          'Content-Type': 'application/json; charset=utf-8',
+          'Transfer-Encoding': 'chunked',
+          'Cache-Control': 'no-cache, no-transform',
+          'X-Message-Id': newMsgId
+        }
+      });
     }
 
     // Streaming for standard chat
