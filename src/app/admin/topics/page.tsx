@@ -19,18 +19,28 @@ export default function AdminTopics() {
 
   const fetchTopics = async () => {
     setLoading(true);
-    const data = await getTopics();
-    setTopics(data);
-    
-    const counts: Record<string, number> = {};
-    await Promise.all(
-      data.map(async (t) => {
-        counts[t.id] = await getTopicAnswerCount(t.id);
-      })
-    );
-    setAnswerCounts(counts);
-    
-    setLoading(false);
+    try {
+      const data = await getTopics();
+      setTopics(data);
+      
+      const counts: Record<string, number> = {};
+      await Promise.all(
+        data.map(async (t) => {
+          try {
+            counts[t.id] = await getTopicAnswerCount(t.id);
+          } catch (e) {
+            console.warn(`Failed to fetch count for topic ${t.id}`, e);
+            counts[t.id] = 0;
+          }
+        })
+      );
+      setAnswerCounts(counts);
+    } catch (error) {
+      console.error("Failed to fetch topics:", error);
+      alert("일기 주제를 불러오는 중 오류가 발생했습니다.");
+    } finally {
+      setLoading(false);
+    }
   };
 
   useEffect(() => {
