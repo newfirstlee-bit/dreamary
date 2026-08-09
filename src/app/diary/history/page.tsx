@@ -56,7 +56,7 @@ function DiaryHistoryContent() {
   const fetchDiaries = async (userId: string, charId: string) => {
     const [data, profile] = await Promise.all([
       getDiariesByUserAndChar(userId, charId),
-      getUserProfile(userId, charId)
+      getUserProfile(`${userId}_${charId}`)
     ]);
     // Sort newest first
     data.sort((a, b) => b.createdAt - a.createdAt);
