@@ -24,16 +24,22 @@ export default function AdminTopics() {
       setTopics(data);
       
       const counts: Record<string, number> = {};
-      await Promise.all(
-        data.map(async (t) => {
-          try {
-            counts[t.id] = await getTopicAnswerCount(t.id);
-          } catch (e) {
-            console.warn(`Failed to fetch count for topic ${t.id}`, e);
-            counts[t.id] = 0;
-          }
-        })
-      );
+      
+      // Chunk requests to avoid rate limits (20 concurrent requests max)
+      const chunkSize = 20;
+      for (let i = 0; i < data.length; i += chunkSize) {
+        const chunk = data.slice(i, i + chunkSize);
+        await Promise.all(
+          chunk.map(async (t) => {
+            try {
+              counts[t.id] = await getTopicAnswerCount(t.id);
+            } catch (e) {
+              console.warn(`Failed to fetch count for topic ${t.id}`, e);
+              counts[t.id] = 0;
+            }
+          })
+        );
+      }
       setAnswerCounts(counts);
     } catch (error) {
       console.error("Failed to fetch topics:", error);
