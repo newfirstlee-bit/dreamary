@@ -178,6 +178,10 @@ function ChatDetailContent({ params }: { params: { id: string } }) {
         setUserProfile(profile);
 
         const history = await getChatMessages(userId, char.id);
+        // Render the authoritative one-time read immediately. The realtime
+        // listener can be delayed or unavailable on a first WebView mount;
+        // waiting for it made a chat with a visible preview appear blank.
+        setMessages(history);
         if (history.length === 0) {
           triggerInitialPing(char, profile);
         }
