@@ -1,7 +1,18 @@
 const isAppBuild = process.env.NEXT_PUBLIC_BUILD_TARGET === 'app';
+// Netlify previews also use NODE_ENV=production, so use the deployment
+// context to distinguish test websites from the production website.
+const isDevWeb = process.env.NODE_ENV === 'development' ||
+  ['deploy-preview', 'branch-deploy'].includes(process.env.CONTEXT);
+const buildLabel = isAppBuild
+  ? process.env.NEXT_PUBLIC_APP_CHANNEL
+  : `web · ${isDevWeb ? 'dev' : 'prod'}`;
+if (isAppBuild && !['app · dev', 'app · prod'].includes(buildLabel)) {
+  throw new Error('앱은 npm run build:app 또는 npm run build:app:release로 빌드하세요.');
+}
 
 /** @type {import('next').NextConfig} */
 const nextConfig = {
+  env: { NEXT_PUBLIC_APP_CHANNEL: buildLabel },
   ...(isAppBuild ? { output: 'export', trailingSlash: true } : {}),
   images: {
     // Netlify의 /_next/image 프록시가 정상 ImgBB 원본에도 404를 반환할 수 있어

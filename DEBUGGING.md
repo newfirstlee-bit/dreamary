@@ -2,6 +2,13 @@
 
 같은 장애가 반복되지 않도록 실제 기기에서 확인된 원인과 금지 설정을 기록한다.
 
+## 2026-09-10 버전 표시 최종 규칙 (사용자 요청)
+
+- 버전 뒤 구분은 웹 개발/미리보기 `web · dev`, 웹 운영 `web · prod`, 앱 개발 `app · dev`, 앱 운영 `app · prod`로 통일한다. 아래 과거 기록의 `branch · PR2`/`release` 표시는 이 규칙으로 대체한다.
+- Netlify 테스트 배포도 `NODE_ENV=production`으로 컴파일되므로 웹은 `CONTEXT=deploy-preview` 또는 `branch-deploy`를 개발 표시로 분류한다. 로컬 `npm run dev`도 개발 표시다.
+- 앱은 기존 `app-build-targets.json`의 branch/release 대상에 표시값을 함께 지정한다. 표시 변경은 API 주소·Firebase 연결·데이터 처리에 영향을 주지 않는다. 앱 빌드 명령과 서버 불일치 차단은 유지한다.
+- 전달 전 네 가지 표시값과 테스트 앱 번들을 확인하고, `check:app` 및 양 플랫폼 동기화·빌드를 수행한다.
+
 ## 2026-09-10 branch 앱만 로그인 실패 — 테스트 앱의 운영 API 연결과 오류 오분류
 
 ### 증상·원인 및 증거 범위

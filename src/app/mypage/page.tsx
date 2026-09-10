@@ -26,16 +26,8 @@ import { getUserId } from '@/lib/auth';
 const TERMS_URL = 'https://pickled-shovel-787.notion.site/3b5278d76e0580768273f5e88a09c3fe?source=copy_link';
 const PRIVACY_URL = 'https://pickled-shovel-787.notion.site/3b5278d76e0580ba9269f3ed205b37f6?source=copy_link';
 const APP_VERSION = process.env.NEXT_PUBLIC_APP_VERSION || '0.1.0';
-// App builds made from a test branch are labelled explicitly so they cannot
-// be confused with a production install. A release pipeline can override
-// this with NEXT_PUBLIC_APP_CHANNEL=release (or another approved label).
-const APP_BUILD_LABEL = process.env.NEXT_PUBLIC_APP_CHANNEL || (
-  process.env.NEXT_PUBLIC_BUILD_TARGET === 'app'
-    ? 'branch'
-    : process.env.NODE_ENV === 'development'
-      ? 'dev'
-      : 'web'
-);
+// The build configuration pairs the platform/environment label with its target.
+const APP_BUILD_LABEL = process.env.NEXT_PUBLIC_APP_CHANNEL || 'web · prod';
 const APP_VERSION_LABEL = `v${APP_VERSION} · ${APP_BUILD_LABEL}`;
 
 interface MyPageCache {
