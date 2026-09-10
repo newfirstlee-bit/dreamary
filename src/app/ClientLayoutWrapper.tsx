@@ -9,9 +9,84 @@ import AdBlockModal from '@/components/AdBlockModal';
 import { LocaleProvider, getLocale } from '@/lib/i18n';
 import { t } from '@/lib/i18n';
 import { AuthProvider } from '@/components/AuthContext';
+import { useAuth } from '@/components/AuthContext';
 import { useNativeNavigation } from '@/hooks/useNativeNavigation';
 import { Capacitor } from '@capacitor/core';
 import { shouldShowBottomNav } from '@/lib/navigation';
+import {
+  attachDiaryPushOpenHandler,
+  checkDiaryPushPermission,
+  clearDiaryPushBadgeAndDeliveredNotifications,
+  isDiaryPushLocallyEnabled,
+  isDiaryPushSupported,
+  registerDiaryPush,
+} from '@/lib/diaryPush';
+
+function DiaryPushTokenRefresh() {
+  const { user, status } = useAuth();
+
+  useEffect(() => {
+    if (!isDiaryPushSupported() || status !== 'authenticated' || !user) return;
+    if (!isDiaryPushLocallyEnabled(user.uid)) return;
+
+    const refreshKey = `dreamary_push_token_refreshed_${user.uid}`;
+    if (window.sessionStorage.getItem(refreshKey) === 'true') return;
+    window.sessionStorage.setItem(refreshKey, 'true');
+
+    let cancelled = false;
+
+    const refreshTokenIfEnabled = async () => {
+      try {
+        const permission = await checkDiaryPushPermission();
+
+        if (cancelled || permission.receive !== 'granted') return;
+
+        await registerDiaryPush({
+          user,
+          ownerId: user.uid,
+          locale: getLocale(),
+        });
+      } catch (error) {
+        console.warn('Diary push token refresh skipped:', error);
+      }
+    };
+
+    refreshTokenIfEnabled();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [status, user]);
+
+  return null;
+}
+
+function AnalyticsIdentity({ isAdmin, pathname }: { isAdmin: boolean; pathname: string | null }) {
+  const { user, status } = useAuth();
+
+  useEffect(() => {
+    if (isAdmin || typeof window === 'undefined') return;
+    if (window.localStorage.getItem('block_analytics') === 'true') return;
+    if (status === 'checking') return;
+
+    const userId = user?.uid || getUserId();
+    if (!userId) return;
+
+    identifyUser(userId);
+
+    if ((window as any).clarity) {
+      const authStatus = user ? 'authenticated' : 'guest';
+      (window as any).clarity('identify', userId);
+      (window as any).clarity('set', 'dreamary_user_id', userId);
+      (window as any).clarity('set', 'dreamary_auth_status', authStatus);
+      if (pathname) {
+        (window as any).clarity('set', 'dreamary_path', pathname);
+      }
+    }
+  }, [isAdmin, pathname, status, user]);
+
+  return null;
+}
 
 function isEditableElement(element: Element | null): boolean {
   if (!(element instanceof HTMLElement)) return false;
@@ -44,6 +119,10 @@ export default function ClientLayoutWrapper({ children }: { children: React.Reac
       document.documentElement.style.setProperty('--keyboard-height', `${Math.max(0, Math.round(height))}px`);
     };
 
+    const setKeyboardScrollHeight = (height: number) => {
+      document.documentElement.style.setProperty('--keyboard-scroll-height', `${Math.max(0, Math.round(height))}px`);
+    };
+
     const updateViewport = () => {
       const viewportHeight = viewport?.height ?? window.innerHeight;
       document.documentElement.style.setProperty('--app-viewport-height', `${Math.round(viewportHeight)}px`);
@@ -56,9 +135,13 @@ export default function ClientLayoutWrapper({ children }: { children: React.Reac
       const viewportIsReduced = viewportHeight < maximumViewportHeight - 100;
       if (viewportIsReduced) {
         const viewportKeyboardHeight = window.innerHeight - viewportHeight - (viewport?.offsetTop ?? 0);
-        setKeyboardHeight(viewportKeyboardHeight);
+        setKeyboardScrollHeight(viewportKeyboardHeight);
+        if (!Capacitor.isNativePlatform()) {
+          setKeyboardHeight(viewportKeyboardHeight);
+        }
       } else if (!hasEditableFocus) {
         setKeyboardHeight(0);
+        setKeyboardScrollHeight(0);
       }
       applyKeyboardState(hasEditableFocus || viewportIsReduced);
     };
@@ -94,18 +177,22 @@ export default function ClientLayoutWrapper({ children }: { children: React.Reac
             // Android resizes the WebView itself. Lifting again by the reported
             // keyboard height moves the CTA twice and clips it near the top.
             setKeyboardHeight(nativePlatform === 'ios' ? info.keyboardHeight : 0);
+            setKeyboardScrollHeight(info.keyboardHeight);
             applyKeyboardState(true);
           }).then(handle => { removeKeyboardWillShow = () => handle.remove(); });
           Keyboard.addListener('keyboardDidShow', info => {
             setKeyboardHeight(nativePlatform === 'ios' ? info.keyboardHeight : 0);
+            setKeyboardScrollHeight(info.keyboardHeight);
             applyKeyboardState(true);
           }).then(handle => { removeKeyboardDidShow = () => handle.remove(); });
           Keyboard.addListener('keyboardWillHide', () => {
             setKeyboardHeight(0);
+            setKeyboardScrollHeight(0);
             applyKeyboardState(false);
           }).then(handle => { removeKeyboardWillHide = () => handle.remove(); });
           Keyboard.addListener('keyboardDidHide', () => {
             setKeyboardHeight(0);
+            setKeyboardScrollHeight(0);
             applyKeyboardState(false);
           }).then(handle => { removeKeyboardDidHide = () => handle.remove(); });
         })
@@ -126,6 +213,7 @@ export default function ClientLayoutWrapper({ children }: { children: React.Reac
       document.body.classList.remove('is-keyboard-open');
       document.documentElement.style.removeProperty('--app-viewport-height');
       document.documentElement.style.removeProperty('--keyboard-height');
+      document.documentElement.style.removeProperty('--keyboard-scroll-height');
     };
   }, []);
 
@@ -133,6 +221,37 @@ export default function ClientLayoutWrapper({ children }: { children: React.Reac
     document.body.classList.toggle('is-full-page-route', !isBottomNavRoute);
     return () => document.body.classList.remove('is-full-page-route');
   }, [isBottomNavRoute]);
+
+  useEffect(() => {
+    let cleanup: (() => void) | undefined;
+    attachDiaryPushOpenHandler(url => {
+      if (url === '/') router.push('/');
+      else router.push(url.startsWith('/') ? url : '/diary');
+    })
+      .then(remove => { cleanup = remove; })
+      .catch(error => console.warn('Push notification open handler skipped:', error));
+
+    return () => cleanup?.();
+  }, [router]);
+
+  useEffect(() => {
+    if (!isDiaryPushSupported()) return;
+
+    clearDiaryPushBadgeAndDeliveredNotifications();
+
+    let removeAppStateListener: (() => void) | undefined;
+    import('@capacitor/app')
+      .then(({ App }) => {
+        App.addListener('appStateChange', ({ isActive }) => {
+          if (isActive) clearDiaryPushBadgeAndDeliveredNotifications();
+        }).then(handle => {
+          removeAppStateListener = () => handle.remove();
+        });
+      })
+      .catch(error => console.warn('Push badge app-state listener skipped:', error));
+
+    return () => removeAppStateListener?.();
+  }, []);
 
   useEffect(() => {
     if (typeof window !== 'undefined' && window.location.search.includes('block_analytics=true')) {
@@ -176,6 +295,8 @@ export default function ClientLayoutWrapper({ children }: { children: React.Reac
     <AuthProvider>
       <LocaleProvider>
         <AdBlockModal />
+        <DiaryPushTokenRefresh />
+        <AnalyticsIdentity isAdmin={!!isAdmin} pathname={pathname} />
         {children}
         {isBottomNavRoute && !isKeyboardOpen && <BottomNav />}
       </LocaleProvider>

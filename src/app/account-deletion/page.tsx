@@ -93,7 +93,7 @@ export default function AccountDeletionPage() {
   return (
     <main className={`app-container full-page status-surface-white ${styles.page}`}>
       <div className={styles.scrollArea}>
-        <p className={styles.brand}>Dreamary · 드리머리</p>
+        <p className={styles.brand}>Dreamary · 드림어리</p>
         <h1 className={styles.title}>계정 및 데이터 삭제</h1>
         <p className={styles.description}>
           앱을 삭제한 뒤에도 이 페이지에서 Dreamary 계정 삭제를 요청하고 즉시 완료할 수 있습니다.

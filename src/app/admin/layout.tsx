@@ -2,14 +2,15 @@ import { cookies } from 'next/headers';
 import Link from 'next/link';
 import AdminLogin from './AdminLogin';
 import LogoutButton from './LogoutButton';
+import { validAdminSession } from '@/lib/server/adminSession';
 
-export default function AdminLayout({ children }: { children: React.ReactNode }) {
+export default async function AdminLayout({ children }: { children: React.ReactNode }) {
   const isAppBuild = process.env.NEXT_PUBLIC_BUILD_TARGET === 'app';
   let isAdmin = false;
   
   if (!isAppBuild) {
     const cookieStore = cookies();
-    isAdmin = cookieStore.get('admin_auth')?.value === 'true';
+    isAdmin = await validAdminSession(cookieStore.get('admin_auth')?.value);
   }
 
   if (!isAdmin) {
@@ -23,7 +24,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
   return (
     <div style={{ display: 'flex', width: '100%', height: '100vh', backgroundColor: '#f9f9f9', overflow: 'hidden' }}>
       <aside style={{ width: '250px', backgroundColor: 'white', borderRight: '1px solid #ddd', padding: '20px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
-        <h1 style={{ fontSize: '1.5rem', fontWeight: 'bold', color: 'var(--point-color)', marginBottom: '30px' }}>드리머리 어드민</h1>
+        <h1 style={{ fontSize: '1.5rem', fontWeight: 'bold', color: 'var(--point-color)', marginBottom: '30px' }}>드림어리 어드민</h1>
         <Link href="/admin" style={{ padding: '12px', borderRadius: '8px', backgroundColor: 'var(--gray-100)', color: 'var(--gray-800)', textDecoration: 'none', fontWeight: 'bold' }}>대시보드</Link>
         <Link href="/admin/topics" style={{ padding: '12px', borderRadius: '8px', backgroundColor: 'var(--gray-100)', color: 'var(--gray-800)', textDecoration: 'none', fontWeight: 'bold' }}>일기 주제 관리</Link>
         <Link href="/admin/users" style={{ padding: '12px', borderRadius: '8px', backgroundColor: 'var(--gray-100)', color: 'var(--gray-800)', textDecoration: 'none', fontWeight: 'bold' }}>사용자 로그</Link>

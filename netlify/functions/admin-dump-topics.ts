@@ -1,5 +1,6 @@
 import type { Config } from "@netlify/functions";
-import { getTopics } from '../../src/lib/db';
+import { readAdminTopics } from '../../src/lib/server/adminTopics';
+import { isAdminRequest } from '../../src/lib/server/adminSession';
 import { corsHeaders } from './cors';
 
 export const config: Config = {
@@ -12,7 +13,8 @@ export default async function reqHandler(req: Request) {
   }
 
   try {
-    const topics = await getTopics();
+    if (!await isAdminRequest(req)) return new Response(null, { status: 401 });
+    const topics = await readAdminTopics();
     return new Response(JSON.stringify(topics), { headers: corsHeaders });
   } catch (error) {
     console.error('Dump Topics Error:', error);

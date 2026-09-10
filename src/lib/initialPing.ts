@@ -1,6 +1,7 @@
 import { Capacitor, CapacitorHttp } from '@capacitor/core';
 import type { Character, UserProfile } from '@/lib/db';
 import { apiFetch, getApiUrl } from '@/lib/api';
+import { diaryRequestHeaders } from '@/lib/diaryRequestHeaders';
 
 interface InitialPingParams {
   character: Character;
@@ -69,7 +70,7 @@ async function sendInitialPing(params: InitialPingParams): Promise<InitialPingRe
     // globally patching fetch/XHR, so Firestore WebChannel remains untouched.
     const response = await CapacitorHttp.post({
       url: getApiUrl('/api/chat'),
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', ...await diaryRequestHeaders(payload) },
       data: payload,
       connectTimeout: 15000,
       readTimeout: REQUEST_TIMEOUT_MS,

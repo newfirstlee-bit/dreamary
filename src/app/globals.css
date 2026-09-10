@@ -24,11 +24,13 @@
   --safe-top: var(--safe-area-inset-top, env(safe-area-inset-top, 0px));
   --safe-bottom: var(--safe-area-inset-bottom, env(safe-area-inset-bottom, 0px));
   --keyboard-height: 0px;
+  --keyboard-scroll-height: 0px;
   --bottom-ui-safe-gap: var(--safe-bottom);
   --android-system-bottom-fallback: 48px;
   --bottom-nav-height: calc(65px + var(--bottom-ui-safe-gap));
   --fixed-cta-footer-height: calc(84px + var(--bottom-ui-safe-gap));
   --tab-header-height: 52px;
+  --global-overlay-z-index: 100000;
   color-scheme: light; /* Force light mode native UI elements */
 }
 
@@ -48,6 +50,17 @@ body.is-keyboard-open {
   margin: 0;
 }
 
+@keyframes dreamarySpin {
+  100% {
+    transform: rotate(360deg);
+  }
+}
+
+.animate-spin,
+.dreamary-spin {
+  animation: dreamarySpin 0.9s linear infinite;
+}
+
 body {
   background-color: var(--background);
   color: var(--foreground);
@@ -55,6 +68,15 @@ body {
   min-height: 100vh;
   display: flex;
   justify-content: center;
+}
+
+/* App-wide dialogs and bottom sheets must be portaled to document.body.
+   This layer stays above page scroll containers, headers, tabs, and dev badges. */
+.global-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: var(--global-overlay-z-index);
+  isolation: isolate;
 }
 
 /* Mobile container styling */
@@ -78,6 +100,7 @@ body {
   text-align: left;
   font-size: 20px;
   font-weight: bold;
+  flex-shrink: 0;
 }
 
 .content {
@@ -112,6 +135,26 @@ body {
   min-height: 0;
 }
 
+.home-readable-card {
+  position: relative;
+  overflow: hidden;
+}
+
+.home-readable-card > * {
+  position: relative;
+  z-index: 1;
+}
+
+.home-readable-card-dark::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.2);
+  mix-blend-mode: multiply;
+  pointer-events: none;
+  z-index: 0;
+}
+
 .diary-dummy-message {
   width: 100%;
 }
@@ -131,14 +174,76 @@ body {
   flex-shrink: 0;
 }
 
+.diary-content {
+  flex: 1 1 0;
+  height: 0;
+  min-height: 0;
+  position: relative;
+  overflow-y: scroll;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior-y: contain;
+  touch-action: pan-y;
+  overflow-anchor: none;
+  padding-bottom: 160px;
+  scroll-padding-bottom: 160px;
+}
+
 .diary-entry-textarea {
   width: 100%;
   min-height: 120px;
   background-color: white;
+  touch-action: pan-y;
 }
 
 body.is-ios-app.is-keyboard-open .diary-page .diary-content {
-  padding-bottom: calc(var(--keyboard-height) + 24px) !important;
+  padding-bottom: calc(160px + var(--keyboard-scroll-height) + 24px) !important;
+  scroll-padding-bottom: calc(160px + var(--keyboard-scroll-height) + 24px);
+}
+
+/* The diary screen opts into Capacitor's native iOS WebView resize mode so
+   the focused textarea follows the keyboard like it does on Android. */
+body.is-ios-app.diary-native-keyboard-resize.is-keyboard-open .diary-page .diary-content {
+  padding-bottom: 176px !important;
+  scroll-padding-bottom: 176px;
+}
+
+/* Android already shrinks the WebView for the IME. Keep enough content tail
+   for manual scrolling without adding the reported keyboard height twice. */
+body.is-android-app.is-keyboard-open .diary-page .diary-content {
+  padding-bottom: 176px !important;
+  scroll-padding-bottom: 176px;
+}
+
+.diary-character-selector {
+  transition: padding 0.2s ease, gap 0.2s ease;
+}
+
+.diary-character-card {
+  transition: padding 0.2s ease, gap 0.2s ease, border-radius 0.2s ease, box-shadow 0.2s ease;
+}
+
+.diary-character-avatar {
+  transition: width 0.2s ease, height 0.2s ease, opacity 0.16s ease;
+}
+
+.diary-character-selector-collapsed {
+  padding: 8px 20px !important;
+  gap: 8px !important;
+}
+
+.diary-character-selector-collapsed .diary-character-card {
+  flex-direction: row !important;
+  padding: 8px 14px !important;
+  gap: 0 !important;
+  border-radius: 999px !important;
+  min-height: 38px;
+  box-shadow: 0 2px 6px rgba(0,0,0,0.04) !important;
+}
+
+.diary-character-selector-collapsed .diary-character-avatar {
+  width: 0 !important;
+  height: 0 !important;
+  opacity: 0;
 }
 
 /* Full-page flows do not use the bottom tabs and must respect device safe areas. */
@@ -268,12 +373,63 @@ body.is-keyboard-open .full-page .content {
 
 .fixed-cta-page {
   padding-bottom: 0 !important;
+  /* fixed footer는 position:fixed라 부모 overflow 필요 없음.
+     iOS WKWebView에서 overflow:hidden이 자식 터치 스크롤을 차단하는
+     버그를 우회하기 위해 visible로 전환. */
+  overflow: visible;
 }
 
 .fixed-cta-content {
+  flex: 1;
+  /* iOS flex 내부 스크롤 보장: height:0으로 자연 높이를 제거하고
+     flex:1이 가용 공간을 채우도록 하여 overflow-y가 동작하게 함 */
+  height: 0;
   min-height: 0;
   overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
   padding-bottom: var(--fixed-cta-footer-height);
+  scroll-padding-bottom: calc(var(--fixed-cta-footer-height) + 24px);
+}
+
+/* User profile edit owns exactly one vertical scroll container. Keeping the
+   body and full-page shell fixed avoids WKWebView handing the pan gesture to
+   the non-scrollable page root. */
+.user-profile-edit-page {
+  background-color: var(--gray-50);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.user-profile-edit-scroll {
+  flex: 1 1 0;
+  min-height: 0;
+  width: 100%;
+  overflow-x: hidden;
+  overflow-y: scroll;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior-y: contain;
+  touch-action: pan-y;
+  padding: 20px 20px calc(var(--fixed-cta-footer-height) + 24px);
+}
+
+body.is-keyboard-open .user-profile-edit-scroll {
+  padding-bottom: calc(var(--fixed-cta-footer-height) + var(--keyboard-scroll-height) + 32px);
+}
+
+body.is-keyboard-open .fixed-cta-content {
+  padding-bottom: calc(var(--fixed-cta-footer-height) + var(--keyboard-scroll-height) + 24px) !important;
+  scroll-padding-bottom: calc(var(--fixed-cta-footer-height) + var(--keyboard-scroll-height) + 24px);
+}
+
+body.is-keyboard-open .full-page .content.fixed-cta-content {
+  padding-bottom: calc(var(--fixed-cta-footer-height) + var(--keyboard-scroll-height) + 32px) !important;
+  scroll-padding-bottom: calc(var(--fixed-cta-footer-height) + var(--keyboard-scroll-height) + 32px);
+}
+
+body.is-keyboard-open .fixed-cta-content input,
+body.is-keyboard-open .fixed-cta-content textarea {
+  scroll-margin-bottom: calc(var(--fixed-cta-footer-height) + var(--keyboard-scroll-height) + 32px);
 }
 
 .fixed-cta-footer {
@@ -304,6 +460,24 @@ body.is-android-app.is-keyboard-open .full-page-footer,
 body.is-android-app.is-keyboard-open .fixed-cta-footer,
 body.is-android-app.is-keyboard-open .account-full-page-footer {
   bottom: 0;
+}
+
+/* Android WebView resizes itself for the keyboard; the extra keyboard-scroll-height
+   in padding/scroll-padding causes the browser to overshoot when scrolling a
+   focused input into view. Override all three properties to use CTA height only. */
+body.is-android-app.is-keyboard-open .fixed-cta-content {
+  padding-bottom: calc(var(--fixed-cta-footer-height) + 24px) !important;
+  scroll-padding-bottom: calc(var(--fixed-cta-footer-height) + 24px);
+}
+
+body.is-android-app.is-keyboard-open .full-page .content.fixed-cta-content {
+  padding-bottom: calc(var(--fixed-cta-footer-height) + 32px) !important;
+  scroll-padding-bottom: calc(var(--fixed-cta-footer-height) + 32px);
+}
+
+body.is-android-app.is-keyboard-open .fixed-cta-content input,
+body.is-android-app.is-keyboard-open .fixed-cta-content textarea {
+  scroll-margin-bottom: calc(var(--fixed-cta-footer-height) + 16px);
 }
 
 .guide-chat-content {
@@ -369,6 +543,10 @@ body.is-android-app.is-keyboard-open .account-full-page-footer {
 
   .diary-character-selector {
     padding: 8px 16px !important;
+  }
+
+  .diary-character-selector-collapsed {
+    padding: 6px 16px !important;
   }
 
   .diary-character-card {

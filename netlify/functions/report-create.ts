@@ -3,6 +3,8 @@ import { FieldValue } from 'firebase-admin/firestore';
 import { Resend } from 'resend';
 import { adminDb } from '../../src/lib/firebase-admin';
 import { corsHeaders } from './cors';
+import { requireDataOwner, assertGuestActive, securityErrorResponse } from '../../src/lib/server/guestIdentity';
+import { DiaryAuthenticationError } from '../../src/lib/server/diaryAuthentication';
 
 export const config: Config = {
   path: "/api/reports/create"
@@ -94,9 +96,16 @@ export default async function reqHandler(req: Request) {
     }
 
     const payload = sanitizePayload(await req.json());
+    const owner = await requireDataOwner(req, payload.userId);
+    await assertGuestActive(adminDb, owner);
     if (!payload.targetId || !payload.content || payload.reasons.length === 0) {
       return new Response(JSON.stringify({ error: '신고 대상과 사유가 필요합니다.' }), { status: 400, headers: corsHeaders });
     }
+    if (payload.targetId.includes('/')) throw new DiaryAuthenticationError(400, '신고 대상을 확인해주세요.');
+    const target = await adminDb.collection(payload.source === 'chat' ? 'chatMessages' : 'diaries').doc(payload.targetId).get();
+    if (target.data()?.userId !== owner.uid || target.data()?.characterId !== payload.characterId ||
+        (payload.source === 'chat' && target.data()?.role !== 'assistant')) throw new DiaryAuthenticationError(403, '신고 대상 접근 권한이 없습니다.');
+    payload.content = String(payload.source === 'chat' ? target.data()?.content || '' : target.data()?.charReply || '').slice(0, 4000);
 
     const reportRef = adminDb.collection('reports').doc();
     await reportRef.set({
@@ -112,7 +121,6 @@ export default async function reqHandler(req: Request) {
 
     return new Response(JSON.stringify({ success: true, pendingCount }), { headers: corsHeaders });
   } catch (error: any) {
-    console.error('Report Create Error:', error);
-    return new Response(JSON.stringify({ error: error?.message || '신고 접수 중 오류가 발생했습니다.' }), { status: 500, headers: corsHeaders });
+    return securityErrorResponse(error, corsHeaders);
   }
 }

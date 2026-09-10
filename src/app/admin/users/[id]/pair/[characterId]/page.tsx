@@ -1,8 +1,6 @@
 "use client";
 
 import { useEffect, useState } from 'react';
-import { collection, query, where, getDocs, doc, getDoc } from 'firebase/firestore';
-import { db } from '@/lib/firebase';
 import { Loader2, ChevronLeft } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { Diary, ChatMessage, Character } from '@/lib/db';
@@ -15,31 +13,38 @@ export default function AdminPairDetail({ params }: { params: { id: string; char
   const [character, setCharacter] = useState<Character | null>(null);
   const [diaries, setDiaries] = useState<Diary[]>([]);
   const [chats, setChats] = useState<ChatMessage[]>([]);
+  const [diaryCursor, setDiaryCursor] = useState<string | null>(null);
+  const [chatCursor, setChatCursor] = useState<string | null>(null);
+  const [loadingMoreDiaries, setLoadingMoreDiaries] = useState(false);
+  const [loadingMoreChats, setLoadingMoreChats] = useState(false);
+
+  const fetchLogs = async (type: 'diaries' | 'chats', cursor?: string | null) => {
+    const params = new URLSearchParams({ type, pageSize: '20', userId, characterId });
+    if (type === 'diaries' && !cursor) params.set('includeCharacter', '1');
+    if (cursor) params.set('cursor', cursor);
+    const response = await fetch(`/api/admin/pair-logs?${params.toString()}`);
+    const data = await response.json();
+    if (!response.ok || data.error) throw new Error(data.error || 'Failed to load logs');
+
+    if (type === 'diaries') {
+      if (!cursor) setCharacter(data.character || null);
+      setDiaries(prev => cursor ? [...prev, ...data.items] : data.items);
+      setDiaryCursor(data.nextCursor || null);
+    } else {
+      setChats(prev => cursor ? [...prev, ...data.items] : data.items);
+      setChatCursor(data.nextCursor || null);
+    }
+  };
 
   useEffect(() => {
     const fetchPairData = async () => {
       try {
         setLoading(true);
 
-        // Fetch Character Info
-        const charDoc = await getDoc(doc(db, 'characters', characterId));
-        if (charDoc.exists()) {
-          setCharacter(charDoc.data() as Character);
-        }
-
-        // Fetch Diaries
-        const diaryQ = query(collection(db, 'diaries'), where('characterId', '==', characterId));
-        const diarySnap = await getDocs(diaryQ);
-        const fetchedDiaries = diarySnap.docs.map(d => d.data() as Diary);
-        fetchedDiaries.sort((a, b) => a.createdAt - b.createdAt); // oldest first
-        setDiaries(fetchedDiaries);
-
-        // Fetch Chats
-        const chatQ = query(collection(db, 'chatMessages'), where('characterId', '==', characterId));
-        const chatSnap = await getDocs(chatQ);
-        const fetchedChats = chatSnap.docs.map(d => d.data() as ChatMessage);
-        fetchedChats.sort((a, b) => a.createdAt - b.createdAt); // oldest first
-        setChats(fetchedChats);
+        await Promise.all([
+          fetchLogs('diaries'),
+          fetchLogs('chats'),
+        ]);
 
       } catch (err) {
         console.error(err);
@@ -63,6 +68,32 @@ export default function AdminPairDetail({ params }: { params: { id: string; char
   const pairName = character ? (character.pairName || character.name || '이름 없음') : '이름 없음';
   const charName = character ? (character.name || '캐릭터') : '캐릭터';
 
+  const handleLoadMoreDiaries = async () => {
+    if (!diaryCursor) return;
+    try {
+      setLoadingMoreDiaries(true);
+      await fetchLogs('diaries', diaryCursor);
+    } catch (error) {
+      console.error(error);
+      alert('일기 로그를 추가로 불러오지 못했습니다.');
+    } finally {
+      setLoadingMoreDiaries(false);
+    }
+  };
+
+  const handleLoadMoreChats = async () => {
+    if (!chatCursor) return;
+    try {
+      setLoadingMoreChats(true);
+      await fetchLogs('chats', chatCursor);
+    } catch (error) {
+      console.error(error);
+      alert('채팅 로그를 추가로 불러오지 못했습니다.');
+    } finally {
+      setLoadingMoreChats(false);
+    }
+  };
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: 'calc(100vh - 100px)' }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: '15px', marginBottom: '20px' }}>
@@ -77,7 +108,7 @@ export default function AdminPairDetail({ params }: { params: { id: string; char
         {/* Diaries Panel */}
         <div style={{ flex: 1, display: 'flex', flexDirection: 'column', backgroundColor: 'white', borderRadius: '12px', border: '1px solid #ddd', overflow: 'hidden' }}>
           <div style={{ backgroundColor: 'var(--gray-100)', padding: '15px', borderBottom: '1px solid #ddd', fontWeight: 'bold' }}>
-            일기 상세 로그 (총 {diaries.length}개)
+            일기 상세 로그 ({diaries.length}개 로드)
           </div>
           <div style={{ flex: 1, overflowY: 'auto', padding: '20px', display: 'flex', flexDirection: 'column', gap: '20px' }}>
             {diaries.length === 0 ? (
@@ -102,13 +133,18 @@ export default function AdminPairDetail({ params }: { params: { id: string; char
                 </div>
               ))
             )}
+            {diaryCursor && (
+              <button onClick={handleLoadMoreDiaries} disabled={loadingMoreDiaries} style={{ padding: '10px 14px', borderRadius: '999px', border: '1px solid var(--border-color)', backgroundColor: 'white', color: 'var(--gray-700)', fontWeight: 'bold', cursor: loadingMoreDiaries ? 'default' : 'pointer' }}>
+                {loadingMoreDiaries ? '불러오는 중...' : '일기 20개 더보기'}
+              </button>
+            )}
           </div>
         </div>
 
         {/* Chats Panel */}
         <div style={{ flex: 1, display: 'flex', flexDirection: 'column', backgroundColor: 'white', borderRadius: '12px', border: '1px solid #ddd', overflow: 'hidden' }}>
           <div style={{ backgroundColor: 'var(--gray-100)', padding: '15px', borderBottom: '1px solid #ddd', fontWeight: 'bold' }}>
-            채팅 상세 로그 (총 {chats.length}개 / 턴 수: {chats.filter(c => c.role === 'user').length}턴)
+            채팅 상세 로그 ({chats.length}개 로드)
           </div>
           <div style={{ flex: 1, overflowY: 'auto', padding: '20px', display: 'flex', flexDirection: 'column', gap: '15px' }}>
             {chats.length === 0 ? (
@@ -137,6 +173,11 @@ export default function AdminPairDetail({ params }: { params: { id: string; char
                   </div>
                 );
               })
+            )}
+            {chatCursor && (
+              <button onClick={handleLoadMoreChats} disabled={loadingMoreChats} style={{ padding: '10px 14px', borderRadius: '999px', border: '1px solid var(--border-color)', backgroundColor: 'white', color: 'var(--gray-700)', fontWeight: 'bold', cursor: loadingMoreChats ? 'default' : 'pointer' }}>
+                {loadingMoreChats ? '불러오는 중...' : '채팅 20개 더보기'}
+              </button>
             )}
           </div>
         </div>

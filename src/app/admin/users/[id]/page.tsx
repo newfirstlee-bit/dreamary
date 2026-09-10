@@ -1,12 +1,10 @@
 "use client";
 
 import { useEffect, useState } from 'react';
-import { collection, query, where, getDocs, doc, getDoc } from 'firebase/firestore';
-import { db } from '@/lib/firebase';
 import { Loader2, ChevronLeft } from 'lucide-react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { Character, UserProfile, Diary, ChatMessage } from '@/lib/db';
+import { UserProfile } from '@/lib/db';
 
 interface PairStat {
   characterId: string;
@@ -39,75 +37,14 @@ export default function AdminUserDetail({ params }: { params: { id: string } }) 
       try {
         setLoading(true);
 
-        // Fetch User Profile
-        const userDoc = await getDoc(doc(db, 'users', userId));
-        let userName = '알 수 없음';
-        if (userDoc.exists()) {
-          const profile = userDoc.data() as UserProfile;
-          setUserProfile(profile);
-          userName = profile.name || userName;
-        }
+        const params = new URLSearchParams({ userId });
+        const response = await fetch(`/api/admin/user-detail?${params.toString()}`);
+        const data = await response.json();
+        if (!response.ok || data.error) throw new Error(data.error || 'Failed to load user detail');
 
-        // Fetch Characters
-        const charQ = query(collection(db, 'characters'), where('userId', '==', userId));
-        const charSnap = await getDocs(charQ);
-        const characters = charSnap.docs.map(d => d.data() as Character);
-
-        // Fetch Diaries
-        const diaryQ = query(collection(db, 'diaries'), where('userId', '==', userId));
-        const diarySnap = await getDocs(diaryQ);
-        const diaries = diarySnap.docs.map(d => d.data() as Diary);
-
-        // Fetch Chat Messages
-        const chatQ = query(collection(db, 'chatMessages'), where('userId', '==', userId));
-        const chatSnap = await getDocs(chatQ);
-        const chats = chatSnap.docs.map(d => d.data() as ChatMessage);
-
-        // Calculate Global Stats
-        let firstLogin = Number.MAX_SAFE_INTEGER;
-        let lastLogin = 0;
-        let chatTurns = 0;
-
-        const allDates: number[] = [];
-        if (userDoc.exists() && userDoc.data().createdAt) allDates.push(userDoc.data().createdAt);
-        characters.forEach(c => c.createdAt && allDates.push(c.createdAt));
-        diaries.forEach(d => d.createdAt && allDates.push(d.createdAt));
-        chats.forEach(c => {
-          if (c.createdAt) allDates.push(c.createdAt);
-          if (c.role === 'user') chatTurns++;
-        });
-
-        if (allDates.length > 0) {
-          firstLogin = Math.min(...allDates);
-          lastLogin = Math.max(...allDates);
-        } else {
-          firstLogin = 0;
-        }
-
-        setStats({
-          firstLogin,
-          lastLogin,
-          charactersCount: characters.length,
-          diariesCount: diaries.length,
-          chatTurns
-        });
-
-        // Calculate Pair Stats
-        const pairStats: PairStat[] = characters.map(char => {
-          const charDiaries = diaries.filter(d => d.characterId === char.id).length;
-          const charChats = chats.filter(c => c.characterId === char.id && c.role === 'user').length;
-
-          return {
-            characterId: char.id,
-            characterName: char.name || '이름 없음',
-            pairName: char.pairName || char.name || '이름 없음',
-            userName: userName,
-            diariesCount: charDiaries,
-            chatTurns: charChats,
-          };
-        });
-
-        setPairs(pairStats);
+        setUserProfile(data.userProfile as UserProfile | null);
+        setStats(data.stats);
+        setPairs(data.pairs);
       } catch (err) {
         console.error(err);
         alert('데이터를 불러오는 중 오류가 발생했습니다.');

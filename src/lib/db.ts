@@ -1,25 +1,46 @@
-import { db } from './firebase';
-import { collection, doc, getDocs, setDoc, updateDoc, deleteDoc, getDoc, query, where, orderBy, limit, getCountFromServer, onSnapshot, writeBatch, DocumentReference } from 'firebase/firestore';
+import { auth, db } from './firebase';
+import { profileReadCache, topicReadCache } from './dataReadCache';
+import { getStoredGuestUserId, retireGuestIdentity, getUserId } from './auth';
+import { collection, doc, getDocs, setDoc, updateDoc, deleteDoc, getDoc, query, where, orderBy, limit, getCountFromServer, onSnapshot, runTransaction, startAfter, QueryDocumentSnapshot, DocumentData } from './dataFirestore';
+import { getDiaryDailyDocId } from './diaryIdentity';
+import { getGuestSession } from './guestSession';
+import { apiPostJson } from './api';
 
 export interface OwnershipMigration {
-  refs: DocumentReference[];
+  sourceUserId: string;
+  token: string;
 }
 
 export const prepareOwnershipMigration = async (sourceUserId: string): Promise<OwnershipMigration> => {
-  const collections = ['characters', 'diaries', 'chatMessages'];
-  const snapshots = await Promise.all(
-    collections.map(name => getDocs(query(collection(db, name), where('userId', '==', sourceUserId))))
-  );
-  return { refs: snapshots.flatMap(snapshot => snapshot.docs.map(item => item.ref)) };
+  return { sourceUserId, token: await getGuestSession(sourceUserId) };
 };
 
-export const completeOwnershipMigration = async (migration: OwnershipMigration, targetUserId: string) => {
-  for (let start = 0; start < migration.refs.length; start += 500) {
-    const batch = writeBatch(db);
-    migration.refs.slice(start, start + 500).forEach(ref => batch.update(ref, { userId: targetUserId }));
-    await batch.commit();
-  }
+const migrations = new Map<string, Promise<void>>();
+export const completeOwnershipMigration = (migration: OwnershipMigration, targetUserId: string): Promise<void> => {
+  const key = `${migration.sourceUserId}:${targetUserId}`;
+  const pending = migrations.get(key);
+  if (pending) return pending;
+  const request = (async () => {
+    // Bounded pages; a failed request is resumed explicitly, not auto-replayed.
+    for (let page = 0; page < 100; page++) {
+      const result = await apiPostJson<{ done: boolean }>('/api/backup/migrate', {
+        sourceUUID: migration.sourceUserId, uid: targetUserId,
+      }, { headers: { 'X-Guest-Authorization': `Guest ${migration.token}` } });
+      if (result.done) { retireGuestIdentity(migration.sourceUserId); return; }
+    }
+    throw new Error('이전할 데이터가 많습니다. 다시 로그인하여 이어서 진행해주세요.');
+  })().finally(() => migrations.delete(key));
+  migrations.set(key, request);
+  return request;
 };
+
+export async function migrateGuestBackup(code: string, uid: string) {
+  for (let page = 0; page < 100; page++) {
+    const result = await apiPostJson<{ done: boolean; sourceUUID: string }>('/api/backup/migrate', { code, uid });
+    if (result.done) { retireGuestIdentity(result.sourceUUID); return; }
+  }
+  throw new Error('이전할 데이터가 많습니다. 같은 백업 코드로 다시 시도해주세요.');
+}
 
 export interface Character {
   id: string;
@@ -77,6 +98,8 @@ export const getCharacter = async (id: string): Promise<Character | null> => {
 };
 
 export const saveCharacter = async (char: Character) => {
+  // Bind a new guest before creating its first remotely stored data.
+  if (!auth.currentUser) await getGuestSession(char.userId);
   await setDoc(doc(db, 'characters', char.id), char);
 };
 
@@ -89,26 +112,32 @@ export const unlockMessageAd = async (msgId: string) => {
 };
 
 export const deleteCharacter = async (id: string) => {
-  await deleteDoc(doc(db, 'characters', id));
-  // Delete related diaries
-  const diaryQ = query(collection(db, 'diaries'), where('characterId', '==', id));
-  const diarySnap = await getDocs(diaryQ);
-  for (const d of diarySnap.docs) await deleteDoc(d.ref);
-  // Delete related chat messages
-  const chatQ = query(collection(db, 'chatMessages'), where('characterId', '==', id));
-  const chatSnap = await getDocs(chatQ);
-  for (const c of chatSnap.docs) await deleteDoc(c.ref);
+  const userId = getUserId();
+  for (let page = 0; page < 100; page++) {
+    const result = await apiPostJson<{ done: boolean }>('/api/character/delete', { userId, characterId: id });
+    if (result.done) return;
+  }
+  throw new Error('삭제할 데이터가 많습니다. 같은 캐릭터 삭제를 다시 시도해주세요.');
 };
 
 // Users CRUD
 export const getUserProfile = async (id: string): Promise<UserProfile | null> => {
-  const d = await getDoc(doc(db, 'users', id));
-  if (d.exists()) return d.data() as UserProfile;
-  return null;
+  const ownerId = auth.currentUser?.uid || getStoredGuestUserId();
+  const read = async () => {
+    const d = await getDoc(doc(db, 'users', id));
+    return d.exists() ? d.data() as UserProfile : null;
+  };
+  // Never share an anonymous cache key across guest UUIDs or server-side requests.
+  return ownerId ? profileReadCache.get(`${ownerId}:${id}`, read) : read();
 };
 
 export const saveUserProfile = async (user: UserProfile) => {
-  await setDoc(doc(db, 'users', user.id), user);
+  profileReadCache.clear();
+  try {
+    await setDoc(doc(db, 'users', user.id), user);
+  } finally {
+    profileReadCache.clear();
+  }
 };
 
 // --- Diary & Topic Models ---
@@ -134,24 +163,34 @@ export interface Diary {
   requestId?: string;
 }
 
+export interface DiaryPage {
+  diaries: Diary[];
+  nextCursor: QueryDocumentSnapshot<DocumentData> | null;
+}
+
+export { getDiaryDailyDocId };
+
 // Topics CRUD
 export const getTopics = async (): Promise<Topic[]> => {
-  const snapshot = await getDocs(collection(db, 'topics'));
-  return snapshot.docs.map(doc => doc.data() as Topic).sort((a, b) => a.order - b.order);
+  return topicReadCache.get('topics', async () => {
+    const snapshot = await getDocs(collection(db, 'topics'));
+    return snapshot.docs.map(doc => doc.data() as Topic).sort((a, b) => a.order - b.order);
+  });
 };
 
 export const saveTopic = async (topic: Topic) => {
-  await setDoc(doc(db, 'topics', topic.id), topic);
+  await apiPostJson('/api/admin/topics-data', { action: 'save', topic });
+  topicReadCache.clear();
 };
 
 export const deleteTopic = async (topicId: string) => {
-  await deleteDoc(doc(db, 'topics', topicId));
+  await apiPostJson('/api/admin/topics-data', { action: 'delete', id: topicId });
+  topicReadCache.clear();
 };
 
 export const getTopicAnswerCount = async (topicId: string): Promise<number> => {
-  const q = query(collection(db, 'diaries'), where('topicId', '==', topicId));
-  const snapshot = await getCountFromServer(q);
-  return snapshot.data().count;
+  const result = await apiPostJson<{ count: number }>('/api/admin/topics-data', { action: 'count', id: topicId });
+  return result.count;
 };
 
 // Diaries CRUD
@@ -159,6 +198,65 @@ export const getDiariesByUserAndChar = async (userId: string, characterId: strin
   const q = query(collection(db, 'diaries'), where('userId', '==', userId), where('characterId', '==', characterId));
   const snapshot = await getDocs(q);
   return snapshot.docs.map(doc => doc.data() as Diary).sort((a, b) => b.createdAt - a.createdAt);
+};
+
+export const getDiariesByUserAndCharPage = async (
+  userId: string,
+  characterId: string,
+  pageSize = 30,
+  cursor?: QueryDocumentSnapshot<DocumentData> | null
+): Promise<DiaryPage> => {
+  const constraints = [
+    where('userId', '==', userId),
+    where('characterId', '==', characterId),
+    limit(pageSize),
+  ];
+  const q = cursor
+    ? query(collection(db, 'diaries'), ...constraints, startAfter(cursor))
+    : query(collection(db, 'diaries'), ...constraints);
+  const snapshot = await getDocs(q);
+  return {
+    diaries: snapshot.docs.map(doc => doc.data() as Diary),
+    nextCursor: snapshot.docs.length === pageSize ? snapshot.docs[snapshot.docs.length - 1] : null,
+  };
+};
+
+export const getAdjacentDiaryIds = async (
+  userId: string,
+  characterId: string,
+  createdAt: number
+): Promise<{ prevDiaryId: string | null; nextDiaryId: string | null }> => {
+  const olderQuery = query(
+    collection(db, 'diaries'),
+    where('userId', '==', userId),
+    where('characterId', '==', characterId),
+    where('createdAt', '<', createdAt),
+    orderBy('createdAt', 'desc'),
+    limit(1)
+  );
+  const newerQuery = query(
+    collection(db, 'diaries'),
+    where('userId', '==', userId),
+    where('characterId', '==', characterId),
+    where('createdAt', '>', createdAt),
+    orderBy('createdAt', 'asc'),
+    limit(1)
+  );
+
+  try {
+    const [olderSnap, newerSnap] = await Promise.all([
+      getDocs(olderQuery),
+      getDocs(newerQuery),
+    ]);
+
+    return {
+      prevDiaryId: olderSnap.empty ? null : (olderSnap.docs[0].data() as Diary).id,
+      nextDiaryId: newerSnap.empty ? null : (newerSnap.docs[0].data() as Diary).id,
+    };
+  } catch (error) {
+    console.warn('Adjacent diary query failed; skipping unbounded fallback to protect Firestore quota.', error);
+    return { prevDiaryId: null, nextDiaryId: null };
+  }
 };
 
 export const getTodayDiaryByUserAndChar = async (
@@ -178,9 +276,8 @@ export const getTodayDiaryByUserAndChar = async (
     if (snapshot.empty) return null;
     return snapshot.docs[0].data() as Diary;
   } catch (error) {
-    console.warn('Today diary optimized query failed; falling back to full diary list.', error);
-    const diaries = await getDiariesByUserAndChar(userId, characterId);
-    return diaries.find(d => d.dateString === dateString) || null;
+    console.warn('Today diary optimized query failed; skipping full diary fallback to protect Firestore quota.', error);
+    return null;
   }
 };
 
@@ -194,9 +291,8 @@ export const getDiaryCountByUserAndChar = async (userId: string, characterId: st
     const snapshot = await getCountFromServer(q);
     return snapshot.data().count;
   } catch (error) {
-    console.warn('Diary count optimized query failed; falling back to full diary list.', error);
-    const diaries = await getDiariesByUserAndChar(userId, characterId);
-    return diaries.length;
+    console.warn('Diary count optimized query failed; skipping full diary fallback to protect Firestore quota.', error);
+    return 0;
   }
 };
 
@@ -230,19 +326,33 @@ export const subscribeTodayDiary = (
   return onSnapshot(
     q,
     (snapshot) => {
+      // An initial empty offline cache is not proof that a server-saved diary
+      // disappeared. Keep the API result until an authoritative snapshot arrives.
+      if (snapshot.empty && snapshot.metadata.fromCache) return;
       callback(snapshot.empty ? null : (snapshot.docs[0].data() as Diary));
     },
     (error) => {
-      console.warn('Today diary subscription failed; falling back to one-time full diary read.', error);
-      getDiariesByUserAndChar(userId, characterId)
-        .then(diaries => callback(diaries.find(d => d.dateString === dateString) || null))
-        .catch(() => callback(null));
+      console.warn('Today diary subscription failed; skipping full diary fallback to protect Firestore quota.', error);
     }
   );
 };
 
 export const saveDiary = async (diary: Diary) => {
   await setDoc(doc(db, 'diaries', diary.id), diary);
+};
+
+export const saveDiaryOncePerDay = async (diary: Diary): Promise<{ diary: Diary; created: boolean }> => {
+  const docRef = doc(db, 'diaries', diary.id);
+
+  return runTransaction(db, async (transaction) => {
+    const snapshot = await transaction.get(docRef);
+    if (snapshot.exists()) {
+      return { diary: snapshot.data() as Diary, created: false };
+    }
+
+    transaction.set(docRef, diary);
+    return { diary, created: true };
+  });
 };
 
 export const unlockDiaryAd = async (diaryId: string) => {
@@ -305,9 +415,24 @@ export const getLatestChatMessage = async (userId: string, characterId: string):
     if (snapshot.empty) return null;
     return snapshot.docs[0].data() as ChatMessage;
   } catch (error) {
-    console.warn('Latest chat optimized query failed; falling back to full chat history.', error);
-    const msgs = await getChatMessages(userId, characterId);
-    return msgs.length > 0 ? msgs[msgs.length - 1] : null;
+    console.warn('Latest chat optimized query failed; using bounded fallback to protect Firestore quota.', error);
+  }
+
+  try {
+    const q = query(
+      collection(db, 'chatMessages'),
+      where('userId', '==', userId),
+      where('characterId', '==', characterId),
+      limit(30)
+    );
+    const snapshot = await getDocs(q);
+    if (snapshot.empty) return null;
+    const messages = snapshot.docs.map(doc => doc.data() as ChatMessage);
+    messages.sort((a, b) => (b.createdAt || b.timestamp || 0) - (a.createdAt || a.timestamp || 0));
+    return messages[0] || null;
+  } catch (fallbackError) {
+    console.warn('Latest chat bounded fallback failed.', fallbackError);
+    return null;
   }
 };
 

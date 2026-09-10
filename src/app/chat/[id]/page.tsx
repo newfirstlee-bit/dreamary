@@ -3,7 +3,7 @@ import { apiFetch, apiPostJson } from '@/lib/api';
 import { showAd } from "@/lib/ads";
 
 import { useEffect, useState, useRef, ReactNode, useCallback, Suspense } from 'react';
-import Image from 'next/image';
+import ResilientImage from '@/components/ResilientImage';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { Capacitor } from '@capacitor/core';
 import { useUserId } from '@/hooks/useUserId';
@@ -21,6 +21,7 @@ import { clearUserCache } from '@/lib/appCache';
 import { buildStaticEntityRoute, resolveStaticEntityId } from '@/lib/navigation';
 import { ensureInitialPing } from '@/lib/initialPing';
 import { logAdDiagnostic } from '@/lib/adDiagnostics';
+import { useAsyncActionLock } from '@/hooks/useAsyncActionLock';
 
 // polyfill for crypto.randomUUID() which fails on HTTP (non-HTTPS) mobile
 const generateId = (): string => {
@@ -43,6 +44,7 @@ function ChatDetailContent({ params }: { params: { id: string } }) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [inputMsg, setInputMsg] = useState("");
   const [isTyping, setIsTyping] = useState(false);
+  const { isPending: isSending, runLocked: runChatSendLocked } = useAsyncActionLock();
   const [streamingContent, setStreamingContent] = useState('');
   const [streamingMessageId, setStreamingMessageId] = useState<string | null>(null);
   const [showSettings, setShowSettings] = useState(false);
@@ -59,7 +61,6 @@ function ChatDetailContent({ params }: { params: { id: string } }) {
   const isAutoScrollEnabled = useRef(true);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const inputAreaRef = useRef<HTMLDivElement>(null);
-  const isSendingRef = useRef(false);
   const draftLoaded = useRef(false);
   const userId = useUserId();
   // Static app builds use /chat/1 as a physical page and keep the real ID in
@@ -274,161 +275,162 @@ function ChatDetailContent({ params }: { params: { id: string } }) {
   };
 
   const handleSend = async () => {
-    if (!inputMsg.trim() || !character || isSendingRef.current) return;
-    isSendingRef.current = true;
-    const userText = inputMsg.trim();
-    const requestId = generateId();
+    if (!inputMsg.trim() || !character) return;
 
-    const userMsg: ChatMessage = {
-      id: Date.now().toString(),
-      userId: userId!,
-      characterId: character.id,
-      role: 'user',
-      content: userText,
-      createdAt: Date.now()
-    };
+    await runChatSendLocked(async () => {
+      const userText = inputMsg.trim();
+      const requestId = generateId();
 
-    // Note: Since we have subscribeChatMessages, it will automatically update 'messages' state.
-    // But for instant UI feedback we can also append locally.
-    setMessages(prev => {
-      if (!prev.find(m => m.id === userMsg.id)) {
-        return [...prev, userMsg];
-      }
-      return prev;
-    });
-    
-    setInputMsg("");
-    trackEvent('Chat_Message_Sent', {
-      character_id: character.id,
-      message_length: userText.length
-    });
-    
-    if (!localStorage.getItem('core_interaction_tracked')) {
-      trackEvent('Core_interaction', { type: 'chat' });
-      localStorage.setItem('core_interaction_tracked', 'true');
-    }
-    
-    if (inputRef.current) {
-      inputRef.current.style.height = 'auto';
-      inputRef.current.blur();
-    }
+      const userMsg: ChatMessage = {
+        id: Date.now().toString(),
+        userId: userId!,
+        characterId: character.id,
+        role: 'user',
+        content: userText,
+        createdAt: Date.now()
+      };
 
-    setIsTyping(true);
-    isAutoScrollEnabled.current = true;
-    let success = false;
-    let savedId = '';
-    let attemptedAdTurn = false;
-    let userMessagePersisted = false;
-    try {
-      // Save before calling AI so the server can build context, but remove it again if sending fails.
-      await saveChatMessage(userMsg);
-      userMessagePersisted = true;
-      if (userId) clearUserCache(userId, ['chat', 'home']);
-
-      const isAdTurn = shouldShowChatAd();
-      const isNativeChat = Capacitor.isNativePlatform();
-      attemptedAdTurn = isAdTurn;
-      
-      let adWaitPromise = Promise.resolve(true);
-      if (isAdTurn) {
-        setAdModalOpen(true);
-        adWaitPromise = new Promise<boolean>((resolve) => {
-          setModalResolver(() => (didOpen: boolean) => resolve(didOpen));
-        });
-        const adOpened = await adWaitPromise;
-        if (!adOpened) {
-          logAdDiagnostic('chat', 'ad_open_failed', { characterId: character.id, requestId });
-          throw new Error('AD_OPEN_FAILED');
+      // Note: Since we have subscribeChatMessages, it will automatically update 'messages' state.
+      // But for instant UI feedback we can also append locally.
+      setMessages(prev => {
+        if (!prev.find(m => m.id === userMsg.id)) {
+          return [...prev, userMsg];
         }
-        logAdDiagnostic('chat', 'ad_completed', { characterId: character.id, requestId });
-      }
-
-      // Get recent 10 messages for context
-      const contextMessages = [...messages, userMsg].slice(-10);
-
-      const res = await apiFetch('/api/chat', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          character,
-          userProfile,
-          messages: contextMessages,
-          isFirstPing: false,
-          userId: userId,
-          isAdTurn: false,
-          requestId
-        })
+        return prev;
       });
 
-      if (!res.ok) {
-        throw new Error('Failed to fetch from API');
+      setInputMsg("");
+      trackEvent('Chat_Message_Sent', {
+        character_id: character.id,
+        message_length: userText.length
+      });
+
+      if (!localStorage.getItem('core_interaction_tracked')) {
+        trackEvent('Core_interaction', { type: 'chat' });
+        localStorage.setItem('core_interaction_tracked', 'true');
       }
 
-      const reader = res.body?.getReader();
-      if (!reader) throw new Error('Streaming not supported');
-
-      savedId = res.headers.get('X-Message-Id') || '';
-      if (savedId) {
-        setStreamingMessageId(savedId);
+      if (inputRef.current) {
+        inputRef.current.style.height = 'auto';
+        inputRef.current.blur();
       }
 
-      const decoder = new TextDecoder('utf-8');
-      let done = false;
-      let assistantReply = '';
+      setIsTyping(true);
+      isAutoScrollEnabled.current = true;
+      let success = false;
+      let savedId = '';
+      let attemptedAdTurn = false;
+      let userMessagePersisted = false;
+      try {
+        // Save before calling AI so the server can build context, but remove it again if sending fails.
+        await saveChatMessage(userMsg);
+        userMessagePersisted = true;
+        if (userId) clearUserCache(userId, ['chat', 'home']);
 
-      while (!done) {
-        const { value, done: readerDone } = await reader.read();
-        done = readerDone;
-        if (value) {
-          const chunk = decoder.decode(value, { stream: true });
-          const pieces = chunk.match(/.{1,3}/g) || [];
+        const isAdTurn = shouldShowChatAd();
+        const isNativeChat = Capacitor.isNativePlatform();
+        attemptedAdTurn = isAdTurn;
 
-          for (const piece of pieces) {
-            assistantReply += piece;
-            setStreamingContent(assistantReply);
-            await new Promise(resolve => setTimeout(resolve, 50));
+        let adWaitPromise = Promise.resolve(true);
+        if (isAdTurn) {
+          setAdModalOpen(true);
+          adWaitPromise = new Promise<boolean>((resolve) => {
+            setModalResolver(() => (didOpen: boolean) => resolve(didOpen));
+          });
+          const adOpened = await adWaitPromise;
+          if (!adOpened) {
+            logAdDiagnostic('chat', 'ad_open_failed', { characterId: character.id, requestId });
+            throw new Error('AD_OPEN_FAILED');
+          }
+          logAdDiagnostic('chat', 'ad_completed', { characterId: character.id, requestId });
+        }
+
+        // Get recent 10 messages for context
+        const contextMessages = [...messages, userMsg].slice(-10);
+
+        const res = await apiFetch('/api/chat', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            character,
+            userProfile,
+            messages: contextMessages,
+            isFirstPing: false,
+            userId: userId,
+            isAdTurn: false,
+            requestId
+          })
+        });
+
+        if (!res.ok) {
+          throw new Error('Failed to fetch from API');
+        }
+
+        const reader = res.body?.getReader();
+        if (!reader) throw new Error('Streaming not supported');
+
+        savedId = res.headers.get('X-Message-Id') || '';
+        if (savedId) {
+          setStreamingMessageId(savedId);
+        }
+
+        const decoder = new TextDecoder('utf-8');
+        let done = false;
+        let assistantReply = '';
+
+        while (!done) {
+          const { value, done: readerDone } = await reader.read();
+          done = readerDone;
+          if (value) {
+            const chunk = decoder.decode(value, { stream: true });
+            const pieces = chunk.match(/.{1,3}/g) || [];
+
+            for (const piece of pieces) {
+              assistantReply += piece;
+              setStreamingContent(assistantReply);
+              await new Promise(resolve => setTimeout(resolve, 50));
+            }
           }
         }
-      }
 
-      setStreamingContent('');
-      setStreamingMessageId(null);
-      success = true;
-      
-      if (success) {
-        recordSuccessfulChatTurn();
-        clearDraft(character.id, 'chat');
+        setStreamingContent('');
+        setStreamingMessageId(null);
+        success = true;
 
-        trackEvent('Chat_Response_Received', {
-          character_id: character.id,
-        });
-        // loadMessages() is no longer needed due to subscription
-      } else {
-        throw new Error('Streaming failed');
-      }
-    } catch (error) {
-      console.error('Send failed:', error);
-      closeAdModal();
-      setStreamingMessageId(null);
-      
-      setMessages(prev => prev.filter(m => m.id !== userMsg.id));
-      if (userMessagePersisted) {
-        deleteMessage(userMsg.id).catch(deleteError => {
-          console.warn('Failed to remove unsent chat message:', deleteError);
-        });
-      }
-      setInputMsg(userText);
-      saveDraft(character.id, userText, 'chat');
-      if ((error as Error)?.message !== 'AD_OPEN_FAILED') {
-        if (attemptedAdTurn) {
-          logAdDiagnostic('chat', 'app_server_request_failed', { characterId: character.id, requestId }, error);
+        if (success) {
+          recordSuccessfulChatTurn();
+          clearDraft(character.id, 'chat');
+
+          trackEvent('Chat_Response_Received', {
+            character_id: character.id,
+          });
+          // loadMessages() is no longer needed due to subscription
+        } else {
+          throw new Error('Streaming failed');
         }
-        setErrorModalOpen(true);
+      } catch (error) {
+        console.error('Send failed:', error);
+        closeAdModal();
+        setStreamingMessageId(null);
+
+        setMessages(prev => prev.filter(m => m.id !== userMsg.id));
+        if (userMessagePersisted) {
+          deleteMessage(userMsg.id).catch(deleteError => {
+            console.warn('Failed to remove unsent chat message:', deleteError);
+          });
+        }
+        setInputMsg(userText);
+        saveDraft(character.id, userText, 'chat');
+        if ((error as Error)?.message !== 'AD_OPEN_FAILED') {
+          if (attemptedAdTurn) {
+            logAdDiagnostic('chat', 'app_server_request_failed', { characterId: character.id, requestId }, error);
+          }
+          setErrorModalOpen(true);
+        }
+      } finally {
+        setIsTyping(false);
       }
-    } finally {
-      setIsTyping(false);
-      isSendingRef.current = false;
-    }
+    });
   };
 
   const handleDeleteChat = async () => {
@@ -616,7 +618,7 @@ function ChatDetailContent({ params }: { params: { id: string } }) {
               <div key={msg.id} style={{ display: 'flex', gap: '8px', marginBottom: '8px', alignItems: 'flex-start', flexDirection: editingMessageId === msg.id ? 'column' : 'row', width: '100%' }}>
                 {editingMessageId !== msg.id && showProfile && character?.image && (
                   <div style={{ width: '32px', height: '32px', borderRadius: '50%', backgroundColor: 'var(--gray-200)', overflow: 'hidden', position: 'relative', flexShrink: 0 }}>
-                    <Image src={character.image} alt={character.name} fill style={{ objectFit: 'cover' }} />
+                    <ResilientImage src={character.image} alt={character.name} kind="character_profile" fill style={{ objectFit: 'cover' }} fallback={<User size={22} color="var(--gray-500)" />} />
                   </div>
                 )}
                 {editingMessageId !== msg.id && !showProfile && character?.image && (
@@ -631,7 +633,7 @@ function ChatDetailContent({ params }: { params: { id: string } }) {
                   {editingMessageId === msg.id && showProfile && character?.image && (
                     <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px' }}>
                       <div style={{ width: '32px', height: '32px', borderRadius: '50%', backgroundColor: 'var(--gray-200)', overflow: 'hidden', position: 'relative', flexShrink: 0 }}>
-                        <Image src={character.image} alt={character.name} fill style={{ objectFit: 'cover' }} />
+                        <ResilientImage src={character.image} alt={character.name} kind="character_profile" fill style={{ objectFit: 'cover' }} fallback={<User size={22} color="var(--gray-500)" />} />
                       </div>
                       <span style={{ fontSize: '0.75rem', color: 'var(--gray-500)' }}>
                         {character?.name}
@@ -714,7 +716,10 @@ function ChatDetailContent({ params }: { params: { id: string } }) {
                   )}
                   
                   {editingMessageId !== msg.id && (
-                    <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', width: '100%', gap: '8px', marginTop: '4px' }}>
+                    <div style={{ display: 'flex', justifyContent: 'flex-start', alignItems: 'center', width: '100%', gap: '8px', marginTop: '4px' }}>
+                      <span style={{ fontSize: '0.65rem', color: 'var(--gray-500)' }}>
+                        {showTime ? timeString : ''}
+                      </span>
                       {!msg.isAdLocked && (
                         <button
                           onClick={() => setReportTarget(msg)}
@@ -731,9 +736,6 @@ function ChatDetailContent({ params }: { params: { id: string } }) {
                       <button onClick={() => setDeleteConfirmMessageId(msg.id)} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '2px', display: 'flex', color: 'var(--gray-500)' }}>
                         <Trash2 size={12} />
                       </button>
-                      <span style={{ fontSize: '0.65rem', color: 'var(--gray-500)' }}>
-                        {showTime ? timeString : ''}
-                      </span>
                     </div>
                   )}
                 </div>
@@ -803,7 +805,7 @@ function ChatDetailContent({ params }: { params: { id: string } }) {
           <div style={{ display: 'flex', gap: '8px', marginBottom: '8px', alignItems: 'flex-start' }}>
             {character?.image && (
               <div style={{ width: '32px', height: '32px', borderRadius: '50%', backgroundColor: 'var(--gray-200)', overflow: 'hidden', position: 'relative', flexShrink: 0 }}>
-                <Image src={character.image} alt={character.name} fill style={{ objectFit: 'cover' }} />
+                <ResilientImage src={character.image} alt={character.name} kind="character_profile" fill style={{ objectFit: 'cover' }} fallback={<User size={22} color="var(--gray-500)" />} />
               </div>
             )}
             <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', maxWidth: '75%' }}>
@@ -821,7 +823,7 @@ function ChatDetailContent({ params }: { params: { id: string } }) {
           <div style={{ display: 'flex', justifyContent: 'flex-start', gap: '10px', alignItems: 'flex-end', marginBottom: '20px' }}>
             {character?.image && (
               <div style={{ width: '36px', height: '36px', borderRadius: '50%', backgroundColor: 'var(--gray-200)', overflow: 'hidden', position: 'relative', flexShrink: 0 }}>
-                <Image src={character.image} alt="char" fill style={{ objectFit: 'cover' }} />
+                <ResilientImage src={character.image} alt="char" kind="character_profile" fill style={{ objectFit: 'cover' }} fallback={<User size={22} color="var(--gray-500)" />} />
               </div>
             )}
             <div className="chat-bubble char" style={{ padding: '15px 18px', display: 'flex', alignItems: 'center', gap: '6px', height: '44px' }}>
@@ -878,10 +880,10 @@ function ChatDetailContent({ params }: { params: { id: string } }) {
               onMouseDown={(e) => e.preventDefault()}
               onTouchStart={(e) => e.preventDefault()}
               onClick={handleSend}
-              disabled={!inputMsg.trim() || isSendingRef.current}
-              style={{ width: '40px', height: '40px', borderRadius: '50%', backgroundColor: inputMsg.trim() && !isSendingRef.current ? 'var(--point-color)' : 'var(--gray-300)', color: 'white', border: 'none', display: 'flex', justifyContent: 'center', alignItems: 'center', cursor: inputMsg.trim() && !isSendingRef.current ? 'pointer' : 'not-allowed', flexShrink: 0, paddingRight: '2px' }}
+              disabled={!inputMsg.trim() || isSending}
+              style={{ width: '40px', height: '40px', borderRadius: '50%', backgroundColor: isSending ? '#CBBEFF' : inputMsg.trim() ? 'var(--point-color)' : 'var(--gray-300)', color: 'white', border: 'none', display: 'flex', justifyContent: 'center', alignItems: 'center', cursor: inputMsg.trim() && !isSending ? 'pointer' : 'not-allowed', flexShrink: 0, paddingRight: '2px' }}
             >
-              <Send size={18} />
+              {isSending ? <Loader2 className="animate-spin" size={18} /> : <Send size={18} />}
             </button>
           </div>
         </div>

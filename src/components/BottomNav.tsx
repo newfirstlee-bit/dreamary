@@ -4,11 +4,12 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { Home, BookOpen, MessageCircle, User } from 'lucide-react';
 import { useLocale } from '@/lib/i18n';
-import { shouldShowBottomNav } from '@/lib/navigation';
+import { getBottomNavActivePath, shouldShowBottomNav } from '@/lib/navigation';
 
 export default function BottomNav() {
   const pathname = usePathname();
   const { t } = useLocale();
+  const activePath = getBottomNavActivePath(pathname);
   
   // Bottom navigation is rendered only for explicitly approved tab routes.
   if (!shouldShowBottomNav(pathname)) return null;
@@ -29,19 +30,20 @@ export default function BottomNav() {
       width: '100%',
       maxWidth: '480px',
       height: 'var(--bottom-nav-height)',
-      backgroundColor: '#FFFFFF',
-      backdropFilter: 'none',
-      borderTop: '1px solid rgba(0, 0, 0, 0.08)',
+      backgroundColor: 'rgba(255, 255, 255, 0.7)',
+      backdropFilter: 'saturate(180%) blur(14px)',
+      WebkitBackdropFilter: 'saturate(180%) blur(14px)',
+      borderTop: '1px solid rgba(0, 0, 0, 0.06)',
       display: 'flex',
       justifyContent: 'space-around',
       alignItems: 'center',
       paddingTop: 0,
       zIndex: 1000,
       paddingBottom: 'var(--bottom-ui-safe-gap)',
-      boxShadow: '0 -2px 10px rgba(0,0,0,0.02)'
+      boxShadow: '0 -4px 16px rgba(0,0,0,0.04)'
     }}>
       {navItems.map((item) => {
-        const isActive = pathname === item.path || (item.path !== '/' && pathname.startsWith(item.path));
+        const isActive = activePath === item.path;
         const color = isActive ? 'var(--point-color)' : 'var(--text-muted)';
         const Icon = item.icon;
         

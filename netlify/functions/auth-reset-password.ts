@@ -1,9 +1,8 @@
 import type { Config } from "@netlify/functions";
-import { db } from '../../src/lib/firebase';
-import { collection, query, where, getDocs } from 'firebase/firestore';
-import { adminAuth } from '../../src/lib/firebase-admin';
+import { adminDb } from '../../src/lib/firebase-admin';
 import { Resend } from 'resend';
 import { corsHeaders } from './cors';
+import { randomInt } from 'node:crypto';
 
 export const config: Config = {
   path: "/api/auth/reset-password"
@@ -11,11 +10,30 @@ export const config: Config = {
 
 const resend = new Resend(process.env.RESEND_API_KEY);
 
+async function getAdminAuth() {
+  const [
+    { initializeApp, getApps, cert },
+    { getAuth },
+  ] = await Promise.all([
+    import('firebase-admin/app'),
+    import('firebase-admin/auth'),
+  ]);
+
+  if (!getApps().length) {
+    if (!process.env.FIREBASE_SERVICE_ACCOUNT_KEY) return null;
+    initializeApp({
+      credential: cert(JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT_KEY)),
+    });
+  }
+
+  return getAuth();
+}
+
 function generateRandomPassword(length = 8) {
   const chars = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!@#$%^&*';
   let pass = '';
   for (let i = 0; i < length; i++) {
-    pass += chars.charAt(Math.floor(Math.random() * chars.length));
+    pass += chars.charAt(randomInt(chars.length));
   }
   return pass;
 }
@@ -31,19 +49,20 @@ export default async function reqHandler(req: Request) {
       return new Response(JSON.stringify({ error: 'auth.missingFields' }), { status: 400, headers: corsHeaders });
     }
 
+    const adminAuth = await getAdminAuth();
+
     if (!adminAuth) {
       return new Response(JSON.stringify({ error: 'auth.serverConfigError' }), { status: 500, headers: corsHeaders });
     }
 
-    const accountsRef = collection(db, 'accounts');
-    const q = query(accountsRef, where('id', '==', id), where('email', '==', email));
-    const snapshot = await getDocs(q);
+    const snapshot = await adminDb!.collection('accounts').where('id', '==', id).where('email', '==', email).limit(1).get();
 
     if (snapshot.empty) {
       return new Response(JSON.stringify({ error: 'auth.accountNotFound' }), { status: 404, headers: corsHeaders });
     }
 
     const uid = snapshot.docs[0].id;
+    if (!process.env.RESEND_API_KEY) throw new Error('Password delivery is not configured');
     const tempPassword = generateRandomPassword();
     await adminAuth.updateUser(uid, { password: tempPassword });
 
@@ -66,7 +85,7 @@ export default async function reqHandler(req: Request) {
         return new Response(JSON.stringify({ error: `이메일 발송 실패: ${resendError.message}` }), { status: 500, headers: corsHeaders });
       }
     } else {
-      console.warn('RESEND_API_KEY is not set. Temp password:', tempPassword);
+      throw new Error('Password delivery is not configured');
     }
 
     return new Response(JSON.stringify({ success: true }), { headers: corsHeaders });

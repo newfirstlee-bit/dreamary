@@ -1,6 +1,6 @@
 import { initializeApp, getApps, getApp } from "firebase/app";
 import { initializeFirestore } from "firebase/firestore";
-import { getAuth, initializeAuth, browserLocalPersistence } from "firebase/auth";
+import { getAuth, initializeAuth, browserLocalPersistence, inMemoryPersistence } from "firebase/auth";
 import { Capacitor } from "@capacitor/core";
 
 const firebaseConfig = {
@@ -17,8 +17,11 @@ const app = !getApps().length ? initializeApp(firebaseConfig) : getApp();
 // Native WebViews can delay or block Firestore's initial WebSocket connection.
 // Auto detection keeps the normal transport when it works and falls back only
 // when needed, without forcing every request through long polling.
+// Data authentication must not turn a guest into a logged-in UI user. Keep the
+// original login app/persistence, and use a separate in-memory data session.
+const dataApp = getApps().find(item => item.name === 'dreamary-data') || initializeApp(firebaseConfig, 'dreamary-data');
 export const db = initializeFirestore(
-  app,
+  dataApp,
   Capacitor.isNativePlatform() ? { experimentalAutoDetectLongPolling: true } : {}
 );
 
@@ -32,3 +35,4 @@ try {
   authInstance = getAuth(app);
 }
 export const auth = authInstance;
+export const dataAuth = initializeAuth(dataApp, { persistence: inMemoryPersistence });

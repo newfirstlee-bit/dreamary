@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from 'react';
-import Image from 'next/image';
+import ResilientImage from '@/components/ResilientImage';
 import { useRouter } from 'next/navigation';
 import { useUserId } from '@/hooks/useUserId';
 import { Character, getLatestChatMessage, ChatMessage } from '@/lib/db';
@@ -15,6 +15,7 @@ import { sortCharactersByRecent, touchRecentCharacter } from '@/lib/characterOrd
 import { getCharactersWithGuestRecovery } from '@/lib/ownership';
 import { buildStaticEntityRoute } from '@/lib/navigation';
 import { useAppStore } from '@/store/useAppStore';
+import { INITIAL_PING_EVENT } from '@/lib/initialPing';
 
 interface ChatListCache {
   characters: Character[];
@@ -130,6 +131,40 @@ export default function ChatList() {
     init();
   }, [userId, t, status]);
 
+  useEffect(() => {
+    if (!userId) return;
+
+    const handleInitialPingState = (event: Event) => {
+      const detail = (event as CustomEvent<{
+        status: 'started' | 'completed' | 'failed';
+        userId: string;
+        characterId: string;
+        reply?: string;
+        savedId?: string;
+      }>).detail;
+
+      if (!detail || detail.userId !== userId) return;
+
+      if (detail.status === 'completed' && detail.reply) {
+        setLastMessages(prev => ({
+          ...prev,
+          [detail.characterId]: {
+            id: detail.savedId || `initial-ping-local-${Date.now()}`,
+            userId,
+            characterId: detail.characterId,
+            role: 'assistant',
+            content: detail.reply,
+            createdAt: Date.now(),
+            locale,
+          } as ChatMessage,
+        }));
+      }
+    };
+
+    window.addEventListener(INITIAL_PING_EVENT, handleInitialPingState);
+    return () => window.removeEventListener(INITIAL_PING_EVENT, handleInitialPingState);
+  }, [locale, userId]);
+
   if (loading) {
     return (
       <div className="app-container" style={{ display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
@@ -200,7 +235,7 @@ export default function ChatList() {
               {/* Pair Image (Only Character, 52.5px size) */}
               <div style={{ flexShrink: 0 }}>
                 <div style={{ width: '53px', height: '53px', borderRadius: '50%', backgroundColor: 'var(--gray-200)', overflow: 'hidden', position: 'relative', display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
-                  {char.image ? <Image src={char.image} alt="char" fill style={{ objectFit: 'cover' }} /> : <User size={24} color="var(--gray-500)" />}
+                  {char.image ? <ResilientImage src={char.image} alt="char" kind="character_profile" fill style={{ objectFit: 'cover' }} fallback={<User size={24} color="var(--gray-500)" />} /> : <User size={24} color="var(--gray-500)" />}
                 </div>
               </div>
               

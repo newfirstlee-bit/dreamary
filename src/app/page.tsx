@@ -1,14 +1,12 @@
 "use client";
 
-import React, { useEffect, useState, useRef } from 'react';
-import Image from 'next/image';
+import React, { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useUserId } from '@/hooks/useUserId';
 import { useAuth } from '@/components/AuthContext';
 import { useLocale, getDateLocale } from '@/lib/i18n';
 import { Character, getTodayDiaryByUserAndChar, getDiaryCountByUserAndChar, getTopics, Topic, getUserProfile, UserProfile, getLatestChatMessage, ChatMessage } from '@/lib/db';
-import { uploadImageToImgbb } from '@/lib/imgbb';
-import { Loader2, User, Settings, Camera, Image as ImageIcon, ChevronRight } from 'lucide-react';
+import { Loader2, User, Settings, ChevronRight } from 'lucide-react';
 import { trackEvent } from '@/lib/mixpanel';
 import { readUserCache, writeUserCache } from '@/lib/appCache';
 import { getRecentCharacterIds, sortCharactersByRecent, touchRecentCharacter } from '@/lib/characterOrder';
@@ -16,6 +14,9 @@ import { getCharactersWithGuestRecovery } from '@/lib/ownership';
 import { useAppStore } from '@/store/useAppStore';
 import { buildStaticEntityRoute } from '@/lib/navigation';
 import { INITIAL_PING_EVENT, ensureInitialPing, isInitialPingPending } from '@/lib/initialPing';
+import { formatKoreanNameTemplate } from '@/lib/koreanJosa';
+import { preloadImage, preloadImages } from '@/lib/imagePreload';
+import ResilientImage from '@/components/ResilientImage';
 
 interface HomeCache {
   characters: Character[];
@@ -66,6 +67,7 @@ export default function Home() {
   const [userProfiles, setUserProfiles] = useState<Record<string, UserProfile | null>>({});
   const [latestChat, setLatestChat] = useState<ChatMessage | null>(null);
   const [initialPingCharIds, setInitialPingCharIds] = useState<Set<string>>(new Set());
+  const [displayBgImage, setDisplayBgImage] = useState<string | null>(null);
 
   const { loadCharacters, loadTopics } = useAppStore();
 
@@ -73,6 +75,36 @@ export default function Home() {
   const userId = typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('demo') === 'true' 
     ? '4b0b39a0-d691-4f5d-b562-0fc49a02e790' 
     : baseUserId;
+  const selectedCharForBackground = characters.find(c => c.id === selectedCharId) || characters[0] || null;
+  const targetBgImage = selectedCharForBackground?.homeBackgroundImage || selectedCharForBackground?.image || null;
+
+  useEffect(() => {
+    let cancelled = false;
+
+    if (!targetBgImage) {
+      setDisplayBgImage(null);
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    preloadImage(targetBgImage, 'home_background')
+      .then(resolved => {
+        if (!cancelled) setDisplayBgImage(resolved);
+      })
+      .catch(() => {
+        if (!cancelled) setDisplayBgImage(null);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [targetBgImage]);
+
+  useEffect(() => {
+    if (characters.length === 0) return;
+    void preloadImages(characters.map(char => char.homeBackgroundImage || char.image), 4);
+  }, [characters]);
 
   useEffect(() => {
     if (authLoading || !userId) return;
@@ -429,7 +461,7 @@ export default function Home() {
   };
 
   const dDay = calculateDDay();
-  const bgImage = selectedChar?.homeBackgroundImage || selectedChar?.image;
+  const bgImage = displayBgImage;
   const hasBg = !!bgImage;
   const isLightMode = selectedChar?.homeTheme === 'light';
   const textColor = hasBg ? (isLightMode ? 'var(--gray-800)' : 'white') : 'var(--gray-800)';
@@ -440,9 +472,10 @@ export default function Home() {
 
   let formattedContent = (locale === 'ja' && todayTopic?.contentJa) ? todayTopic.contentJa : (todayTopic?.content || '');
   if (formattedContent && selectedChar) {
-    formattedContent = formattedContent
-      .replace(/{유저}/g, userProfile?.name || (locale === 'ja' ? t('common.user') : '유저'))
-      .replace(/{캐릭터}/g, selectedChar.name);
+    formattedContent = formatKoreanNameTemplate(formattedContent, {
+      userName: userProfile?.name || (locale === 'ja' ? t('common.user') : '유저'),
+      characterName: selectedChar.name,
+    });
   }
 
   return (
@@ -451,13 +484,25 @@ export default function Home() {
       className={`app-container tab-page home-page ${!hasBg ? 'diary-bg status-surface-check' : 'status-surface-home-bg'}`}
       style={{ 
         position: 'relative',
-        ...(hasBg ? {
-          backgroundImage: `url(${bgImage})`,
-          backgroundSize: 'cover',
-          backgroundPosition: 'center'
-        } : {})
       }}
     >
+      {hasBg && (
+        <div
+          aria-hidden="true"
+          style={{
+            position: 'absolute',
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            backgroundImage: `url(${bgImage})`,
+            backgroundSize: 'cover',
+            backgroundPosition: 'center',
+            pointerEvents: 'none',
+            transition: 'opacity 180ms ease',
+          }}
+        />
+      )}
       {/* Semi-transparent overlay if there is a background, to ensure UI is readable */}
       {hasBg && (
         <div style={{ 
@@ -486,6 +531,7 @@ export default function Home() {
                 <div 
                   key={char.id} 
                   onClick={() => {
+                    void preloadImage(char.homeBackgroundImage || char.image).catch(() => undefined);
                     setSelectedCharId(char.id);
                     touchRecentCharacter(userId, char.id);
                   }}
@@ -505,7 +551,14 @@ export default function Home() {
                     width: '70px', height: '70px', borderRadius: '15px', overflow: 'hidden', backgroundColor: 'var(--gray-200)', position: 'relative'
                   }}>
                     {char.image ? (
-                      <Image src={char.image} alt={char.name} fill style={{ objectFit: 'cover' }} />
+                      <ResilientImage
+                        src={char.image}
+                        alt={char.name}
+                        kind="character_profile"
+                        fill
+                        style={{ objectFit: 'cover' }}
+                        fallback={<div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}><User size={32} color="var(--gray-500)" /></div>}
+                      />
                     ) : (
                       <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                         <User size={32} color="var(--gray-500)" />
@@ -537,6 +590,7 @@ export default function Home() {
                   {selectedChar?.pairName || selectedChar?.name}
                 </span>
                 <button 
+                  className={hasBg && !isLightMode && selectedChar?.id !== 'dummy' ? 'home-readable-card home-readable-card-dark' : undefined}
                   onClick={() => {
                     if (selectedChar?.id === 'dummy') {
                       trackEvent('locked_feature_tapped', { feature_name: 'settings', screen: 'home' });
@@ -574,6 +628,7 @@ export default function Home() {
           <div className="home-bottom-cards" style={{ marginTop: 'auto', display: 'flex', flexDirection: 'column', gap: '14px', flexShrink: 0 }}>
             {(latestChat || isInitialPingTyping) && (
               <div 
+                className={hasBg && !isLightMode && selectedCharId !== 'dummy' ? 'home-readable-card home-readable-card-dark' : undefined}
                 onClick={() => {
                   if (selectedChar?.id === 'dummy') {
                     trackEvent('locked_feature_tapped', { feature_name: 'chat', screen: 'home' });
@@ -600,13 +655,13 @@ export default function Home() {
                 <div style={{ width: '42px', height: '42px', borderRadius: '50%', overflow: 'hidden', backgroundColor: selectedCharId === 'dummy' ? 'white' : 'var(--gray-200)', flexShrink: 0, position: 'relative' }}>
                   {isInitialPingTyping || latestChat?.role === 'assistant' ? (
                     selectedChar?.image ? (
-                      <Image src={selectedChar.image} alt={selectedChar.name} fill style={{ objectFit: 'cover' }} />
+                      <ResilientImage src={selectedChar.image} alt={selectedChar.name} kind="character_profile" fill style={{ objectFit: 'cover' }} fallback={<User size={20} color="var(--gray-500)" />} />
                     ) : (
                       <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}><User size={20} color={selectedCharId === 'dummy' ? 'var(--gray-400)' : 'var(--gray-500)'} /></div>
                     )
                   ) : (
                     userProfiles[selectedCharId || '']?.image ? (
-                      <Image src={userProfiles[selectedCharId || '']!.image!} alt="User" fill style={{ objectFit: 'cover' }} />
+                      <ResilientImage src={userProfiles[selectedCharId || '']!.image!} alt="User" kind="user_profile" fill style={{ objectFit: 'cover' }} fallback={<User size={20} color="var(--gray-500)" />} />
                     ) : (
                       <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}><User size={20} color="var(--gray-500)" /></div>
                     )
@@ -645,6 +700,7 @@ export default function Home() {
 
             {selectedCharId && unwrittenChars.has(selectedCharId) && todayTopic ? (
               <div 
+                className={hasBg && !isLightMode && selectedCharId !== 'dummy' ? 'home-readable-card home-readable-card-dark' : undefined}
                 onClick={() => {
                   if (selectedCharId === 'dummy') {
                     trackEvent('locked_feature_tapped', { feature_name: 'diary', screen: 'home' });

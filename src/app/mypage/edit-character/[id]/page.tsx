@@ -1,11 +1,11 @@
 "use client";
 
 import { useEffect, useState, useRef } from 'react';
-import Image from 'next/image';
+import ResilientImage from '@/components/ResilientImage';
 import { useRouter, useParams } from 'next/navigation';
 import { getUserId } from '@/lib/auth';
 import { getCharacterById, saveCharacter, Character } from '@/lib/db';
-import { uploadImageToImgbb } from '@/lib/imgbb';
+import { uploadProfileImageToImgbb } from '@/lib/imgbb';
 import { Loader2, ChevronLeft, Camera, User } from 'lucide-react';
 import { trackEvent } from '@/lib/mixpanel';
 import { useLocale } from '@/lib/i18n';
@@ -160,7 +160,7 @@ export default function EditCharacterPage() {
       let finalImgUrl = imageUrl;
       
       if (imageFile) {
-        finalImgUrl = await uploadImageToImgbb(imageFile);
+        finalImgUrl = await uploadProfileImageToImgbb(imageFile);
       }
 
       const updatedChar: Character = {
@@ -205,7 +205,7 @@ export default function EditCharacterPage() {
 
   return (
     <div className="app-container full-page fixed-cta-page" style={{ backgroundColor: 'var(--gray-50)' }}>
-      <header className="header" style={{ borderBottomLeftRadius: 0, borderBottomRightRadius: 0, position: 'relative', display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
+      <header className="header" style={{ borderBottomLeftRadius: 0, borderBottomRightRadius: 0, position: 'relative', display: 'flex', justifyContent: 'center', alignItems: 'center', flexShrink: 0 }}>
         <button onClick={handleBack} style={{ position: 'absolute', left: '20px', background: 'none', border: 'none', color: 'var(--foreground)', cursor: 'pointer', display: 'flex', alignItems: 'center' }}>
           <ChevronLeft size={28} color="var(--gray-800)" />
         </button>
@@ -225,7 +225,7 @@ export default function EditCharacterPage() {
             }}
           >
             {imageUrl ? (
-              <Image src={imageUrl} alt="preview" fill style={{ objectFit: 'cover' }} />
+              <ResilientImage src={imageUrl} alt="preview" kind="character_profile" fill style={{ objectFit: 'cover' }} fallback={<User size={48} color="var(--gray-400)" />} />
             ) : (
               <Camera size={32} color="var(--gray-500)" />
             )}

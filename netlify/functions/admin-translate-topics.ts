@@ -1,5 +1,9 @@
 import type { Config } from "@netlify/functions";
-import { getTopics, saveTopic } from '../../src/lib/db';
+import { adminDb } from '../../src/lib/firebase-admin';
+import { isAdminRequest } from '../../src/lib/server/adminSession';
+import type { Topic } from '../../src/lib/db';
+import { readAdminTopics as getTopics } from '../../src/lib/server/adminTopics';
+const saveTopic = async (topic: Topic) => adminDb!.collection('topics').doc(topic.id).set(topic);
 import { corsHeaders } from './cors';
 
 export const config: Config = {
@@ -195,6 +199,7 @@ const userTranslations: Record<number, string> = {
 };
 
 export default async function reqHandler(req: Request) {
+  if (!await isAdminRequest(req)) return new Response(null, { status: 401 });
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders, status: 204 });
   }

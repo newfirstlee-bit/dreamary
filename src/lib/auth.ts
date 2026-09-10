@@ -38,6 +38,13 @@ export function getStoredGuestUserId(): string | null {
   return localStorage.getItem(USER_ID_KEY) || getCookie(USER_ID_KEY);
 }
 
+export function retireGuestIdentity(sourceUserId: string) {
+  if (getStoredGuestUserId() !== sourceUserId) return;
+  localStorage.removeItem(USER_ID_KEY);
+  setCookie(USER_ID_KEY, '', -1);
+  // Do not reuse a transferred UUID when the user later logs out.
+}
+
 export function getUserId(): string {
   if (typeof window === 'undefined') return ''; // SSR 대응
 

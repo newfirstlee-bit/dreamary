@@ -2,17 +2,17 @@
 import { apiPostJson } from '@/lib/api';
 
 import { useEffect, useState } from 'react';
-import Image from 'next/image';
+import ResilientImage from '@/components/ResilientImage';
 import { useRouter } from 'next/navigation';
 import { useUserId } from '@/hooks/useUserId';
-import { getUserProfile, Character, UserProfile, deleteCharacter } from '@/lib/db';
-import { Loader2, Settings, User, Plus, Heart, X, Copy, LogIn, Key, Download, LogOut, Eye, EyeOff, ChevronLeft } from 'lucide-react';
+import { getUserProfile, Character, UserProfile, deleteCharacter, migrateGuestBackup } from '@/lib/db';
+import { Loader2, Settings, User, Plus, Heart, X, Copy, LogIn, Key, Download, LogOut, Eye, EyeOff, ChevronLeft, ChevronRight } from 'lucide-react';
 import Link from 'next/link';
 import { useLocale } from '@/lib/i18n';
 import { useAuth } from '@/components/AuthContext';
 import { auth, db } from '@/lib/firebase';
 import { signOut, signInWithEmailAndPassword, updatePassword } from 'firebase/auth';
-import { doc, getDoc, updateDoc } from 'firebase/firestore';
+import { doc, getDoc, updateDoc } from '@/lib/dataFirestore';
 import { withTimeout } from '@/lib/async';
 import { clearUserCache, readUserCache, writeUserCache } from '@/lib/appCache';
 import { copyRecentCharacterOrder } from '@/lib/characterOrder';
@@ -21,9 +21,20 @@ import { getCharactersWithGuestRecovery } from '@/lib/ownership';
 import { invalidateCharacterStore, useAppStore } from '@/store/useAppStore';
 import { Browser } from '@capacitor/browser';
 import { Capacitor } from '@capacitor/core';
+import { getUserId } from '@/lib/auth';
 
 const TERMS_URL = 'https://pickled-shovel-787.notion.site/3b5278d76e0580768273f5e88a09c3fe?source=copy_link';
 const PRIVACY_URL = 'https://pickled-shovel-787.notion.site/3b5278d76e0580ba9269f3ed205b37f6?source=copy_link';
+const APP_VERSION = process.env.NEXT_PUBLIC_APP_VERSION || '0.1.0';
+const APP_API_URL = process.env.NEXT_PUBLIC_API_URL || '';
+const APP_BUILD_LABEL = process.env.NODE_ENV === 'development'
+  ? 'dev'
+  : process.env.NEXT_PUBLIC_BUILD_TARGET === 'app'
+    ? APP_API_URL
+      ? 'app-dev'
+      : 'app-prod'
+    : 'web';
+const APP_VERSION_LABEL = `v${APP_VERSION} · ${APP_BUILD_LABEL}`;
 
 interface MyPageCache {
   characters: Character[];
@@ -35,7 +46,7 @@ export default function MyPage() {
   const { t, locale, setLocale } = useLocale();
   const { user, status } = useAuth();
   const isGuest = !user;
-  const isAppBuild = process.env.NEXT_PUBLIC_BUILD_TARGET === 'app';
+  const [isNativeApp, setIsNativeApp] = useState<boolean | null>(null);
   const [loading, setLoading] = useState(true);
   
   const [characters, setCharacters] = useState<Character[]>([]);
@@ -87,6 +98,10 @@ export default function MyPage() {
     }
     window.open(url, '_blank', 'noopener,noreferrer');
   };
+
+  useEffect(() => {
+    setIsNativeApp(process.env.NEXT_PUBLIC_BUILD_TARGET === 'app' && Capacitor.isNativePlatform());
+  }, []);
 
   useEffect(() => {
     if (window.visualViewport) {
@@ -226,7 +241,7 @@ export default function MyPage() {
     if (!inputBackupCode || !user?.uid) return;
     setIsMigrating(true);
     try {
-      await apiPostJson('/api/backup/migrate', { code: inputBackupCode, uid: user.uid });
+      await migrateGuestBackup(inputBackupCode, user.uid);
       
       alert(t('mypage.migrateSuccess'));
       localStorage.setItem('migration_completed', 'true');
@@ -238,6 +253,33 @@ export default function MyPage() {
       alert(err.message);
     } finally {
       setIsMigrating(false);
+    }
+  };
+
+  const handleLogout = async () => {
+    const previousUid = user?.uid;
+    try {
+      if (previousUid) {
+        clearUserCache(previousUid);
+        invalidateCharacterStore(previousUid);
+      }
+      useAppStore.getState().clearStore();
+      setAccountInfo(null);
+      setCharacters([]);
+      setUserProfiles({});
+      localStorage.removeItem('last_active_user_id');
+      await signOut(auth);
+      const guestId = getUserId();
+      if (guestId) {
+        clearUserCache(guestId);
+        invalidateCharacterStore(guestId);
+      }
+      sessionStorage.setItem('has_redirected_to_diary', 'true');
+      router.replace('/');
+      router.refresh();
+    } catch (error) {
+      console.error('Logout failed:', error);
+      window.location.href = '/';
     }
   };
 
@@ -388,15 +430,20 @@ export default function MyPage() {
             {characters.map(char => {
               const userProfile = userProfiles[char.id];
               return (
-              <div key={char.id} style={{ backgroundColor: 'white', padding: '20px', borderRadius: '15px', border: '1px solid var(--border-color)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '10px' }}>
+              <button
+                type="button"
+                key={char.id}
+                onClick={() => setSelectedChar(char)}
+                style={{ width: '100%', backgroundColor: 'white', padding: '20px', borderRadius: '15px', border: '1px solid var(--border-color)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '10px', cursor: 'pointer', textAlign: 'left' }}
+              >
                 <div style={{ display: 'flex', alignItems: 'center', gap: '15px', flex: 1, overflow: 'hidden', position: 'relative' }}>
                   {/* Pair Images */}
                   <div style={{ display: 'flex', alignItems: 'center', flexShrink: 0 }}>
                     <div style={{ width: '60px', height: '60px', borderRadius: '50%', backgroundColor: 'var(--gray-200)', overflow: 'hidden', position: 'relative', border: '2px solid white', zIndex: 2, display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
-                      {char.image ? <Image src={char.image} alt="char" fill style={{ objectFit: 'cover' }} /> : <User size={24} color="var(--gray-500)" />}
+                      {char.image ? <ResilientImage src={char.image} alt="char" kind="character_profile" fill style={{ objectFit: 'cover' }} fallback={<User size={24} color="var(--gray-500)" />} /> : <User size={24} color="var(--gray-500)" />}
                     </div>
                     <div style={{ width: '60px', height: '60px', borderRadius: '50%', backgroundColor: 'var(--gray-200)', overflow: 'hidden', position: 'relative', border: '2px solid white', marginLeft: '-20px', zIndex: 1, display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
-                      {userProfile?.image ? <Image src={userProfile.image} alt="user" fill style={{ objectFit: 'cover' }} /> : <User size={24} color="var(--gray-500)" />}
+                      {userProfile?.image ? <ResilientImage src={userProfile.image} alt="user" kind="user_profile" fill style={{ objectFit: 'cover' }} fallback={<User size={24} color="var(--gray-500)" />} /> : <User size={24} color="var(--gray-500)" />}
                     </div>
                   </div>
                   {/* Pair Names */}
@@ -414,15 +461,8 @@ export default function MyPage() {
                     )}
                   </div>
                 </div>
-
-                {/* Edit Button */}
-                <button 
-                  onClick={() => setSelectedChar(char)}
-                  style={{ padding: '8px 16px', backgroundColor: 'var(--gray-100)', border: 'none', borderRadius: '8px', color: 'var(--gray-700)', fontWeight: 'bold', cursor: 'pointer', fontSize: '0.85rem', flexShrink: 0 }}
-                >
-                  {t('common.edit')}
-                </button>
-              </div>
+                <ChevronRight size={20} color="var(--gray-500)" style={{ flexShrink: 0 }} />
+              </button>
             )})}
 
             {/* + 새 페어 만들기 버튼 */}
@@ -486,7 +526,7 @@ export default function MyPage() {
         )}
 
         {/* My Info Section (UUID) - Only for non-logged-in web users */}
-        {isGuest && !isAppBuild && (
+        {isGuest && isNativeApp === false && (
           <section style={{ marginTop: '30px' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '15px' }}>
             <h2 style={{ fontSize: '1.2rem', color: 'var(--foreground)', fontWeight: 'bold' }}>{t('mypage.myInfo')}</h2>
@@ -556,6 +596,15 @@ export default function MyPage() {
             >
               {t('mypage.privacyPolicy')}
             </button>
+            {isNativeApp && (
+              <button
+                type="button"
+                onClick={() => router.push('/mypage/notification-settings')}
+                style={{ width: '100%', padding: '15px', borderRadius: '12px', border: '1px solid var(--gray-400)', backgroundColor: 'white', color: 'var(--gray-700)', fontWeight: 'bold', fontSize: '1rem', display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '8px', cursor: 'pointer' }}
+              >
+                {t('mypage.notificationSettings')}
+              </button>
+            )}
           </div>
         </section>
 
@@ -575,27 +624,34 @@ export default function MyPage() {
           </section>
         )}
 
-        {!isGuest && (
-          <button 
-            onClick={async () => {
-              if (user?.uid) clearUserCache(user.uid);
-              await signOut(auth);
-              window.location.reload();
-            }}
-            style={{ 
-              alignSelf: 'center', 
-              color: 'var(--gray-600)', 
-              fontSize: '0.9rem', 
-              background: 'none', 
-              border: 'none', 
-              cursor: 'pointer', 
-              marginTop: '10px',
-              textDecoration: 'underline'
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '8px', marginTop: '10px' }}>
+          {!isGuest && (
+            <button 
+              onClick={handleLogout}
+              style={{ 
+                color: 'var(--gray-600)', 
+                fontSize: '0.9rem', 
+                background: 'none', 
+                border: 'none', 
+                cursor: 'pointer', 
+                padding: 0,
+                textDecoration: 'none'
+              }}
+            >
+              {t('mypage.logout')}
+            </button>
+          )}
+          <span
+            aria-label="app version"
+            style={{
+              color: 'var(--gray-600)',
+              fontSize: '0.9rem',
+              textDecoration: 'none'
             }}
           >
-            {t('mypage.logout')}
-          </button>
-        )}
+            {APP_VERSION_LABEL}
+          </span>
+        </div>
 
       </main>
 
@@ -624,33 +680,36 @@ export default function MyPage() {
                 router.push(buildStaticEntityRoute('/mypage/edit-pairname', selectedChar.id));
                 setSelectedChar(null);
               }}
-              style={{ height: '68px', padding: '16px', backgroundColor: 'var(--gray-50)', border: '1px solid var(--border-color)', borderRadius: '12px', fontSize: '1rem', fontWeight: 'bold', color: 'var(--foreground)', cursor: 'pointer', textAlign: 'left', display: 'flex', alignItems: 'center', gap: '12px' }}
+              style={{ minHeight: '52px', padding: '10px 0', backgroundColor: 'transparent', border: 'none', borderRadius: 0, fontSize: '1rem', fontWeight: 'bold', color: 'var(--foreground)', cursor: 'pointer', textAlign: 'left', display: 'flex', alignItems: 'center', gap: '12px', width: '100%' }}
             >
-              {t('mypage.pairName')}
+              <span style={{ flex: 1 }}>{t('mypage.pairName')}</span>
+              <ChevronRight size={20} color="var(--gray-500)" style={{ flexShrink: 0 }} />
             </button>
             <button 
               onClick={() => {
                 router.push(buildStaticEntityRoute('/mypage/edit-character', selectedChar.id));
                 setSelectedChar(null);
               }}
-              style={{ height: '68px', padding: '16px', backgroundColor: 'var(--gray-50)', border: '1px solid var(--border-color)', borderRadius: '12px', fontSize: '1rem', fontWeight: 'bold', color: 'var(--foreground)', cursor: 'pointer', textAlign: 'left', display: 'flex', alignItems: 'center', gap: '12px' }}
+              style={{ minHeight: '52px', padding: '10px 0', backgroundColor: 'transparent', border: 'none', borderRadius: 0, fontSize: '1rem', fontWeight: 'bold', color: 'var(--foreground)', cursor: 'pointer', textAlign: 'left', display: 'flex', alignItems: 'center', gap: '12px', width: '100%' }}
             >
               <div style={{ width: '36px', height: '36px', borderRadius: '50%', backgroundColor: 'var(--gray-200)', overflow: 'hidden', position: 'relative', display: 'flex', justifyContent: 'center', alignItems: 'center', flexShrink: 0 }}>
-                {selectedChar.image ? <Image src={selectedChar.image} alt="char" fill style={{ objectFit: 'cover' }} /> : <User size={20} color="var(--gray-500)" />}
+                {selectedChar.image ? <ResilientImage src={selectedChar.image} alt="char" kind="character_profile" fill style={{ objectFit: 'cover' }} fallback={<User size={20} color="var(--gray-500)" />} /> : <User size={20} color="var(--gray-500)" />}
               </div>
-              {selectedChar.name}
+              <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{selectedChar.name}</span>
+              <ChevronRight size={20} color="var(--gray-500)" style={{ flexShrink: 0 }} />
             </button>
             <button 
               onClick={() => {
                 router.push(buildStaticEntityRoute('/mypage/edit-user', selectedChar.id));
                 setSelectedChar(null);
               }}
-              style={{ height: '68px', padding: '16px', backgroundColor: 'var(--gray-50)', border: '1px solid var(--border-color)', borderRadius: '12px', fontSize: '1rem', fontWeight: 'bold', color: 'var(--foreground)', cursor: 'pointer', textAlign: 'left', display: 'flex', alignItems: 'center', gap: '12px' }}
+              style={{ minHeight: '52px', padding: '10px 0', backgroundColor: 'transparent', border: 'none', borderRadius: 0, fontSize: '1rem', fontWeight: 'bold', color: 'var(--foreground)', cursor: 'pointer', textAlign: 'left', display: 'flex', alignItems: 'center', gap: '12px', width: '100%' }}
             >
               <div style={{ width: '36px', height: '36px', borderRadius: '50%', backgroundColor: 'var(--gray-200)', overflow: 'hidden', position: 'relative', display: 'flex', justifyContent: 'center', alignItems: 'center', flexShrink: 0 }}>
-                {userProfiles[selectedChar.id]?.image ? <Image src={userProfiles[selectedChar.id]!.image!} alt="user" fill style={{ objectFit: 'cover' }} /> : <User size={20} color="var(--gray-500)" />}
+                {userProfiles[selectedChar.id]?.image ? <ResilientImage src={userProfiles[selectedChar.id]!.image!} alt="user" kind="user_profile" fill style={{ objectFit: 'cover' }} fallback={<User size={20} color="var(--gray-500)" />} /> : <User size={20} color="var(--gray-500)" />}
               </div>
-              {userProfiles[selectedChar.id]?.name || t('common.user')}
+              <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{userProfiles[selectedChar.id]?.name || t('common.user')}</span>
+              <ChevronRight size={20} color="var(--gray-500)" style={{ flexShrink: 0 }} />
             </button>
             <button 
               onClick={(e) => {

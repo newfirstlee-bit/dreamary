@@ -16,7 +16,11 @@ export default function HomeSettingsPage({ params }: { params: { id: string } })
   const [loading, setLoading] = useState(true);
   const [character, setCharacter] = useState<Character | null>(null);
   const [uploadingBg, setUploadingBg] = useState(false);
+  const [showBgChangedModal, setShowBgChangedModal] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const uploadAbortRef = useRef<AbortController | null>(null);
+  const uploadSequenceRef = useRef(0);
+  const mountedRef = useRef(true);
   const characterId = resolveStaticEntityId(params.id);
 
   useEffect(() => {
@@ -33,22 +37,72 @@ export default function HomeSettingsPage({ params }: { params: { id: string } })
     init();
   }, [characterId]);
 
+  useEffect(() => {
+    mountedRef.current = true;
+    let removeAppStateListener: (() => void) | undefined;
+
+    import('@capacitor/app')
+      .then(({ App }) => {
+        App.addListener('appStateChange', ({ isActive }) => {
+          if (!isActive) {
+            uploadAbortRef.current?.abort();
+          }
+        }).then(handle => {
+          removeAppStateListener = () => handle.remove();
+        });
+      })
+      .catch(() => undefined);
+
+    return () => {
+      mountedRef.current = false;
+      uploadAbortRef.current?.abort();
+      removeAppStateListener?.();
+    };
+  }, []);
+
+  const cancelBackgroundUpload = () => {
+    uploadAbortRef.current?.abort();
+    uploadAbortRef.current = null;
+    uploadSequenceRef.current += 1;
+    setUploadingBg(false);
+  };
+
   const handleBgUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     if (!e.target.files || !e.target.files[0] || !character) return;
+    const file = e.target.files[0];
+    e.target.value = '';
+    uploadAbortRef.current?.abort();
+    const uploadId = uploadSequenceRef.current + 1;
+    uploadSequenceRef.current = uploadId;
+    const abortController = new AbortController();
+    uploadAbortRef.current = abortController;
     setUploadingBg(true);
     try {
-      const url = await uploadImageToImgbb(e.target.files[0]);
+      const url = await uploadImageToImgbb(file, { signal: abortController.signal });
+      if (!mountedRef.current || abortController.signal.aborted || uploadSequenceRef.current !== uploadId) return;
       await updateCharacter(character.id, { homeBackgroundImage: url });
+      if (!mountedRef.current || abortController.signal.aborted || uploadSequenceRef.current !== uploadId) return;
       clearUserCache(character.userId);
       invalidateCharacterStore(character.userId);
       setCharacter({ ...character, homeBackgroundImage: url });
-      alert(t('homeSettings.bgSuccess'));
+      setShowBgChangedModal(true);
     } catch (err: any) {
+      if (err?.name === 'AbortError') return;
       console.error(err);
       alert(`${t('homeSettings.bgFail')} (${err.message || err})`);
     } finally {
-      setUploadingBg(false);
+      if (uploadSequenceRef.current === uploadId) {
+        uploadAbortRef.current = null;
+        setUploadingBg(false);
+      }
     }
+  };
+
+  const handleBack = () => {
+    if (uploadingBg) {
+      cancelBackgroundUpload();
+    }
+    router.back();
   };
 
   const handleDDayChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -85,7 +139,7 @@ export default function HomeSettingsPage({ params }: { params: { id: string } })
   return (
     <div className="app-container full-page">
       <header className="header" style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-        <button onClick={() => router.back()} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '0', display: 'flex' }}>
+        <button onClick={handleBack} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '0', display: 'flex' }}>
           <ChevronLeft size={28} color="var(--gray-800)" />
         </button>
         {t('homeSettings.homeTitle')}
@@ -101,7 +155,7 @@ export default function HomeSettingsPage({ params }: { params: { id: string } })
             disabled={uploadingBg}
             style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '8px 16px', backgroundColor: 'var(--point-color)', color: 'white', border: 'none', borderRadius: '10px', fontWeight: 'bold', cursor: 'pointer' }}
           >
-            {uploadingBg && <Loader2 size={16} className="animate-spin" />}
+            {uploadingBg && <Loader2 size={16} className="dreamary-spin" />}
             {uploadingBg ? t('common.uploading') : t('common.upload')}
           </button>
           <input type="file" accept="image/*" ref={fileInputRef} onChange={handleBgUpload} style={{ display: 'none' }} />
@@ -151,6 +205,56 @@ export default function HomeSettingsPage({ params }: { params: { id: string } })
           </div>
         </div>
       </div>
+      {showBgChangedModal && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          onClick={() => setShowBgChangedModal(false)}
+          style={{
+            position: 'fixed',
+            inset: 0,
+            backgroundColor: 'rgba(0,0,0,0.45)',
+            zIndex: 3000,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: '20px'
+          }}
+        >
+          <div
+            onClick={event => event.stopPropagation()}
+            style={{
+              width: '100%',
+              maxWidth: '360px',
+              backgroundColor: 'white',
+              borderRadius: '20px',
+              padding: '24px 20px 20px',
+              boxShadow: '0 20px 60px rgba(0,0,0,0.18)'
+            }}
+          >
+            <p style={{ fontSize: '1.15rem', fontWeight: 800, color: 'var(--gray-900)', textAlign: 'center', marginBottom: '24px', lineHeight: 1.4 }}>
+              {t('homeSettings.bgChanged')}
+            </p>
+            <div style={{ display: 'flex', gap: '10px' }}>
+              <button
+                type="button"
+                onClick={() => router.push('/')}
+                style={{ flex: 1, border: 'none', borderRadius: '12px', padding: '14px 8px', backgroundColor: 'var(--gray-200)', color: 'var(--gray-800)', fontWeight: 700, fontSize: '15px' }}
+              >
+                {t('homeSettings.goHome')}
+              </button>
+              <button
+                type="button"
+                onClick={() => setShowBgChangedModal(false)}
+                style={{ flex: 1, border: 'none', borderRadius: '12px', padding: '14px 8px', backgroundColor: 'var(--gray-900)', color: 'var(--gray-200)', fontWeight: 800, fontSize: '15px' }}
+              >
+                {t('homeSettings.keepEditing')}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      <style dangerouslySetInnerHTML={{__html: `@keyframes dreamarySpin { 100% { transform: rotate(360deg); } } .dreamary-spin { animation: dreamarySpin 0.9s linear infinite; }`}} />
     </div>
   );
 }

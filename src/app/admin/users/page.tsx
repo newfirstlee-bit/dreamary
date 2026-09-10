@@ -1,67 +1,46 @@
 "use client";
 
 import { useEffect, useState } from 'react';
-import { collection, getDocs, deleteDoc, doc, query, where } from 'firebase/firestore';
-import { db } from '@/lib/firebase';
 import { Loader2, Search, Trash2 } from 'lucide-react';
-import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 
 interface UserStat {
   userId: string;
+  accountId: string;
   charactersCount: number;
   diariesCount: number;
   lastActivity: number;
+  createdAt: number;
 }
 
 export default function AdminUsers() {
   const router = useRouter();
   const [users, setUsers] = useState<UserStat[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
 
+  const fetchUsers = async (cursor?: string | null) => {
+    try {
+      cursor ? setLoadingMore(true) : setLoading(true);
+      const params = new URLSearchParams({ pageSize: '20' });
+      if (cursor) params.set('cursor', cursor);
+      const response = await fetch(`/api/admin/users?${params.toString()}`);
+      const data = await response.json();
+      if (!response.ok || data.error) throw new Error(data.error || 'Failed to load users');
+      setUsers(prev => cursor ? [...prev, ...data.users] : data.users);
+      setNextCursor(data.nextCursor || null);
+    } catch (err) {
+      console.error(err);
+      alert('사용자 목록을 불러오는 중 오류가 발생했습니다.');
+    } finally {
+      setLoading(false);
+      setLoadingMore(false);
+    }
+  };
+
   useEffect(() => {
-    const fetchUsers = async () => {
-      try {
-        const charsSnap = await getDocs(collection(db, 'characters'));
-        const diariesSnap = await getDocs(collection(db, 'diaries'));
-        
-        const userMap = new Map<string, UserStat>();
-
-        const initUser = (userId: string) => {
-          if (!userMap.has(userId)) {
-            userMap.set(userId, { userId, charactersCount: 0, diariesCount: 0, lastActivity: 0 });
-          }
-          return userMap.get(userId)!;
-        };
-
-        charsSnap.forEach(d => {
-          const data = d.data();
-          if (data.userId) {
-            const u = initUser(data.userId);
-            u.charactersCount += 1;
-            if (data.createdAt && data.createdAt > u.lastActivity) u.lastActivity = data.createdAt;
-          }
-        });
-
-        diariesSnap.forEach(d => {
-          const data = d.data();
-          if (data.userId) {
-            const u = initUser(data.userId);
-            u.diariesCount += 1;
-            if (data.createdAt && data.createdAt > u.lastActivity) u.lastActivity = data.createdAt;
-          }
-        });
-
-        const sortedUsers = Array.from(userMap.values()).sort((a, b) => b.lastActivity - a.lastActivity);
-        setUsers(sortedUsers);
-      } catch (err) {
-        console.error(err);
-      } finally {
-        setLoading(false);
-      }
-    };
-
     fetchUsers();
   }, []);
 
@@ -69,41 +48,17 @@ export default function AdminUsers() {
     if (!confirm(`정말 ${userId} 의 모든 데이터를 삭제하시겠습니까?\n이 작업은 되돌릴 수 없으며 관련된 캐릭터, 일기, 채팅이 모두 삭제됩니다.`)) return;
     
     try {
-      setLoading(true);
-      await deleteDoc(doc(db, 'users', userId));
-      await deleteDoc(doc(db, 'characters', userId));
-      
-      const charQ = query(collection(db, 'characters'), where('userId', '==', userId));
-      const charSnap = await getDocs(charQ);
-      for (const d of charSnap.docs) await deleteDoc(d.ref);
-
-      const diaryQ1 = query(collection(db, 'diaries'), where('userId', '==', userId));
-      const diarySnap1 = await getDocs(diaryQ1);
-      for (const d of diarySnap1.docs) await deleteDoc(d.ref);
-
-      const diaryQ2 = query(collection(db, 'diaries'), where('characterId', '==', userId));
-      const diarySnap2 = await getDocs(diaryQ2);
-      for (const d of diarySnap2.docs) await deleteDoc(d.ref);
-
-      const chatQ1 = query(collection(db, 'chatMessages'), where('userId', '==', userId));
-      const chatSnap1 = await getDocs(chatQ1);
-      for (const d of chatSnap1.docs) await deleteDoc(d.ref);
-
-      const chatQ2 = query(collection(db, 'chatMessages'), where('characterId', '==', userId));
-      const chatSnap2 = await getDocs(chatQ2);
-      for (const d of chatSnap2.docs) await deleteDoc(d.ref);
-
-      alert('삭제 완료되었습니다.');
-      setUsers(prev => prev.filter(u => u.userId !== userId));
+      alert('관리자 직접 삭제는 한도 보호를 위해 비활성화했습니다. 회원 탈퇴 API 또는 Firebase 콘솔에서 확인 후 삭제해주세요.');
     } catch (error: any) {
       console.error(error);
       alert('삭제 중 오류 발생: ' + error.message);
-    } finally {
-      setLoading(false);
     }
   };
 
-  const filteredUsers = users.filter(u => u.userId.toLowerCase().includes(searchQuery.toLowerCase()));
+  const filteredUsers = users.filter(u => {
+    const needle = searchQuery.toLowerCase();
+    return u.userId.toLowerCase().includes(needle) || (u.accountId || '').toLowerCase().includes(needle);
+  });
 
   if (loading && users.length === 0) return <div><Loader2 className="animate-spin" /></div>;
 
@@ -130,7 +85,7 @@ export default function AdminUsers() {
         <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left' }}>
           <thead>
             <tr style={{ backgroundColor: 'var(--gray-100)', borderBottom: '1px solid #ddd' }}>
-              <th style={{ padding: '15px', fontWeight: 'bold' }}>UUID</th>
+              <th style={{ padding: '15px', fontWeight: 'bold' }}>아이디 / UID</th>
               <th style={{ padding: '15px', fontWeight: 'bold' }}>생성한 페어 수</th>
               <th style={{ padding: '15px', fontWeight: 'bold' }}>일기 작성 수</th>
               <th style={{ padding: '15px', fontWeight: 'bold' }}>마지막 활동</th>
@@ -146,7 +101,8 @@ export default function AdminUsers() {
                 className="hover-row"
               >
                 <td style={{ padding: '15px', color: 'var(--gray-800)', fontFamily: 'monospace' }}>
-                  {u.userId}
+                  <div style={{ fontWeight: 'bold', color: 'var(--gray-800)' }}>{u.accountId || '-'}</div>
+                  <div style={{ fontSize: '0.8rem', color: 'var(--gray-500)' }}>{u.userId}</div>
                 </td>
                 <td style={{ padding: '15px', fontWeight: 'bold', color: 'var(--gray-800)' }}>{u.charactersCount}개</td>
                 <td style={{ padding: '15px', fontWeight: 'bold', color: 'var(--gray-800)' }}>{u.diariesCount}개</td>
@@ -173,6 +129,24 @@ export default function AdminUsers() {
           </tbody>
         </table>
       </div>
+      {nextCursor && (
+        <button
+          onClick={() => fetchUsers(nextCursor)}
+          disabled={loadingMore}
+          style={{
+            alignSelf: 'center',
+            padding: '12px 24px',
+            borderRadius: '999px',
+            border: '1px solid var(--border-color)',
+            backgroundColor: 'white',
+            color: 'var(--gray-700)',
+            fontWeight: 'bold',
+            cursor: loadingMore ? 'default' : 'pointer',
+          }}
+        >
+          {loadingMore ? '불러오는 중...' : '20명 더보기'}
+        </button>
+      )}
     </div>
   );
 }

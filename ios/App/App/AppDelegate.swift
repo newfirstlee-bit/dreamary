@@ -1,5 +1,13 @@
 import UIKit
 import Capacitor
+import UserNotifications
+
+@objc(DreamaryBridgeViewController)
+class DreamaryBridgeViewController: CAPBridgeViewController {
+    override open func capacitorDidLoad() {
+        bridge?.registerPluginInstance(NativeSettingsPlugin())
+    }
+}
 
 @UIApplicationMain
 class AppDelegate: UIResponder, UIApplicationDelegate {
@@ -27,6 +35,8 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
 
     func applicationDidBecomeActive(_ application: UIApplication) {
         // Restart any tasks that were paused (or not yet started) while the application was inactive. If the application was previously in the background, optionally refresh the user interface.
+        application.applicationIconBadgeNumber = 0
+        UNUserNotificationCenter.current().removeAllDeliveredNotifications()
     }
 
     func applicationWillTerminate(_ application: UIApplication) {
@@ -46,4 +56,79 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
         return ApplicationDelegateProxy.shared.application(application, continue: userActivity, restorationHandler: restorationHandler)
     }
 
+    func application(_ application: UIApplication, didRegisterForRemoteNotificationsWithDeviceToken deviceToken: Data) {
+        NotificationCenter.default.post(name: .capacitorDidRegisterForRemoteNotifications, object: deviceToken)
+    }
+
+    func application(_ application: UIApplication, didFailToRegisterForRemoteNotificationsWithError error: Error) {
+        NotificationCenter.default.post(name: .capacitorDidFailToRegisterForRemoteNotifications, object: error)
+    }
+
+}
+
+@objc(NativeSettingsPlugin)
+class NativeSettingsPlugin: CAPPlugin, CAPBridgedPlugin {
+    let identifier = "NativeSettingsPlugin"
+    let jsName = "NativeSettings"
+    let pluginMethods: [CAPPluginMethod] = [
+        CAPPluginMethod(name: "openAppNotificationSettings", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "getNotificationStatus", returnType: CAPPluginReturnPromise)
+    ]
+
+    @objc func openAppNotificationSettings(_ call: CAPPluginCall) {
+        DispatchQueue.main.async {
+            var settingsUrl: URL?
+
+            if #available(iOS 16.0, *) {
+                settingsUrl = URL(string: UIApplication.openNotificationSettingsURLString)
+            }
+
+            if settingsUrl == nil {
+                settingsUrl = URL(string: UIApplication.openSettingsURLString)
+            }
+
+            guard let url = settingsUrl else {
+                call.reject("Unable to create settings URL")
+                return
+            }
+
+            UIApplication.shared.open(url, options: [:]) { opened in
+                call.resolve(["opened": opened])
+            }
+        }
+    }
+
+    @objc func getNotificationStatus(_ call: CAPPluginCall) {
+        UNUserNotificationCenter.current().getNotificationSettings { settings in
+            let status: String
+            let enabled: Bool
+
+            switch settings.authorizationStatus {
+            case .authorized:
+                status = "granted"
+                enabled = true
+            case .provisional:
+                status = "provisional"
+                enabled = true
+            case .ephemeral:
+                status = "ephemeral"
+                enabled = true
+            case .denied:
+                status = "denied"
+                enabled = false
+            case .notDetermined:
+                status = "prompt"
+                enabled = false
+            @unknown default:
+                status = "unknown"
+                enabled = false
+            }
+
+            call.resolve([
+                "supported": true,
+                "enabled": enabled,
+                "authorizationStatus": status
+            ])
+        }
+    }
 }

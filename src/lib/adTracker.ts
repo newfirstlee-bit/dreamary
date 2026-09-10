@@ -43,18 +43,27 @@ export const saveAdStats = (stats: AdStats) => {
 };
 
 export const trackDiaryAndCheckAd = (): boolean => {
+  console.warn('trackDiaryAndCheckAd() is deprecated. Use shouldShowDiaryAd() before send and recordSuccessfulDiaryTurn() after diary reply success.');
+  return shouldShowDiaryAd();
+};
+
+export const shouldShowDiaryAd = (): boolean => {
   if (typeof window !== 'undefined' && localStorage.getItem('dev_force_ads') === 'true') {
     return true;
   }
 
   const stats = getAdStats();
-  stats.diaryCount += 1;
-  saveAdStats(stats);
-  
-  // Diary: 1st time, then every 3rd time (1, 4, 7, 10...)
-  if (stats.diaryCount === 1) return true;
-  if (stats.diaryCount > 1 && (stats.diaryCount - 1) % 3 === 0) return true;
+  const nextDiaryCount = stats.diaryCount + 1;
+
+  // Diary: 1st successful diary, then every 3rd successful diary (1, 4, 7, 10...)
+  if (nextDiaryCount === 1) return true;
+  if (nextDiaryCount > 1 && (nextDiaryCount - 1) % 3 === 0) return true;
   return false;
+};
+
+export const recordSuccessfulDiaryTurn = () => {
+  const stats = getAdStats();
+  saveAdStats({ ...stats, diaryCount: stats.diaryCount + 1 });
 };
 
 export const trackChatAndCheckAd = (): boolean => {

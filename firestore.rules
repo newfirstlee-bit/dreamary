@@ -1,0 +1,56 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() { return request.auth != null; }
+    function ownerId() {
+      return request.auth.token.get('dreamaryOwner', request.auth.uid);
+    }
+    function owns(data) { return signedIn() && data.userId == ownerId(); }
+    function mayWrite() {
+      return signedIn() && (!request.auth.token.get('dreamaryGuest', false) ||
+        !get(/databases/$(database)/documents/guestCredentials/$(ownerId())).data.keys().hasAny(['migrationTarget', 'retired']));
+    }
+    function ownsCharacter(id) {
+      return signedIn() && get(/databases/$(database)/documents/characters/$(id)).data.userId == ownerId();
+    }
+    match /characters/{id} {
+      allow read: if owns(resource.data);
+      allow create: if mayWrite() && owns(request.resource.data) && request.resource.data.id == id &&
+        !request.resource.data.keys().hasAny(['diaryOwnershipMigrated', 'deleting']);
+      allow update: if mayWrite() && owns(resource.data) && owns(request.resource.data) &&
+        !resource.data.get('deleting', false) &&
+        !request.resource.data.diff(resource.data).affectedKeys().hasAny(['userId', 'id', 'diaryOwnershipMigrated', 'deleting']);
+      // Cascading deletion is performed by the authenticated server endpoint.
+      allow delete: if false;
+    }
+    match /users/{characterId} {
+      allow read: if ownsCharacter(characterId);
+      allow create, update: if mayWrite() && ownsCharacter(characterId) && request.resource.data.id == characterId;
+      allow delete: if false;
+    }
+    match /diaries/{id} {
+      allow read: if owns(resource.data);
+      allow update: if mayWrite() && owns(resource.data) &&
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['isAdLocked']) &&
+        request.resource.data.isAdLocked == false;
+      // Creation/edit/today-only deletion require server authentication/validation.
+      allow create, delete: if false;
+    }
+    match /chatMessages/{id} {
+      allow read: if owns(resource.data);
+      allow create: if mayWrite() && owns(request.resource.data) && request.resource.data.id == id &&
+        request.resource.data.role == 'user' && ownsCharacter(request.resource.data.characterId);
+      allow update: if mayWrite() && owns(resource.data) &&
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['content', 'isAdLocked']);
+      allow delete: if mayWrite() && owns(resource.data);
+    }
+    match /accounts/{uid} {
+      allow get, create, update: if signedIn() && !request.auth.token.get('dreamaryGuest', false) && uid == ownerId();
+      allow list, delete: if false;
+    }
+    match /topics/{id} { allow read: if true; allow write: if false; }
+    // Includes credential hashes, backup codes/attempts, reports, push targets,
+    // future unknown collections. Admin SDK uses IAM, not client rules.
+    match /{document=**} { allow read, write: if false; }
+  }
+}

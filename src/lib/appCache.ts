@@ -1,3 +1,5 @@
+import { profileReadCache } from './dataReadCache';
+
 const CACHE_VERSION = 'v1';
 const CACHE_PREFIX = `dreamary_app_cache_${CACHE_VERSION}`;
 const DEFAULT_MAX_AGE_MS = 5 * 60 * 1000;
@@ -44,6 +46,7 @@ export function writeUserCache<T>(ownerId: string, section: string, data: T) {
 }
 
 export function clearUserCache(ownerId: string, sections?: string[]) {
+  profileReadCache.clear();
   if (typeof window === 'undefined' || !ownerId) return;
   try {
     if (sections) {

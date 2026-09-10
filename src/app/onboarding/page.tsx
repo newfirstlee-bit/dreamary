@@ -6,7 +6,7 @@ import { useRouter } from 'next/navigation';
 import { useOnboardingStore } from '@/store/useOnboardingStore';
 import { getUserId, generateUUID } from '@/lib/auth';
 import { saveCharacter, saveUserProfile, Character, UserProfile } from '@/lib/db';
-import { uploadImageToImgbb } from '@/lib/imgbb';
+import { uploadProfileImageToImgbb } from '@/lib/imgbb';
 import { ChevronLeft, Camera, Loader2, User } from 'lucide-react';
 import { trackEvent } from '@/lib/mixpanel';
 import { useLocale } from '@/lib/i18n';
@@ -14,20 +14,7 @@ import { clearUserCache } from '@/lib/appCache';
 import { withTimeout } from '@/lib/async';
 import { invalidateCharacterStore } from '@/store/useAppStore';
 import { ensureInitialPing } from '@/lib/initialPing';
-
-function getJosa(word: string, josaType: '이/가' | '을/를' | '은/는' | '으로/로' | '과/와' | '아/야'): string {
-  if (!word) return josaType.split('/')[0];
-  const lastChar = word.charCodeAt(word.length - 1);
-  if (lastChar < 44032 || lastChar > 55203) return josaType.split('/')[0]; 
-  const hasBatchim = (lastChar - 44032) % 28 !== 0;
-  const [josaT, josaF] = josaType.split('/');
-  return hasBatchim ? josaT : josaF;
-}
-
-function applyJosa(word: string, josaType: '이/가' | '을/를' | '은/는' | '으로/로' | '과/와' | '아/야'): string {
-  if (!word) return '';
-  return word + getJosa(word, josaType);
-}
+import { applyKoreanJosa } from '@/lib/koreanJosa';
 
 const SAVE_TIMEOUT_MS = 15000;
 
@@ -151,7 +138,7 @@ export default function OnboardingPage() {
       let charImgUrl = store.charImage;
       if (store.charImageFile) {
         charImgUrl = await withTimeout(
-          uploadImageToImgbb(store.charImageFile),
+          uploadProfileImageToImgbb(store.charImageFile),
           SAVE_TIMEOUT_MS,
           '이미지 업로드 시간이 초과되었습니다.'
         );
@@ -160,7 +147,7 @@ export default function OnboardingPage() {
       let userImgUrl = store.userImage;
       if (store.userImageFile) {
         userImgUrl = await withTimeout(
-          uploadImageToImgbb(store.userImageFile),
+          uploadProfileImageToImgbb(store.userImageFile),
           SAVE_TIMEOUT_MS,
           '이미지 업로드 시간이 초과되었습니다.'
         );
@@ -333,7 +320,7 @@ export default function OnboardingPage() {
         <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.5)', zIndex: 1000, display: 'flex', justifyContent: 'center', alignItems: 'center', padding: '20px' }}>
           <div style={{ backgroundColor: 'white', borderRadius: '15px', padding: '30px 20px', width: '100%', maxWidth: '340px', textAlign: 'center', display: 'flex', flexDirection: 'column', animation: 'fadeIn 0.2s ease' }}>
             <h2 style={{ fontSize: '1.3rem', marginBottom: '15px', lineHeight: '1.4' }}>{t('onboarding.userModalTitle')}</h2>
-            <p style={{ color: 'var(--text-muted)', marginBottom: '30px', lineHeight: '1.5', fontSize: '0.95rem' }} dangerouslySetInnerHTML={{ __html: t('onboarding.userModalDesc').replace('{name}', locale === 'ja' ? (store.charName || t('common.character')) : applyJosa(store.charName || '캐릭터', '과/와')) }} />
+            <p style={{ color: 'var(--text-muted)', marginBottom: '30px', lineHeight: '1.5', fontSize: '0.95rem' }} dangerouslySetInnerHTML={{ __html: t('onboarding.userModalDesc').replace('{name}', locale === 'ja' ? (store.charName || t('common.character')) : applyKoreanJosa(store.charName || '캐릭터', '과/와')) }} />
             
             <div style={{ display: 'flex', gap: '10px', width: '100%' }}>
               <button type="button" onClick={(e) => { e.preventDefault(); e.stopPropagation(); setShowUserModal(false); handleFinish(); }} style={{ flex: 1, padding: '15px', borderRadius: '10px', border: 'none', backgroundColor: 'var(--gray-200)', color: 'var(--gray-800)', cursor: 'pointer', fontWeight: '500', fontSize: '15px' }}>
@@ -492,7 +479,7 @@ function GenderSelect({ value, onChange }: { value: string, onChange: (v: string
 function CharacterStep({ step, store, onNext }: { step: number, store: any, onNext: () => void }) {
   const { t, locale } = useLocale();
   const isLast = step === 7;
-  const charNameText = locale === 'ja' ? (store.charName || t('common.character')) : (store.charName ? applyJosa(store.charName, '이/가') : '캐릭터가');
+  const charNameText = locale === 'ja' ? (store.charName || t('common.character')) : (store.charName ? applyKoreanJosa(store.charName, '이/가') : '캐릭터가');
   const charNameStr = store.charName || '캐릭터';
   const charExampleChatRef = useRef<HTMLTextAreaElement>(null);
 
@@ -705,9 +692,9 @@ function NarrativeStep({ step, store, onNext }: { step: number, store: any, onNe
 function UserStep({ step, store, onNext }: { step: number, store: any, onNext: () => void }) {
   const { t, locale } = useLocale();
   const isLast = step === 4;
-  const userNameText = locale === 'ja' ? (store.userName || '私') : (store.userName ? applyJosa(store.userName, '이/가') : '내가');
+  const userNameText = locale === 'ja' ? (store.userName || '私') : (store.userName ? applyKoreanJosa(store.userName, '이/가') : '내가');
   const charNameText = store.charName ? store.charName : (locale === 'ja' ? t('common.character') : '캐릭터');
-  const charNameJosaGa = locale === 'ja' ? (store.charName || t('common.character')) : (store.charName ? applyJosa(store.charName, '이/가') : '캐릭터가');
+  const charNameJosaGa = locale === 'ja' ? (store.charName || t('common.character')) : (store.charName ? applyKoreanJosa(store.charName, '이/가') : '캐릭터가');
   const userNameStr = store.userName || '나';
 
   const isNextDisabled = () => {

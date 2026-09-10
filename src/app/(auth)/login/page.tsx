@@ -12,12 +12,15 @@ import { completeOwnershipMigration, prepareOwnershipMigration } from '@/lib/db'
 import { getStoredGuestUserId } from '@/lib/auth';
 import { clearUserCache } from '@/lib/appCache';
 import { copyRecentCharacterOrder } from '@/lib/characterOrder';
-import { doc, setDoc } from 'firebase/firestore';
+import { doc, setDoc } from '@/lib/dataFirestore';
 import { invalidateCharacterStore } from '@/store/useAppStore';
+import { getPendingDiaryPushOptIn } from '@/lib/diaryPush';
+import { useAuth } from '@/components/AuthContext';
 
 export default function LoginPage() {
   const router = useRouter();
-  const { t } = useLocale();
+  const { syncAuthUser } = useAuth();
+  const { t, locale } = useLocale();
   const [id, setId] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
@@ -32,21 +35,51 @@ export default function LoginPage() {
     try {
       const email = `${id}@dreamary.internal`;
       const guestUserId = getStoredGuestUserId();
-      const migration = guestUserId ? await prepareOwnershipMigration(guestUserId) : null;
+
+      // 로그인을 먼저 수행하여 UI 응답성 확보
       const credential = await signInWithEmailAndPassword(auth, email, password);
-      if (migration && guestUserId !== credential.user.uid) {
-        await completeOwnershipMigration(migration, credential.user.uid);
-        copyRecentCharacterOrder(guestUserId, credential.user.uid);
-      }
+      // Firebase SDK 상태와 React 인증 상태를 라우팅 전에 동일하게 맞춘다.
+      // WKWebView에서는 onAuthStateChanged 반영이 다음 화면보다 늦을 수 있다.
+      syncAuthUser(credential.user);
+
+      // 로그인 즉시 계정 문서 업데이트 및 캐시 초기화
       await setDoc(doc(db, 'accounts', credential.user.uid), { id, updatedAt: Date.now() }, { merge: true });
       if (guestUserId) clearUserCache(guestUserId);
       clearUserCache(credential.user.uid);
       invalidateCharacterStore();
       trackEvent('Login_Success');
-      router.push('/mypage');
+
+      // 라우팅을 먼저 수행 (UI 즉시 전환)
+      const pendingDiaryPush = getPendingDiaryPushOptIn();
+      if (pendingDiaryPush) {
+        const params = new URLSearchParams({ resumePushOptIn: 'true' });
+        if (pendingDiaryPush.characterId) params.set('charId', pendingDiaryPush.characterId);
+        router.push(`/diary?${params.toString()}`);
+      } else {
+        router.push('/mypage');
+      }
+
+      // Migration은 백그라운드에서 non-blocking 처리
+      if (guestUserId && guestUserId !== credential.user.uid) {
+        prepareOwnershipMigration(guestUserId)
+          .then(migration => completeOwnershipMigration(migration, credential.user.uid))
+          .then(() => {
+            copyRecentCharacterOrder(guestUserId, credential.user.uid);
+            clearUserCache(credential.user.uid);
+            invalidateCharacterStore();
+          })
+          .catch(err => console.warn('Background ownership migration failed:', err));
+      }
     } catch (err: any) {
       console.error(err);
-      setError(t('auth.loginFailed'));
+      const code = typeof err?.code === 'string' ? err.code : '';
+      if (code === 'auth/network-request-failed' || code === 'auth/timeout') {
+        setError(locale === 'ja' ? 'ネットワーク接続を確認してからもう一度お試しください。' : '네트워크 연결을 확인한 뒤 다시 시도해주세요.');
+      } else if (code === 'auth/too-many-requests') {
+        setError(locale === 'ja' ? '試行回数が多すぎます。しばらく待ってからお試しください。' : '시도 횟수가 너무 많습니다. 잠시 후 다시 시도해주세요.');
+      } else {
+        setError(t('auth.loginFailed'));
+      }
     } finally {
       setLoading(false);
     }

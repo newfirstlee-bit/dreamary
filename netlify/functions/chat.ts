@@ -1,6 +1,10 @@
 import type { Config } from "@netlify/functions";
-import { saveChatMessage, ChatMessage, getMessageByRequestId } from '../../src/lib/db';
+import type { ChatMessage } from '../../src/lib/db';
+import { adminDb } from '../../src/lib/firebase-admin';
+import { requireDataOwner, assertGuestActive, securityErrorResponse, secretHash } from '../../src/lib/server/guestIdentity';
+import { DiaryAuthenticationError } from '../../src/lib/server/diaryAuthentication';
 import { corsHeaders } from './cors';
+import { applyKoreanJosa, formatKoreanNameTemplate } from '../../src/lib/koreanJosa';
 
 export const config: Config = {
   path: "/api/chat"
@@ -42,16 +46,40 @@ export default async function reqHandler(req: Request) {
   }
 
   try {
+    if (req.method !== 'POST') return new Response(null, { status: 405, headers: corsHeaders });
     const { character, userProfile, messages, isFirstPing, userId, isAdTurn, requestId, preferJsonResponse } = await req.json();
+    const owner = await requireDataOwner(req, userId);
+    if (!adminDb) throw new DiaryAuthenticationError(503, '서버 설정이 필요합니다.');
 
     if (!character || !messages) {
       return new Response(JSON.stringify({ error: 'Missing required fields' }), { status: 400, headers: corsHeaders });
     }
+    if (typeof character.id !== 'string' || !character.id || character.id.includes('/') || !Array.isArray(messages)) throw new DiaryAuthenticationError(400, '채팅 정보를 확인해주세요.');
+    await assertGuestActive(adminDb, owner);
+    const charRef = adminDb.collection('characters').doc(character.id);
+    const charSnapshot = await charRef.get();
+    if (charSnapshot.data()?.userId !== owner.uid || charSnapshot.data()?.deleting) throw new DiaryAuthenticationError(403, '채팅 접근 권한이 없습니다.');
+    const saveChatMessage = async (message: ChatMessage) => adminDb!.runTransaction(async transaction => {
+      await assertGuestActive(adminDb!, owner, transaction);
+      const current = await transaction.get(charRef);
+      if (current.data()?.userId !== owner.uid || current.data()?.deleting) throw new DiaryAuthenticationError(403, '채팅 소유자가 변경되었습니다.');
+      const ref = adminDb!.collection('chatMessages').doc(message.id);
+      const existing = await transaction.get(ref);
+      if (existing.exists) {
+        const stored = existing.data() as ChatMessage;
+        if (stored.userId !== owner.uid || stored.characterId !== character.id) throw new DiaryAuthenticationError(403, '채팅 접근 권한이 없습니다.');
+        return stored;
+      }
+      transaction.create(ref, message);
+      return message;
+    });
 
     if (requestId) {
-      const existing = await getMessageByRequestId(requestId);
+      const snapshot = await adminDb.collection('chatMessages').where('userId', '==', owner.uid)
+        .where('characterId', '==', character.id).where('requestId', '==', requestId).limit(1).get();
+      const existing = snapshot.empty ? null : snapshot.docs[0].data() as ChatMessage;
       if (existing) {
-        return new Response(JSON.stringify({ reply: existing.content, savedId: existing.id }), { headers: corsHeaders });
+        return new Response(JSON.stringify({ reply: existing.content, savedId: existing.id }), { headers: { ...corsHeaders, 'Cache-Control': 'no-store' } });
       }
     }
 
@@ -70,25 +98,34 @@ export default async function reqHandler(req: Request) {
 
     const userFeeling = userProfile?.feeling || (locale === 'ja' ? '特別な感情表現なし' : '특별한 감정 표현 없음');
     const userExtra = userProfile?.extra || (locale === 'ja' ? 'なし' : '없음');
+    const characterName = character.name || (locale === 'ja' ? 'キャラクター' : '캐릭터');
+    const nameTemplate = { userName, characterName };
+    const characterFeeling = formatKoreanNameTemplate(character.feeling || '', nameTemplate);
+    const characterTitle = formatKoreanNameTemplate(character.title || '', nameTemplate);
+    const characterExampleChat = formatKoreanNameTemplate(character.exampleChat || '', nameTemplate);
+    const characterNegative = formatKoreanNameTemplate(character.negative || '', nameTemplate);
+    const characterExtra = formatKoreanNameTemplate(character.extra || (locale === 'ja' ? 'なし' : '없음'), nameTemplate);
+    const formattedUserFeeling = formatKoreanNameTemplate(userFeeling, nameTemplate);
+    const formattedUserExtra = formatKoreanNameTemplate(userExtra, nameTemplate);
 
     let systemPrompt = '';
 
     if (locale === 'ja') {
       systemPrompt = `
 あなたは以下の設定に完璧に従ってロールプレイするキャラクターです。絶対にAIやアシスタントのように振る舞わないでください。
-キャラクター名: ${character.name}
-${userName}に感じている気持ち: ${character.feeling}
-${userName}を呼ぶ呼び方: ${character.title}
+キャラクター名: ${characterName}
+${userName}に感じている気持ち: ${characterFeeling}
+${userName}を呼ぶ呼び方: ${characterTitle}
 会話例（口調の参考）:
-${character.exampleChat}
+${characterExampleChat}
 絶対にしてはいけない言動（ネガティブプロンプト）:
-${character.negative}
-追加設定: ${character.extra || 'なし'}
+${characterNegative}
+追加設定: ${characterExtra}
 
 相手（ユーザー）の設定:
 名前: ${userName}
-私（キャラクター）への気持ち: ${userFeeling}
-相手の追加設定: ${userExtra}
+私（キャラクター）への気持ち: ${formattedUserFeeling}
+相手の追加設定: ${formattedUserExtra}
 `;
 
       if (isFirstPing) {
@@ -116,19 +153,20 @@ ${(userName === 'ユーザー' || userName === '유저' || userName === '나') ?
       // Korean (default)
       systemPrompt = `
 당신은 다음 설정에 따라 완벽하게 롤플레잉하는 캐릭터입니다. 절대 AI나 어시스턴트처럼 행동하지 마세요.
-캐릭터 이름: ${character.name}
-${userName}에게 느끼는 감정: ${character.feeling}
-${userName}를 부르는 호칭: ${character.title}
+캐릭터 이름: ${characterName}
+${userName}에게 느끼는 감정: ${characterFeeling}
+${applyKoreanJosa(userName, '을/를')} 부르는 호칭: ${characterTitle}
 대화 예시 (말투 참고):
-${character.exampleChat}
+${characterExampleChat}
 절대 하면 안되는 말/행동 (네거티브 프롬프트):
-${character.negative}
-추가 설정: ${character.extra || '없음'}
+${characterNegative}
+추가 설정: ${characterExtra}
 
 상대방(유저) 설정:
 이름: ${userName}
-나(캐릭터)를 향한 감정: ${userFeeling}
-상대방 추가 설정: ${userExtra}
+나(캐릭터)를 향한 감정: ${formattedUserFeeling}
+상대방 추가 설정: ${formattedUserExtra}
+한국어 답변에는 영어 알파벳, 일본어, 중국어 한자, 기타 외국어 문자, 의미 없는 코드 조각을 절대 섞지 마세요.
 `;
 
       if (isFirstPing) {
@@ -143,7 +181,7 @@ ${(userName === '유저' || userName === '나' || userName === 'ユーザー') ?
       } else {
         systemPrompt += `
 [특별 지시사항]
-당신은 웹소설 작가이며, 현재 ${userName}와 깊은 서사를 쌓아가는 장문 롤플레잉을 진행 중입니다.
+당신은 웹소설 작가이며, 현재 ${applyKoreanJosa(userName, '과/와')} 깊은 서사를 쌓아가는 장문 롤플레잉을 진행 중입니다.
 1. 대답은 반드시 최대 900자 이내의 한글로 상세하게 작성하세요.
 2. 행동 지문과 심리 묘사는 반드시 소괄호 () 로 감싸서 표현하세요.
    예시: (부드럽게 미소지으며 네 머리카락을 넘겨준다. 심장이 요동친다.) 정말 보고 싶었어.
@@ -171,146 +209,47 @@ ${(userName === '유저' || userName === '나' || userName === 'ユーザー') ?
           { role: "system", content: systemPrompt },
           ...formattedMessages
         ],
-        temperature: 0.8,
+        temperature: 0.7,
         max_tokens: isFirstPing ? 100 : 2000,
         stream: true // Always stream from OpenRouter to prevent Netlify timeout
       })
     });
 
-    if (isFirstPing || preferJsonResponse) {
-      if (!response.ok) {
-        const errData = await response.json().catch(() => ({}));
-        return new Response(JSON.stringify({ error: errData.error?.message || 'Failed to generate reply' }), { status: response.status, headers: corsHeaders });
-      }
-
-      const stream = new ReadableStream({
-        async start(controller) {
-          let isClientConnected = true;
-          let fullReply = '';
-          const newMsgId = crypto.randomUUID();
-          
-          // Keep-alive interval
-          const keepAlive = setInterval(() => {
-            if (isClientConnected) {
-              try {
-                controller.enqueue(new TextEncoder().encode(' '));
-              } catch (e) {
-                isClientConnected = false;
-              }
-            }
-          }, 2000);
-
-          try {
-            if (response.body) {
-              for await (const chunk of parseOpenRouterStream(response.body)) {
-                fullReply += chunk;
-              }
-            }
-          } catch (err) {
-            console.error('Streaming error:', err);
-          } finally {
-            clearInterval(keepAlive);
-            try {
-              const newMsg: ChatMessage = {
-                id: newMsgId,
-                userId: userId || 'unknown',
-                characterId: character.id,
-                role: 'assistant',
-                content: fullReply,
-                createdAt: Date.now(),
-                isAdLocked: isAdTurn === true,
-                ...(requestId ? { requestId } : {}),
-              };
-              if (userId && fullReply) {
-                await saveChatMessage(newMsg);
-              }
-              if (isClientConnected) {
-                const finalJson = JSON.stringify({ reply: fullReply, savedId: newMsgId });
-                controller.enqueue(new TextEncoder().encode(finalJson));
-              }
-            } catch (dbErr) {
-              console.error('DB save failed:', dbErr);
-            }
-            controller.close();
-          }
-        }
-      });
-
-      return new Response(stream, {
-        headers: {
-          ...corsHeaders,
-          'Content-Type': 'application/json; charset=utf-8',
-          'Transfer-Encoding': 'chunked',
-          'Cache-Control': 'no-cache, no-transform',
-          'X-Message-Id': newMsgId
-        }
-      });
-    }
-
-    // Streaming for standard chat
-    if (!response.ok) {
-      const errData = await response.json().catch(() => ({}));
-      return new Response(JSON.stringify({ error: errData.error?.message || 'Failed to generate reply' }), { status: response.status, headers: corsHeaders });
-    }
-
-    let fullReply = '';
-    const newMsgId = crypto.randomUUID();
-
+    if (!response.ok) return Response.json({ error: '채팅 답변 생성에 실패했습니다.' }, { status: response.status, headers: corsHeaders });
+    const jsonResponse = isFirstPing || preferJsonResponse;
+    const newMsgId = requestId ? 'reply_' + secretHash(JSON.stringify([owner.uid, character.id, requestId])) : crypto.randomUUID();
     const stream = new ReadableStream({
       async start(controller) {
-        let isClientConnected = true;
+        let connected = true, errored = false, fullReply = '';
+        const enqueue = (text: string) => {
+          if (connected) try { controller.enqueue(new TextEncoder().encode(text)); } catch { connected = false; }
+        };
+        const keepAlive = jsonResponse ? setInterval(() => enqueue(' '), 2000) : null;
         try {
-          if (response.body) {
-            for await (const chunk of parseOpenRouterStream(response.body)) {
-              fullReply += chunk;
-              if (isClientConnected) {
-                try {
-                  controller.enqueue(new TextEncoder().encode(chunk));
-                } catch (err) {
-                  isClientConnected = false;
-                  console.log('Client disconnected. Continuing background generation...');
-                }
-              }
-            }
+          if (!response.body) throw new Error('Missing reply');
+          for await (const chunk of parseOpenRouterStream(response.body)) {
+            fullReply += chunk;
+            if (!jsonResponse) enqueue(chunk);
           }
-        } catch (err) {
-          console.error('Streaming error:', err);
-          controller.error(err);
+          if (!fullReply.trim()) throw new Error('Empty reply');
+          const saved = await saveChatMessage({
+            id: newMsgId, userId: owner.uid, characterId: character.id,
+            role: 'assistant', content: fullReply, createdAt: Date.now(),
+            isAdLocked: isAdTurn === true, ...(requestId ? { requestId } : {}),
+          });
+          if (jsonResponse) enqueue(JSON.stringify({ reply: saved.content, savedId: saved.id }));
+        } catch {
+          if (jsonResponse) enqueue(JSON.stringify({ error: '채팅 저장에 실패했습니다. 다시 시도해주세요.' }));
+          else { errored = true; if (connected) controller.error(new Error('채팅 저장에 실패했습니다.')); }
         } finally {
-          try {
-            const newMsg: ChatMessage = {
-              id: newMsgId,
-              userId: userId || 'unknown',
-              characterId: character.id,
-              role: 'assistant',
-              content: fullReply,
-              createdAt: Date.now(),
-              isAdLocked: isAdTurn === true,
-              ...(requestId ? { requestId } : {}),
-            };
-            if (userId && fullReply) {
-              await saveChatMessage(newMsg);
-            }
-          } catch (dbErr) {
-            console.error('DB save failed:', dbErr);
-          }
-          controller.close();
+          if (keepAlive) clearInterval(keepAlive);
+          if (connected && !errored) controller.close();
         }
       }
     });
-
-    return new Response(stream, {
-      headers: {
-        ...corsHeaders,
-        'Content-Type': 'text/plain; charset=utf-8',
-        'Transfer-Encoding': 'chunked',
-        'Cache-Control': 'no-cache, no-transform',
-        'X-Message-Id': newMsgId
-      }
-    });
-
-  } catch (error: any) {
-    console.error('API Route Error:', error);
-    return new Response(JSON.stringify({ error: error.message || 'Internal Server Error' }), { status: 500, headers: corsHeaders });
-  }
+    return new Response(stream, { headers: {
+      ...corsHeaders, 'Content-Type': jsonResponse ? 'application/json; charset=utf-8' : 'text/plain; charset=utf-8',
+      'Transfer-Encoding': 'chunked', 'Cache-Control': 'no-store, no-transform', 'X-Message-Id': newMsgId,
+    } });
+  } catch (error) { return securityErrorResponse(error, corsHeaders); }
 }

@@ -14,16 +14,15 @@ export async function getCharactersWithGuestRecovery(
   if (!guestUserId || guestUserId === currentUserId) return characters;
 
   try {
-    const guestCharacters = await getCharactersByUser(guestUserId);
-    if (guestCharacters.length === 0) return characters;
-
+    // Signed-in Firestore credentials cannot read the old guest's documents.
+    // Prove both identities to the server first; read only the resulting UID.
     const migration = await prepareOwnershipMigration(guestUserId);
     await completeOwnershipMigration(migration, currentUserId);
     copyRecentCharacterOrder(guestUserId, currentUserId);
     clearUserCache(guestUserId);
     clearUserCache(currentUserId);
 
-    return guestCharacters.map(character => ({ ...character, userId: currentUserId }));
+    return await getCharactersByUser(currentUserId);
   } catch (error) {
     console.warn('Guest ownership recovery skipped:', error);
     return characters;

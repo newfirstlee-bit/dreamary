@@ -1,11 +1,11 @@
 "use client";
 
 import { useEffect, useState, useRef } from 'react';
-import Image from 'next/image';
+import ResilientImage from '@/components/ResilientImage';
 import { useRouter } from 'next/navigation';
 import { getUserId } from '@/lib/auth';
 import { getUserProfile, saveUserProfile, UserProfile } from '@/lib/db';
-import { uploadImageToImgbb } from '@/lib/imgbb';
+import { uploadProfileImageToImgbb } from '@/lib/imgbb';
 import { Loader2, ChevronLeft, Camera, User } from 'lucide-react';
 import { trackEvent } from '@/lib/mixpanel';
 import { useLocale } from '@/lib/i18n';
@@ -55,6 +55,41 @@ export default function EditUserPage({ params }: { params: { id: string } }) {
   const [imageFile, setImageFile] = useState<File | null>(null);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const profileScrollRef = useRef<HTMLElement>(null);
+  const lowerFieldScrollTimerRef = useRef<number | null>(null);
+
+  const revealLowerFieldIfCovered = (event: React.FocusEvent<HTMLTextAreaElement>) => {
+    const target = event.currentTarget;
+    if (lowerFieldScrollTimerRef.current !== null) {
+      window.clearTimeout(lowerFieldScrollTimerRef.current);
+    }
+
+    // Wait until the native keyboard and fixed CTA have reached their final
+    // positions, then move only the amount that is actually obscured.
+    lowerFieldScrollTimerRef.current = window.setTimeout(() => {
+      window.requestAnimationFrame(() => {
+        if (document.activeElement !== target) return;
+
+        const scrollContainer = profileScrollRef.current;
+        if (!scrollContainer) return;
+
+        const footer = scrollContainer.parentElement?.querySelector<HTMLElement>('.fixed-cta-footer');
+        const containerBottom = scrollContainer.getBoundingClientRect().bottom;
+        const visibleBottom = Math.min(containerBottom, footer?.getBoundingClientRect().top ?? containerBottom) - 16;
+        const coveredDistance = target.getBoundingClientRect().bottom - visibleBottom;
+
+        if (coveredDistance > 0) {
+          scrollContainer.scrollBy({ top: Math.ceil(coveredDistance), behavior: 'smooth' });
+        }
+      });
+    }, 350);
+  };
+
+  useEffect(() => () => {
+    if (lowerFieldScrollTimerRef.current !== null) {
+      window.clearTimeout(lowerFieldScrollTimerRef.current);
+    }
+  }, []);
 
   useEffect(() => {
     const init = async () => {
@@ -93,7 +128,7 @@ export default function EditUserPage({ params }: { params: { id: string } }) {
       let finalImgUrl = imageUrl;
       
       if (imageFile) {
-        finalImgUrl = await uploadImageToImgbb(imageFile);
+        finalImgUrl = await uploadProfileImageToImgbb(imageFile);
       }
 
       const updatedUser: UserProfile = {
@@ -128,85 +163,88 @@ export default function EditUserPage({ params }: { params: { id: string } }) {
   }
 
   return (
-    <div className="app-container full-page fixed-cta-page" style={{ backgroundColor: 'var(--gray-50)' }}>
-      <header className="header" style={{ borderBottomLeftRadius: 0, borderBottomRightRadius: 0, position: 'relative', display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
+    <div className="app-container full-page user-profile-edit-page status-surface-white">
+      <header className="header" style={{ borderBottomLeftRadius: 0, borderBottomRightRadius: 0, position: 'relative', display: 'flex', justifyContent: 'center', alignItems: 'center', flexShrink: 0 }}>
         <button onClick={() => router.back()} style={{ position: 'absolute', left: '20px', background: 'none', border: 'none', color: 'var(--foreground)', cursor: 'pointer', display: 'flex', alignItems: 'center' }}>
           <ChevronLeft size={28} color="var(--gray-800)" />
         </button>
         <span style={{ fontSize: '1.2rem', fontWeight: 'bold' }}>{t('editUser.header')}</span>
       </header>
 
-      <main className="content fixed-cta-content" style={{ display: 'flex', flexDirection: 'column', gap: '30px' }}>
+      <main ref={profileScrollRef} className="user-profile-edit-scroll">
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '30px' }}>
         
-        {/* Profile Image */}
-        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
-          <div 
-            onClick={() => fileInputRef.current?.click()}
-            style={{ 
-              width: '120px', height: '120px', borderRadius: '50%', backgroundColor: 'var(--gray-200)', 
-              display: 'flex', justifyContent: 'center', alignItems: 'center', cursor: 'pointer',
-              overflow: 'hidden', position: 'relative', border: '2px dashed var(--border-color)'
-            }}
-          >
-            {imageUrl ? (
-              <Image src={imageUrl} alt="preview" fill style={{ objectFit: 'cover' }} />
-            ) : (
-              <Camera size={32} color="var(--gray-500)" />
-            )}
+          {/* Profile Image */}
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+            <div 
+              onClick={() => fileInputRef.current?.click()}
+              style={{ 
+                width: '120px', height: '120px', borderRadius: '50%', backgroundColor: 'var(--gray-200)', 
+                display: 'flex', justifyContent: 'center', alignItems: 'center', cursor: 'pointer',
+                overflow: 'hidden', position: 'relative', border: '2px dashed var(--border-color)'
+              }}
+            >
+              {imageUrl ? (
+                <ResilientImage src={imageUrl} alt="preview" kind="user_profile" fill style={{ objectFit: 'cover' }} fallback={<User size={48} color="var(--gray-400)" />} />
+              ) : (
+                <Camera size={32} color="var(--gray-500)" />
+              )}
+            </div>
+            <p style={{ marginTop: '10px', fontSize: '16px', color: 'var(--text-muted)' }}>{t('image.touchUpload')}</p>
+            <p style={{ marginTop: '4px', fontSize: '14px', color: '#ff4d4f', fontWeight: 'bold' }}>{t('image.noAI')}</p>
+            <input type="file" accept="image/*" ref={fileInputRef} onChange={handleImageChange} style={{ display: 'none' }} />
           </div>
-          <p style={{ marginTop: '10px', fontSize: '16px', color: 'var(--text-muted)' }}>{t('image.touchUpload')}</p>
-          <p style={{ marginTop: '4px', fontSize: '14px', color: '#ff4d4f', fontWeight: 'bold' }}>{t('image.noAI')}</p>
-          <input type="file" accept="image/*" ref={fileInputRef} onChange={handleImageChange} style={{ display: 'none' }} />
+
+          {/* Inputs */}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+            
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <label style={{ fontSize: '1rem', fontWeight: 'bold' }}>{t('editUser.name')}</label>
+                <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>{name.length}/10</span>
+              </div>
+              <input 
+                type="text" value={name} onChange={e => setName(e.target.value.slice(0, 10))}
+                placeholder={t('editUser.namePh')}
+                style={{ width: '100%', padding: '15px', borderRadius: '10px', border: '1px solid var(--border-color)', fontSize: '1.05rem', outline: 'none' }}
+              />
+            </div>
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <label style={{ fontSize: '1rem', fontWeight: 'bold' }}>{t('editUser.gender')}</label>
+              </div>
+              <GenderSelect value={gender} onChange={setGender} />
+            </div>
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <label style={{ fontSize: '1rem', fontWeight: 'bold' }}>{t('editUser.feeling')}</label>
+                <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>{feeling.length}/300</span>
+              </div>
+              <textarea 
+                value={feeling} onChange={e => setFeeling(e.target.value.slice(0, 300))}
+                onFocus={revealLowerFieldIfCovered}
+                placeholder={t('editUser.feelingPh')}
+                style={{ width: '100%', padding: '15px', borderRadius: '10px', border: '1px solid var(--border-color)', fontSize: '1rem', outline: 'none', resize: 'none', minHeight: '100px' }}
+              />
+            </div>
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <label style={{ fontSize: '1rem', fontWeight: 'bold' }}>{t('editUser.extra')}</label>
+                <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>{extra.length}/300</span>
+              </div>
+              <textarea 
+                value={extra} onChange={e => setExtra(e.target.value.slice(0, 300))}
+                onFocus={revealLowerFieldIfCovered}
+                placeholder={t('editUser.extraPh')}
+                style={{ width: '100%', padding: '15px', borderRadius: '10px', border: '1px solid var(--border-color)', fontSize: '1rem', outline: 'none', resize: 'none', minHeight: '100px' }}
+              />
+            </div>
+
+          </div>
         </div>
-
-        {/* Inputs */}
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
-          
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <label style={{ fontSize: '1rem', fontWeight: 'bold' }}>{t('editUser.name')}</label>
-              <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>{name.length}/10</span>
-            </div>
-            <input 
-              type="text" value={name} onChange={e => setName(e.target.value.slice(0, 10))}
-              placeholder={t('editUser.namePh')}
-              style={{ width: '100%', padding: '15px', borderRadius: '10px', border: '1px solid var(--border-color)', fontSize: '1.05rem', outline: 'none' }}
-            />
-          </div>
-
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <label style={{ fontSize: '1rem', fontWeight: 'bold' }}>{t('editUser.gender')}</label>
-            </div>
-            <GenderSelect value={gender} onChange={setGender} />
-          </div>
-
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <label style={{ fontSize: '1rem', fontWeight: 'bold' }}>{t('editUser.feeling')}</label>
-              <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>{feeling.length}/300</span>
-            </div>
-            <textarea 
-              value={feeling} onChange={e => setFeeling(e.target.value.slice(0, 300))}
-              placeholder={t('editUser.feelingPh')}
-              style={{ width: '100%', padding: '15px', borderRadius: '10px', border: '1px solid var(--border-color)', fontSize: '1rem', outline: 'none', resize: 'none', minHeight: '100px' }}
-            />
-          </div>
-
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <label style={{ fontSize: '1rem', fontWeight: 'bold' }}>{t('editUser.extra')}</label>
-              <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>{extra.length}/300</span>
-            </div>
-            <textarea 
-              value={extra} onChange={e => setExtra(e.target.value.slice(0, 300))}
-              placeholder={t('editUser.extraPh')}
-              style={{ width: '100%', padding: '15px', borderRadius: '10px', border: '1px solid var(--border-color)', fontSize: '1rem', outline: 'none', resize: 'none', minHeight: '100px' }}
-            />
-          </div>
-
-        </div>
-
       </main>
 
       {/* Pinned Bottom Button */}

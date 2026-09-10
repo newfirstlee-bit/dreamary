@@ -3,7 +3,7 @@ import { KeyboardResize } from '@capacitor/keyboard';
 
 const config: CapacitorConfig = {
   appId: 'com.dreamary.app',
-  appName: '드리머리',
+  appName: '드림어리',
   webDir: 'out',
   plugins: {
     PushNotifications: {

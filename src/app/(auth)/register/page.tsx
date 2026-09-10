@@ -4,7 +4,7 @@ import { apiPostJson } from '@/lib/api';
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { createUserWithEmailAndPassword } from 'firebase/auth';
-import { doc, setDoc } from 'firebase/firestore';
+import { doc, setDoc } from '@/lib/dataFirestore';
 import { auth, db } from '@/lib/firebase';
 import Link from 'next/link';
 import { Eye, EyeOff, ChevronLeft } from 'lucide-react';
@@ -14,9 +14,12 @@ import { completeOwnershipMigration, prepareOwnershipMigration } from '@/lib/db'
 import { clearUserCache } from '@/lib/appCache';
 import { copyRecentCharacterOrder } from '@/lib/characterOrder';
 import { invalidateCharacterStore } from '@/store/useAppStore';
+import { getPendingDiaryPushOptIn } from '@/lib/diaryPush';
+import { useAuth } from '@/components/AuthContext';
 
 export default function RegisterPage() {
   const router = useRouter();
+  const { syncAuthUser } = useAuth();
   const { t, locale } = useLocale();
   const [id, setId] = useState('');
   const [password, setPassword] = useState('');
@@ -82,6 +85,7 @@ export default function RegisterPage() {
       const migration = guestUserId ? await prepareOwnershipMigration(guestUserId) : null;
       const userCredential = await createUserWithEmailAndPassword(auth, pseudoEmail, password);
       const user = userCredential.user;
+      syncAuthUser(user);
 
       if (migration && guestUserId !== user.uid) {
         await completeOwnershipMigration(migration, user.uid);
@@ -101,7 +105,14 @@ export default function RegisterPage() {
       });
 
       alert(t('auth.registerSuccess'));
-      router.push('/mypage');
+      const pendingDiaryPush = getPendingDiaryPushOptIn();
+      if (pendingDiaryPush) {
+        const params = new URLSearchParams({ resumePushOptIn: 'true' });
+        if (pendingDiaryPush.characterId) params.set('charId', pendingDiaryPush.characterId);
+        router.push(`/diary?${params.toString()}`);
+      } else {
+        router.push('/mypage');
+      }
     } catch (err: any) {
       console.error(err);
       if (err.code === 'auth/email-already-in-use') {

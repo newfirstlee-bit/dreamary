@@ -27,6 +27,17 @@ export function shouldShowBottomNav(pathname?: string | null): boolean {
     || BOTTOM_NAV_ROUTE_PREFIXES.some(prefix => normalizedPathname.startsWith(prefix));
 }
 
+/** Returns the single tab path that should be highlighted in BottomNav. */
+export function getBottomNavActivePath(pathname?: string | null): string {
+  if (!pathname) return '/';
+  const normalizedPathname = normalizePathname(pathname);
+  if (normalizedPathname === '/') return '/';
+  if (normalizedPathname.startsWith('/diary')) return '/diary';
+  if (normalizedPathname.startsWith('/chat')) return '/chat';
+  if (normalizedPathname.startsWith('/mypage')) return '/mypage';
+  return normalizedPathname;
+}
+
 /** Full-page flows replace the current tab context and must never show BottomNav. */
 export function isFullPageRoute(pathname?: string | null): boolean {
   return Boolean(pathname) && !shouldShowBottomNav(pathname);
