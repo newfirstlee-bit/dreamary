@@ -75,6 +75,7 @@ async function fixture(seed = {}, overrides = {}) {
   const jwk = await jose.exportJWK(publicKey); jwk.kid = 'test-key';
   const env = { FIREBASE_SERVICE_ACCOUNT_KEY: JSON.stringify({ project_id: 'test-project' }), GUEST_SESSION_SECRET: '12'.repeat(32), ADMIN_SESSION_SECRET: '34'.repeat(32), OPENROUTER_API_KEY: 'fake', ...overrides };
   const modules = new Map();
+  const errorLogs = [];
   let generations = 0;
   const load = file => {
     file = path.resolve(root, file);
@@ -90,6 +91,7 @@ async function fixture(seed = {}, overrides = {}) {
         createCustomToken: async (uid, claims) => JSON.stringify({ uid, claims }),
         deleteUser: async () => {},
         getUser: async () => {
+        if (env.AUTH_ERROR) throw Object.assign(new Error('private request details'), { code: env.AUTH_ERROR });
         if (env.REGISTERED_UUID) return { uid: guestId };
         throw Object.assign(new Error(), { code: 'auth/user-not-found' });
       } }) };
@@ -101,7 +103,7 @@ async function fixture(seed = {}, overrides = {}) {
     vm.runInNewContext(compiled, { module, exports: module.exports, require: requireLocal,
       process: { env }, URL, Request, Response, Buffer, TextEncoder, TextDecoder, ReadableStream, AbortController,
       setTimeout, clearTimeout, setInterval, clearInterval, performance,
-      console: { info() {}, error() {}, warn() {} },
+      console: { info() {}, error(...args) { errorLogs.push(args); }, warn() {} },
       fetch: async () => { generations++;
         if (env.CHAT_STREAM) return new Response('data: ' + JSON.stringify({ choices: [{ delta: { content: '테스트 답변' } }] }) + '\n\ndata: [DONE]\n');
         return Response.json({ choices: [{ message: { content: '테스트 답변' } }] });
@@ -121,8 +123,36 @@ async function fixture(seed = {}, overrides = {}) {
     assert.equal(response.status, 200, await response.clone().text());
     return (await response.json()).token;
   };
-  return { db, load, loginToken, run, bind, env, generations: () => generations };
+  return { db, load, loginToken, run, bind, env, errorLogs, generations: () => generations };
 }
+
+test('Guest diagnostics identify failure stages without logging credentials or changing rejection behavior', async () => {
+  for (const stage of ['token-signing', 'credential-read', 'account-check', 'credential-transaction']) {
+    const f = await fixture({}, stage === 'account-check' ? { AUTH_ERROR: 'auth/insufficient-permission' } : {});
+    const failure = () => { throw Object.assign(new Error('private request details ' + secret), { code: 7 }); };
+    if (stage === 'token-signing') f.load('src/lib/server/guestIdentity.ts').issueGuestSession = failure;
+    if (stage === 'credential-read') f.db.collection = failure;
+    if (stage === 'credential-transaction') f.db.runTransaction = failure;
+    const response = await f.run('guest-session', { userId: guestId, secret });
+    assert.equal(response.status, 500);
+    assert.equal(f.db.stats.writes, 0);
+    assert.equal(f.errorLogs.length, 1);
+    assert.equal(f.errorLogs[0][1].stage, stage);
+    assert.equal(f.errorLogs[0][1].code, stage === 'account-check' ? 'auth/insufficient-permission' : 'permission-denied');
+    for (const output of [JSON.stringify(f.errorLogs), await response.text()]) {
+      for (const privateValue of [secret, guestId, 'private request details']) assert.equal(output.includes(privateValue), false);
+    }
+  }
+  const f = await fixture();
+  await f.bind();
+  assert.deepEqual(f.errorLogs, []);
+  assert.equal((await f.run('guest-session', { userId: guestId, secret: 'ef'.repeat(32) })).status, 403);
+  assert.deepEqual(f.errorLogs, []);
+  f.load('src/lib/server/guestSessionDiagnostics.ts').logGuestSessionFailure({ code: secret, name: secret, message: secret }, 'account-check');
+  assert.equal(f.errorLogs[0][1].code, 'unknown');
+  assert.equal(f.errorLogs[0][1].kind, 'unknown');
+  assert.equal(JSON.stringify(f.errorLogs).includes(secret), false);
+});
 
 test('Firebase: missing, wrong project, invalid signature, future auth_time and wrong owner are rejected', async () => {
   const f = await fixture();

@@ -3,20 +3,25 @@ import { adminDb } from '../../src/lib/firebase-admin';
 import { corsHeaders } from '../shared/cors';
 import { DiaryAuthenticationError } from '../../src/lib/server/diaryAuthentication';
 import { isGuestId, secretHash, sameHash, issueGuestSession, securityErrorResponse } from '../../src/lib/server/guestIdentity';
+import { logGuestSessionFailure, type GuestSessionStage } from '../../src/lib/server/guestSessionDiagnostics';
 
 export const config: Config = { path: '/api/guest/session' };
 export default async function handler(req: Request) {
   if (req.method === 'OPTIONS') return new Response(null, { status: 204, headers: corsHeaders });
   if (req.method !== 'POST') return new Response(null, { status: 405, headers: corsHeaders });
+  let stage: GuestSessionStage = 'configuration';
   try {
     if (!adminDb) throw new DiaryAuthenticationError(503, '서버 설정이 필요합니다.');
+    stage = 'request-validation';
     const { userId, secret } = await req.json();
     if (!isGuestId(userId) || typeof secret !== 'string' || !/^[a-f0-9]{64}$/.test(secret)) {
       throw new DiaryAuthenticationError(400, '비로그인 인증정보가 필요합니다.');
     }
     const hash = secretHash(secret);
     // Validate signing configuration before persisting a binding.
+    stage = 'token-signing';
     const token = await issueGuestSession(userId, hash);
+    stage = 'credential-read';
     const ref = adminDb.collection('guestCredentials').doc(userId);
     const initial = await ref.get();
     if (initial.exists) {
@@ -27,6 +32,7 @@ export default async function handler(req: Request) {
     }
     if (!initial.exists) {
       // UUID format is not evidence that a Firebase account does not own it.
+      stage = 'account-check';
       const { getAuth } = await import('firebase-admin/auth');
       try {
         await getAuth().getUser(userId);
@@ -35,6 +41,7 @@ export default async function handler(req: Request) {
         if ((error as { code?: string }).code !== 'auth/user-not-found') throw error;
       }
     }
+    stage = 'credential-transaction';
     await adminDb.runTransaction(async transaction => {
       const current = await transaction.get(ref);
       if (current.exists) {
@@ -58,5 +65,8 @@ export default async function handler(req: Request) {
     return Response.json({ token, expiresAt: Date.now() + 15 * 60 * 1000 }, {
       headers: { ...corsHeaders, 'Cache-Control': 'no-store' },
     });
-  } catch (error) { return securityErrorResponse(error, corsHeaders); }
+  } catch (error) {
+    logGuestSessionFailure(error, stage);
+    return securityErrorResponse(error, corsHeaders);
+  }
 }
