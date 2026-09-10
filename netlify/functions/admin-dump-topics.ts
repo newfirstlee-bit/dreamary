@@ -1,7 +1,7 @@
 import type { Config } from "@netlify/functions";
 import { readAdminTopics } from '../../src/lib/server/adminTopics';
 import { isAdminRequest } from '../../src/lib/server/adminSession';
-import { corsHeaders } from './cors';
+import { corsHeaders } from '../shared/cors';
 
 export const config: Config = {
   path: "/api/admin/dump-topics"

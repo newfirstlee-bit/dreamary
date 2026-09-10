@@ -3,7 +3,7 @@ import type { ChatMessage } from '../../src/lib/db';
 import { adminDb } from '../../src/lib/firebase-admin';
 import { requireDataOwner, assertGuestActive, securityErrorResponse, secretHash } from '../../src/lib/server/guestIdentity';
 import { DiaryAuthenticationError } from '../../src/lib/server/diaryAuthentication';
-import { corsHeaders } from './cors';
+import { corsHeaders } from '../shared/cors';
 import { applyKoreanJosa, formatKoreanNameTemplate } from '../../src/lib/koreanJosa';
 
 export const config: Config = {

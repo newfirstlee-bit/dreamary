@@ -9,7 +9,7 @@ import {
   getTodayKstDateString,
   pickDiaryPushCandidate,
   type DiaryPushCandidate,
-} from './push-shared.mts';
+} from '../shared/push-shared.mts';
 
 export const config: Config = {
   path: "/api/admin/test-diary-push",

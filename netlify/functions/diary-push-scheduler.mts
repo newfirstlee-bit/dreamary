@@ -11,7 +11,7 @@ import {
   pickDiaryPushCandidate,
   toAdminTimestamp,
   type DiaryPushCandidate,
-} from './push-shared.mts';
+} from '../shared/push-shared.mts';
 
 export const config: Config = {
   // Netlify cron is UTC. 11:00 UTC = 20:00 Korea/Japan time.

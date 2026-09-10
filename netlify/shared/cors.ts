@@ -1,3 +1,4 @@
+// Shared module: keep outside functions/ so Netlify does not deploy it as a function.
 export const corsHeaders = {
   'Access-Control-Allow-Origin': '*', // Adjust for production if necessary
   'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-Guest-Authorization',

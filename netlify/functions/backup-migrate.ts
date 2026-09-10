@@ -1,6 +1,6 @@
 import type { Config } from '@netlify/functions';
 import { adminDb } from '../../src/lib/firebase-admin';
-import { corsHeaders } from './cors';
+import { corsHeaders } from '../shared/cors';
 import { DiaryAuthenticationError, requireDiaryLogin } from '../../src/lib/server/diaryAuthentication';
 import { verifyGuestSession, isGuestId, sameHash, secretHash, securityErrorResponse } from '../../src/lib/server/guestIdentity';
 

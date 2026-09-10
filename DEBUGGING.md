@@ -2,6 +2,36 @@
 
 같은 장애가 반복되지 않도록 실제 기기에서 확인된 원인과 금지 설정을 기록한다.
 
+## 2026-09-10 Netlify 함수 업로드 HTTP 400 — 환경변수 4KB 제한 (로컬 수정·패키징 확인 완료)
+
+### 증상·원인과 증거
+
+- 사용자가 제공한 11:59:39 배포 로그에서 함수 생성 단계가 HTTP 400 및 AWS Lambda 환경변수 총용량 4KB 초과로 거부됐다. 이 로그의 직접 원인은 컴파일 오류나 Firestore 읽기 한도/권한 오류가 아니다.
+- 현재 소스를 Netlify `@netlify/zip-it-and-ship-it`의 `listFunctions(..., {parseISC: true})`로 읽기 전용 검사했다. 총 25개 중 실제 함수 23개는 `runtimeAPIVersion: 2`, 보조파일 `netlify/functions/cors.ts`와 `netlify/functions/push-shared.mts`만 `runtimeAPIVersion: 1`로 발견된다. 보조파일이 함수 디렉터리 직속에 있어 불필요한 Lambda 호환 함수로 배포되는 구조다.
+- 기존 8월 로컬 배포 manifest에도 두 보조파일이 별도 함수로 포함되어 있다. 다만 이번 원격 실패 로그에는 실제 함수명이 없으므로 두 파일 중 어느 업로드가 먼저 실패했는지는 미확정이다. 원격 환경변수 원문/총 바이트 수는 조회하지 않았다.
+- 공식 안내상 최신 Netlify Functions 런타임에는 총용량 4KB 제한이 없고 Lambda 호환 모드에는 남아 있다. 참고: https://docs.netlify.com/build/functions/environment-variables/ 및 https://developers.netlify.com/guides/migrating-to-the-modern-netlify-functions/
+
+### 해결 방향·재발 방지
+
+- 두 보조파일을 `netlify/shared/cors.ts`, `netlify/shared/push-shared.mts`로 이동하고 모든 함수 import 및 테스트 대역 경로를 갱신했다. 원본과 비교해 안내 주석 외 공통 로직이 동일함을 확인했다. 실제 API 경로/인증키/DB 규칙/조회 수는 바꾸지 않았다. Netlify 환경 변경·재배포는 하지 않았다.
+- `scripts/check-netlify-functions.cjs`를 `npm run build`의 `prebuild`에 연결했다. 함수 폴더에 default export 없는 보조파일이나 구형 named handler가 추가되면 빌드 전에 거부한다. 구조 검사는 Netlify 실제 패키징 검사를 대체하지 않는다. `npm run test:netlify`로 보조파일/구형 핸들러 거부 및 정상 함수 허용을 회귀 확인한다.
+- 함수 디렉터리 직속에는 실제 진입점만 둔다. Next 빌드 성공뿐 아니라 Netlify 함수 검색/패키징 목록에서 불필요한 함수와 API v1 잔존 여부를 확인한다.
+- 환경변수 삭제·인증키 길이 축소·비밀키의 NEXT_PUBLIC 접두사 변경으로 우회하지 않는다. `NEXT_PUBLIC_FIREBASE_API_KEY`는 일부 서버 인증 함수에서도 사용하므로 공개 접두사만 보고 Functions scope를 일괄 제거하지 않는다.
+- 환경변수 추가 전 범위와 런타임 용량 제한을 확인한다. 실제 설정값은 로그·문서·채팅에 남기지 않는다. 로컬 앱/Next 빌드는 원격 함수 생성 제한을 검증하지 못한다.
+
+### 수정 후 회귀 절차
+
+1. 함수 검색 목록에서 `cors`, `push-shared`가 사라지고 실제 진입점만 API v2로 남는지 확인한다. Next 어댑터가 생성하는 서버 함수도 별도로 검사한다.
+2. 타입 검사·보안/성능 테스트 및 Netlify 패키징을 확인한다. CORS preflight와 공통 푸시 코드의 import가 유지되는지 확인한다.
+3. 승인된 테스트 배포에서 HTTP 400이 사라지고 인증/일기/알림 동작이 유지되는지 확인한다. 배포 성공은 별도 DB 보안 규칙 검증의 대체가 아니다.
+
+### 로컬 확인 결과
+
+- Netlify 실제 `listFunctions`와 `zipFunctions`(`nodeBundler: nft`, Node 22 대상 설정) 모두 함수 23개/API v2만 반환했다. `cors`, `push-shared`의 독립 함수 패키지는 생성되지 않았다. 의존 모듈로는 정상 포함된다. 임시 패키지는 `/private/tmp/dreamary-netlify-package-2a1x07`에 생성했으며 업로드하지 않았다.
+- `npm run test:netlify` 3개, `npm run test:security` 18개, `npm run test:performance` 15개 통과. `npm run build` 및 빌드 후 `npx tsc --noEmit` 검증을 수행했다. `.next/types`를 사용하는 타입 검사는 Next 빌드와 동시에 실행하지 않는다(동시 실행 시 생성 파일이 교체되어 TS6053 오탐 발생).
+- 이번 수정은 서버 모듈 위치/배포 검사만 변경하므로 앱 재설치가 필요하지 않다. 실제 Netlify 업로드 성공, 최신 Next 어댑터 생성 함수, 실제 환경값을 포함한 원격 동작은 다음 테스트 배포에서 확인한다. 과거 로컬 어댑터 5.15.13 산출물의 서버 함수는 최신 방식이었으나 이번 원격 산출물을 확인한 것은 아니다.
+- 수정된 코드가 배포 소스에 반영되어야 한다. 예전 실패 배포의 같은 커밋을 단순 Retry하면 로컬 수정이 포함되지 않는다. 사용자 환경변수 삭제/축소나 DB 권한 초기화는 하지 않는다.
+
 ## 2026-09-10 Firestore 전체 공개 규칙·서버/클라이언트 인증 연동 보완 — 운영 미반영
 
 ### 증상·근본 원인

@@ -1,5 +1,5 @@
 import type { Config } from "@netlify/functions";
-import { corsHeaders } from './cors';
+import { corsHeaders } from '../shared/cors';
 
 export const config: Config = {
   path: "/api/admin/logout"

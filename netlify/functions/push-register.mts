@@ -1,7 +1,7 @@
 import type { Config } from "@netlify/functions";
 import { FieldValue } from 'firebase-admin/firestore';
-import { corsHeaders } from './cors';
-import { buildDiaryPushCandidates, getFirebaseAdminServices, getNextKst8Pm, getTodayKstDateString, getTomorrowKst8Pm, sanitizeDocId, toAdminTimestamp, verifyFirebaseIdTokenRest } from './push-shared.mts';
+import { corsHeaders } from '../shared/cors';
+import { buildDiaryPushCandidates, getFirebaseAdminServices, getNextKst8Pm, getTodayKstDateString, getTomorrowKst8Pm, sanitizeDocId, toAdminTimestamp, verifyFirebaseIdTokenRest } from '../shared/push-shared.mts';
 
 export const config: Config = {
   path: "/api/push/register"

@@ -1,5 +1,5 @@
 import type { Config } from "@netlify/functions";
-import { corsHeaders } from './cors';
+import { corsHeaders } from '../shared/cors';
 import { createAdminSession } from '../../src/lib/server/adminSession';
 import { createHash, timingSafeEqual } from 'node:crypto';
 

@@ -1,3 +1,4 @@
+// Shared module: keep outside functions/ so Netlify does not deploy it as a function.
 import { cert, getApps, initializeApp } from 'firebase-admin/app';
 import { getFirestore, Timestamp } from 'firebase-admin/firestore';
 import { getMessaging } from 'firebase-admin/messaging';

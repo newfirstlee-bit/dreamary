@@ -2,7 +2,7 @@ import type { Config } from "@netlify/functions";
 import { FieldValue } from 'firebase-admin/firestore';
 import { Resend } from 'resend';
 import { adminDb } from '../../src/lib/firebase-admin';
-import { corsHeaders } from './cors';
+import { corsHeaders } from '../shared/cors';
 import { requireDataOwner, assertGuestActive, securityErrorResponse } from '../../src/lib/server/guestIdentity';
 import { DiaryAuthenticationError } from '../../src/lib/server/diaryAuthentication';
 

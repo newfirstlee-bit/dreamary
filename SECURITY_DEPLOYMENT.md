@@ -76,6 +76,7 @@ match /{document=**} {
 
 ## 로컬 검증
 
+- 2026-09-10 사용자 테스트 배포의 환경변수 4KB 초과에 대응해 보조파일 2개를 `netlify/shared/`로 분리했다. 실제 Netlify 로컬 함수 검색/패키징 결과는 API v2 함수 23개, 구형 함수 0개다. 빌드 사전 구조 검사와 회귀 테스트 3개를 추가했다. 환경변수 값·DB 권한은 변경하지 않았다. 수정된 소스를 올린 다음 원격 테스트 배포 성공 여부를 별도 확인해야 한다. 상세 원인과 절차는 `DEBUGGING.md` 최상단을 따른다.
 - `npm run test:security`: 실제 서명과 실제 TypeScript 핸들러, 메모리 DB를 사용하는 보안 회귀 테스트. 운영 DB/AI 호출 없음.
 - `npm run test:performance`: 기존 캐시·저장 응답·알림 후처리 회귀 테스트.
 - 2026-09-10 최신 코드로 `npm run check:app`(타입 검사 + 정적 앱 빌드), `npm run build`(웹/서버 빌드) 통과. iOS/Android `npx cap sync` 완료.

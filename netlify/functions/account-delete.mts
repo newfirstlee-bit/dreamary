@@ -1,5 +1,5 @@
 import type { Config } from "@netlify/functions";
-import { corsHeaders } from './cors';
+import { corsHeaders } from '../shared/cors';
 import { cleanupAccountData } from '../../src/lib/server/accountCleanup';
 
 export const config: Config = {

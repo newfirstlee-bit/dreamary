@@ -1,7 +1,7 @@
 import type { Config } from '@netlify/functions';
 import { randomInt } from 'node:crypto';
 import { adminDb } from '../../src/lib/firebase-admin';
-import { corsHeaders } from './cors';
+import { corsHeaders } from '../shared/cors';
 import { DiaryAuthenticationError } from '../../src/lib/server/diaryAuthentication';
 import { requireDataOwner, assertGuestActive, secretHash, securityErrorResponse } from '../../src/lib/server/guestIdentity';
 

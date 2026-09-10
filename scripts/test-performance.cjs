@@ -241,7 +241,7 @@ function diaryFixture(existing) {
     runTransaction: async action => action({ get: async target => target.get(), set: (_ref, diary) => { stored = diary; writes++; } }),
   };
   const { default: handler } = load('netlify/functions/diary.ts', {
-    '../../src/lib/firebase-admin': { adminDb: db }, './cors': { corsHeaders: {} },
+    '../../src/lib/firebase-admin': { adminDb: db }, '../shared/cors': { corsHeaders: {} },
     '../../src/lib/diaryIdentity': { getDiaryDailyDocId: () => 'daily' },
     '../../src/lib/koreanJosa': { applyKoreanJosa: value => value, formatKoreanNameTemplate: value => value },
     '../../src/lib/aiReplyGuard': { findUnexpectedLanguageSegments: () => [], getKoreanOnlyRetryInstruction: () => '' },

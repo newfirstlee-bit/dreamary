@@ -1,7 +1,7 @@
 import type { Config } from '@netlify/functions';
 import { adminDb } from '../../src/lib/firebase-admin';
 import { isAdminRequest } from '../../src/lib/server/adminSession';
-import { corsHeaders } from './cors';
+import { corsHeaders } from '../shared/cors';
 export const config: Config = { path: '/api/admin/topics-data' };
 export default async function handler(req: Request) {
   if (req.method !== 'POST') return new Response(null, { status: 405 });

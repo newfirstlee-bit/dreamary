@@ -1,7 +1,7 @@
 import type { Config } from "@netlify/functions";
 import { adminDb } from '../../src/lib/firebase-admin';
 import { Resend } from 'resend';
-import { corsHeaders } from './cors';
+import { corsHeaders } from '../shared/cors';
 import { randomInt } from 'node:crypto';
 
 export const config: Config = {

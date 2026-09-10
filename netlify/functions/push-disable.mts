@@ -1,7 +1,7 @@
 import type { Config } from "@netlify/functions";
 import { FieldValue } from 'firebase-admin/firestore';
-import { corsHeaders } from './cors';
-import { getFirebaseAdminServices, sanitizeDocId, verifyFirebaseIdTokenRest } from './push-shared.mts';
+import { corsHeaders } from '../shared/cors';
+import { getFirebaseAdminServices, sanitizeDocId, verifyFirebaseIdTokenRest } from '../shared/push-shared.mts';
 
 export const config: Config = {
   path: "/api/push/disable"

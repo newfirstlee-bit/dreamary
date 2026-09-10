@@ -4,7 +4,7 @@ import { isAdminRequest } from '../../src/lib/server/adminSession';
 import type { Topic } from '../../src/lib/db';
 import { readAdminTopics as getTopics } from '../../src/lib/server/adminTopics';
 const saveTopic = async (topic: Topic) => adminDb!.collection('topics').doc(topic.id).set(topic);
-import { corsHeaders } from './cors';
+import { corsHeaders } from '../shared/cors';
 
 export const config: Config = {
   path: "/api/admin/translate-topics"

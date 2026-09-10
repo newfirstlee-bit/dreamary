@@ -1,6 +1,6 @@
 import type { Config } from "@netlify/functions";
 import { adminDb } from '../../src/lib/firebase-admin';
-import { corsHeaders } from './cors';
+import { corsHeaders } from '../shared/cors';
 import { getDiaryDailyDocId } from '../../src/lib/diaryIdentity';
 import { applyKoreanJosa, formatKoreanNameTemplate } from '../../src/lib/koreanJosa';
 import { findUnexpectedLanguageSegments, getKoreanOnlyRetryInstruction } from '../../src/lib/aiReplyGuard';

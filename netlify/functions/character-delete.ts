@@ -1,6 +1,6 @@
 import type { Config } from '@netlify/functions';
 import { adminDb } from '../../src/lib/firebase-admin';
-import { corsHeaders } from './cors';
+import { corsHeaders } from '../shared/cors';
 import { requireDataOwner, assertGuestActive, securityErrorResponse } from '../../src/lib/server/guestIdentity';
 import { DiaryAuthenticationError } from '../../src/lib/server/diaryAuthentication';
 export const config: Config = { path: '/api/character/delete' };

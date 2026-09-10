@@ -1,6 +1,6 @@
 import type { Config } from "@netlify/functions";
-import { corsHeaders } from './cors';
-import { getFirebaseAdminServices, verifyFirebaseIdTokenRest } from './push-shared.mts';
+import { corsHeaders } from '../shared/cors';
+import { getFirebaseAdminServices, verifyFirebaseIdTokenRest } from '../shared/push-shared.mts';
 
 export const config: Config = {
   path: "/api/push/status"
