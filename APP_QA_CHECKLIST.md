@@ -11,8 +11,9 @@
 
 - `npm run check:app`: TypeScript 검사 후 앱 정적 빌드
 - `npm run test:performance`: 캐시 경합·저장 응답·사진 로딩·알림 후처리 회귀 테스트(실기기 확인은 별도)
-- 개발 웹·개발 앱 테스트 전에는 `ENVIRONMENT_GUIDE.md`를 확인하고 개발 Firebase·개발 Netlify 값을 사용한다.
-- 개발 빌드에서는 왼쪽 상단에 노란색 `개발` 딱지가 표시되고, 운영 빌드에서는 표시되지 않아야 한다.
+- 앱 연결 대상은 `app-build-targets.json`에서 확인한다. `check:app`/`build:app`은 PR #2 API를 쓰는 branch 앱, `build:app:release`는 운영 API를 쓰는 정식 앱이다. 현재 Firebase 프로젝트는 동일하며 별도 개발 DB로 오해하지 않는다.
+- 마이페이지 표시와 실제 번들의 API URL을 함께 확인한다. 테스트 앱은 `branch · PR2`, 정식 앱은 `release`다. 서버 `/api/data/session`이 없는 구버전 서버와 새 앱을 조합하지 않는다.
+- 로그인 인증 실패와 인증 후 계정 동기화 실패를 구분한다. 후속 API 404/500/권한 오류를 비밀번호 오류로 표시하면 안 된다. `npm run test:app-login`으로 설정/오류 분류 회귀를 확인한다.
 - `npx cap sync`: 최신 웹 결과물을 iOS·Android 프로젝트에 복사
 - 동적 상세 화면 이동은 `buildStaticEntityRoute()`를 사용하고 실제 ID query는 `useSearchParams()`로 반응형 조회한다. 렌더 시점의 `window.location.search`만 읽어 빌드용 ID `1`로 조회하면 안 된다.
 - `/api` 요청은 `apiFetch()` 또는 단발성 JSON용 `apiPostJson()`을 사용한다.

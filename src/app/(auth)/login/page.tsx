@@ -16,6 +16,7 @@ import { doc, setDoc } from '@/lib/dataFirestore';
 import { invalidateCharacterStore } from '@/store/useAppStore';
 import { getPendingDiaryPushOptIn } from '@/lib/diaryPush';
 import { useAuth } from '@/components/AuthContext';
+import { loginFailureKind, type LoginStage } from '@/lib/loginFailure';
 
 export default function LoginPage() {
   const router = useRouter();
@@ -31,6 +32,7 @@ export default function LoginPage() {
     e.preventDefault();
     setError('');
     setLoading(true);
+    let stage: LoginStage = 'credentials';
 
     try {
       const email = `${id}@dreamary.internal`;
@@ -38,6 +40,7 @@ export default function LoginPage() {
 
       // 로그인을 먼저 수행하여 UI 응답성 확보
       const credential = await signInWithEmailAndPassword(auth, email, password);
+      stage = 'account-sync';
       // Firebase SDK 상태와 React 인증 상태를 라우팅 전에 동일하게 맞춘다.
       // WKWebView에서는 onAuthStateChanged 반영이 다음 화면보다 늦을 수 있다.
       syncAuthUser(credential.user);
@@ -71,14 +74,18 @@ export default function LoginPage() {
           .catch(err => console.warn('Background ownership migration failed:', err));
       }
     } catch (err: any) {
-      console.error(err);
-      const code = typeof err?.code === 'string' ? err.code : '';
-      if (code === 'auth/network-request-failed' || code === 'auth/timeout') {
+      const kind = loginFailureKind(err, stage);
+      console.error('[login] failure', { stage, kind });
+      if (kind === 'network') {
         setError(locale === 'ja' ? 'ネットワーク接続を確認してからもう一度お試しください。' : '네트워크 연결을 확인한 뒤 다시 시도해주세요.');
-      } else if (code === 'auth/too-many-requests') {
+      } else if (kind === 'rate-limit') {
         setError(locale === 'ja' ? '試行回数が多すぎます。しばらく待ってからお試しください。' : '시도 횟수가 너무 많습니다. 잠시 후 다시 시도해주세요.');
-      } else {
+      } else if (kind === 'credentials') {
         setError(t('auth.loginFailed'));
+      } else if (kind === 'account-sync') {
+        setError(locale === 'ja' ? 'ログイン認証は完了しましたが、アカウント情報を読み込めませんでした。しばらくしてからもう一度お試しください。' : '로그인 인증은 완료됐지만 계정 정보를 불러오지 못했습니다. 잠시 후 다시 시도해주세요.');
+      } else {
+        setError(locale === 'ja' ? 'ログインサービスに接続できませんでした。しばらくしてからもう一度お試しください。' : '로그인 서비스에 연결하지 못했습니다. 잠시 후 다시 시도해주세요.');
       }
     } finally {
       setLoading(false);

@@ -1,0 +1,12 @@
+{
+  "branch": {
+    "apiUrl": "https://deploy-preview-2--dreamary.netlify.app",
+    "firebaseProjectId": "dreamary-1a9af",
+    "label": "branch · PR2"
+  },
+  "release": {
+    "apiUrl": "https://dreamary.netlify.app",
+    "firebaseProjectId": "dreamary-1a9af",
+    "label": "release"
+  }
+}
