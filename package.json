@@ -4,7 +4,7 @@
   "private": true,
   "scripts": {
     "dev": "NEXT_PUBLIC_APP_VERSION=$npm_package_version next dev -H 0.0.0.0",
-    "prebuild": "node scripts/check-netlify-functions.cjs",
+    "prebuild": "node scripts/check-netlify-functions.cjs && npm run test:server-runtime",
     "build": "NEXT_PUBLIC_APP_VERSION=$npm_package_version next build",
     "build:app": "NEXT_PUBLIC_BUILD_TARGET=app NEXT_PUBLIC_APP_VERSION=$npm_package_version next build",
     "check:app": "tsc --noEmit && npm run build:app",
@@ -12,6 +12,7 @@
     "test:security": "node --test scripts/test-security.cjs",
     "test:rules": "node --test scripts/test-firestore-rules.cjs",
     "test:netlify": "node --test scripts/test-netlify-functions.cjs",
+    "test:server-runtime": "node --no-experimental-require-module --test scripts/test-server-runtime.cjs",
     "cap:sync": "npx cap sync",
     "start": "next start",
     "lint": "next lint"
@@ -44,6 +45,11 @@
     "react-dom": "^18",
     "resend": "^6.17.2",
     "zustand": "^5.0.14"
+  },
+  "overrides": {
+    "jwks-rsa": {
+      "jose": "$jose"
+    }
   },
   "devDependencies": {
     "@types/mixpanel-browser": "^2.60.0",

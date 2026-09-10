@@ -2,6 +2,32 @@
 
 같은 장애가 반복되지 않도록 실제 기기에서 확인된 원인과 금지 설정을 기록한다.
 
+## 2026-09-10 guest/session 500 원인 확정 — 서버의 require(ESM) 제한과 인증 하위 의존성 충돌
+
+### 증상·근본 원인과 증거
+
+- 사용자 재현 뒤 진단 배포 `6aa226950210950009dd697b`의 03:41~03:43 UTC 로그에서 `stage: account-check`, `code: ERR_REQUIRE_ESM`, HTTP 500을 확인했다. 브라우저 입력/DB quota 오류가 아니라 Firebase Auth 로딩 단계의 실패다.
+- 실제 의존성은 `firebase-admin@14.1.0 → jwks-rsa@4.1.0 → jose@6.2.8`. `jwks-rsa/src/utils.js`는 ESM 전용 jose 6을 CommonJS `require()`로 불러온다. Node 22.23.2에 `--no-experimental-require-module`을 주고 `import('firebase-admin/auth')`를 실행하면 같은 `ERR_REQUIRE_ESM`이 재현된다. 바깥 import만 동적으로 바꿔도 내부 require는 그대로다.
+- AWS Lambda는 해당 실험적 기능을 기본 차단한다. 기존 로컬 검사는 기본 허용된 Node로 실행되어 통과했고, `[build.environment] NODE_OPTIONS`만으로 실제 함수 런타임에서도 활성화되었다고 가정한 것이 검증의 빈틈이었다. 실제 실패 런타임 전체 환경값을 출력/수정하지 않았다.
+- 최초 기기 연결뿐 아니라 `data-session` 토큰 발급, Auth SDK를 쓰는 탈퇴/비밀번호 관련 경로도 같은 의존성에 영향을 받는다. 인증 검증 자체를 삭제하는 것은 해결책이 아니다.
+- 근거: [AWS Node.js 런타임 문서](https://docs.aws.amazon.com/lambda/latest/dg/lambda-nodejs.html), [Firebase 저장소 동일 의존성 문제 보고](https://github.com/firebase/firebase-admin-node/issues/3181). 근본 원인 판정은 원격 로그와 로컬 제한 조건 재현을 함께 사용했다.
+
+### 해결 방법·재발 방지
+
+- `package.json`의 `overrides.jwks-rsa.jose = "$jose"`로 해당 하위 모듈만 프로젝트에서 이미 사용하는 CJS/ESM 겸용 `jose@4.15.9`로 통일했다. 잠금 파일에서 중첩 jose 6만 제거했다. Firebase Admin 자체/인증 로직/DB 권한/서명키/조회 횟수는 바꾸지 않는다. 개발·테스트·운영이 동일 잠금 파일과 공통 코드를 사용한다.
+- 초기 `npm install/update`는 기존 중첩 잠금을 유지했다. 따라서 `npm ls`만이 아니라 깨끗한 임시 폴더의 `npm ci --ignore-scripts`와 실제 제한 조건 테스트로 잠금 파일 재현성을 확인한다. 불필요한 전체 의존성 업데이트는 하지 않는다.
+- `test:server-runtime`은 실험적 require(ESM)을 명시적으로 끄고 실제 Firebase Auth의 require/import, 합성 서비스 계정의 custom-token 서명/클레임, 실제 JWKS 공개키 변환을 확인한다. 네트워크/실제 인증키/DB 읽기·쓰기 모두 0건이다.
+- `prebuild`에서 해당 검사를 필수 실행해 개발 PC에서만 우연히 통과하는 배포를 차단한다. 모의 SDK 보안 테스트나 Next 컴파일만으로 인증 런타임 검증을 대체하지 않는다. 진단 로그의 민감정보 금지는 유지한다.
+
+### 회귀 확인
+
+1. 변경 전 Node 22 제한 조건에서 SDK import 실패, 변경 후 같은 조건에서 런타임 테스트 2개 통과를 대조한다. 깨끗한 설치에서도 반복한다.
+2. 보안 19개/성능 15개/Netlify 구조 3개, 타입 검사·웹 빌드 및 실제 Netlify nft 패키징을 확인한다. 생성된 패키지에서도 Auth 로딩/서명을 같은 제한 조건으로 확인한다.
+3. 테스트 PR 새 배포 후 동일 브라우저/비로그인 기기키를 유지한 채 캐릭터 생성을 재시도한다. `guest/session`과 이어지는 `data/session` 성공 및 실제 저장을 확인한다. 사용자 기기키 삭제/전체 DB 초기화로 우회하지 않는다.
+4. 운영 서버·DB 규칙은 별도 승인 전 변경하지 않는다. 라이브러리 호환성 해결은 `SECURITY_DEPLOYMENT.md`의 공개 규칙 차단 항목 해결을 의미하지 않는다.
+
+- 로컬 검증 완료: 위 회귀 39개와 타입 검사/웹 빌드 통과. 깨끗한 임시 설치 및 실제 nft `guest-session.zip` 추출본에서 Node 22.23.2 제한 조건의 SDK 로딩/서명/JWKS 테스트 모두 통과했다. 함수 23개 모두 API v2 유지. 테스트 PR 반영 뒤 원격 캐릭터 생성 성공 여부는 사용자의 재시도로 최종 확인한다.
+
 ## 2026-09-10 테스트 배포 캐릭터 생성 전 guest/session HTTP 500 — 원인 조사 중
 
 ### 증상·확인된 사실
