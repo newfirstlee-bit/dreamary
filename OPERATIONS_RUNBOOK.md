@@ -15,7 +15,7 @@
 | 관리형 백업 예약 | 현재 서버 인증에 조회 권한이 없어 **미확인**. 백업 없음으로 단정하지 않음 |
 | 별도 테스트 Firebase | `dreamary-staging`으로 분리 완료. 합성 테스트는 `demo-dreamary-security` 로컬 에뮬레이터도 사용 |
 | 로컬 서버 환경 | Firebase Admin·ImgBB·메일 설정 존재 여부를 확인. 운영 Netlify에서는 기존 ImgBB 키를 서버 전용 `IMGBB_API_KEY`(builds/functions, secret)로 전환하고 `NEXT_PUBLIC_IMGBB_API_KEY`를 제거했다. APNs 키 묶음은 등록되어 있으나 실제 도착은 실기기 확인 필요 |
-| 실제 요금제·사용량·알림 수신자 | 사용자는 무료 범위 사용 중이라고 답변. 콘솔별 실제 사용량/알림 설정은 미확인 |
+| 실제 요금제·사용량·알림 수신자 | 사용자는 무료 범위 사용 중이라고 답변. 사용량은 수동 확인으로 결정. 콘솔별 알림 설정은 사용하지 않음 |
 
 설정 조회는 읽기 전용으로 수행했다. 사용자 일기·채팅 본문을 조회하거나 운영 DB를 수정하지 않았다. 증거는 `artifacts/operations-2026-09-11/firebase-settings-readonly.json`이다.
 

@@ -13,7 +13,7 @@
 - [x] 운영 Firestore 인덱스 15개 생성 및 READY 확인(2026-09-16).
 - [ ] 오류/비용 알림 수신 이메일과 월 예산·알림 임계값을 정해 Firebase·Netlify 콘솔에 등록.
 - [ ] 암호화 백업의 별도 보관 위치·백업 암호문구·복원 담당자를 정해 실제 운영 백업과 복원 리허설 수행.
-- [ ] GitHub 저장소에 `.github/workflows/verify.yml`을 push해 원격 CI 1회 실행하고 보호 규칙에 연결.
+- [x] GitHub 저장소에 `.github/workflows/verify.yml`을 push해 원격 CI 1회 실행(Verify run `35065744619`, success). 보호 규칙 연결은 GitHub 저장소 설정에서 별도 결정.
 - [ ] iOS·Android 알림 권한이 허용된 실기기에서 실제 푸시 도착을 확인.
 
 완료된 외부 설정:
