@@ -46,6 +46,7 @@ import { getLocalDateString } from '@/lib/dateString';
 import { DiarySaveResponse, savedDiaryForView } from '@/lib/diaryResult';
 
 interface DiaryCache {
+  todayStatusChecked?: boolean;
   dateString: string;
   authMode?: 'authenticated' | 'guest';
   characters: Character[];
@@ -386,7 +387,14 @@ function DiaryContent() {
     if (!activeCharId || activeCharId === 'dummy' || !userId || status === 'checking') return;
     const dateString = getLocalDateString();
     
-    const unsubscribe = subscribeTodayDiary(userId, activeCharId, dateString, setTodayDiary);
+    const unsubscribe = subscribeTodayDiary(userId, activeCharId, dateString, diary => {
+      setTodayDiary(diary);
+      // Keep the confirmed cache in step with server snapshots, including another device.
+      const cached = readUserCache<DiaryCache>(userId, 'diary');
+      if (cached?.dateString === dateString && cached.activeCharId === activeCharId) {
+        writeUserCache(userId, 'diary', { ...cached, todayDiary: diary });
+      }
+    });
     
     return () => unsubscribe();
   }, [activeCharId, userId, status]);
@@ -407,9 +415,12 @@ function DiaryContent() {
       && cacheAuthModeMatches;
 
     if (cachedDiary && hasUsableCache) {
-      const shouldKeepLoadingForFreshStatus = cachedRealCharacters.length > 0 && !cachedDiary.todayDiary;
+      const requestedCharacter = searchParams.get('charId');
+      const confirmedCache = cachedDiary.todayStatusChecked === true
+        && (!requestedCharacter || requestedCharacter === cachedDiary.activeCharId);
+      const shouldKeepLoadingForFreshStatus = !confirmedCache && cachedRealCharacters.length > 0 && !cachedDiary.todayDiary;
 
-      if (cachedRealCharacters.length === 1 && cachedDiary.todayDiary) {
+      if (cachedRealCharacters.length === 1 && cachedDiary.todayDiary && !requestedCharacter) {
         router.replace('/diary/history');
         return;
       }
@@ -421,6 +432,16 @@ function DiaryContent() {
       setTodayTopic(cachedDiary.todayTopic);
       setTodayDiary(cachedDiary.todayDiary);
       setLoading(shouldKeepLoadingForFreshStatus);
+      if (confirmedCache) {
+        const draft = loadDraft(cachedDiary.activeCharId, 'diary');
+        if (!cachedDiary.todayDiary && draft) {
+          setUserEntry(draft);
+          draftLoaded.current = true;
+        }
+        // The five-minute, owner/date/auth-scoped cache already contains a confirmed
+        // empty-or-saved result. Only the active-pair subscription stays live.
+        return;
+      }
     } else {
       setLoading(true);
     }
@@ -458,6 +479,7 @@ function DiaryContent() {
             setTodayTopic(dummyTopic);
           }
           writeUserCache<DiaryCache>(userId, 'diary', {
+            todayStatusChecked: true,
             dateString,
             authMode: currentAuthMode,
             characters: [dummyChar],
@@ -541,6 +563,7 @@ function DiaryContent() {
         setUserProfiles(profileMap);
 
         writeUserCache<DiaryCache>(userId, 'diary', {
+          todayStatusChecked: true,
           dateString,
           authMode: currentAuthMode,
           characters: chars,
@@ -586,7 +609,7 @@ function DiaryContent() {
     return () => {
       cancelled = true;
     };
-  }, [router, userId, status]);
+  }, [router, userId, status, loadCharacters, loadTopics, searchParams, t]);
 
   useEffect(() => {
     if (todayDiary && !todayDiary.isAdLocked && todayDiary.charReply) {

@@ -40,3 +40,15 @@ next-env.d.ts
 
 # Local Netlify folder
 .netlify
+
+# Encrypted operational exports belong outside source control
+/backups/
+*.drmbkp
+
+# Local deployment coordination
+.staging-deploy.lock
+
+# Local OTA bundles and native verification records
+/artifacts/ota-*/
+/.ota-private/
+/.ota-hosting/

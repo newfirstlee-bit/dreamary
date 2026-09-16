@@ -11,11 +11,11 @@ export async function diaryRequestHeaders(data: unknown, loginOnly = false): Pro
     if (loginOnly || typeof userId !== 'string') throw new Error('로그인이 필요합니다.');
     const token = await getGuestSession(userId);
     if (auth.currentUser || getStoredGuestUserId() !== userId) throw new Error('사용자 정보가 변경되었습니다. 다시 시도해주세요.');
-    return { Authorization: `Guest ${token}` };
+    return { 'X-Client-Protocol': '1', Authorization: `Guest ${token}` };
   }
   if (userId !== user.uid) throw new Error('사용자 정보가 변경되었습니다. 일기 화면을 다시 열어주세요.');
   const token = await user.getIdToken();
   // A token refresh can complete after logout/account switching.
   if (auth.currentUser !== user) throw new Error('로그인 상태가 변경되었습니다. 다시 시도해주세요.');
-  return { Authorization: `Bearer ${token}` };
+  return { 'X-Client-Protocol': '1', Authorization: `Bearer ${token}` };
 }

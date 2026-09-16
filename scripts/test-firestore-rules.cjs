@@ -54,9 +54,9 @@ test('rules: owner-constrained queries work; broad or another-owner lists fail',
 
 test('rules: credentials, codes, attempts, reports and push collections are server-only', async () => {
   const owner = client(alice);
-  for (const name of ['guestCredentials', 'guestBackupCodes', 'guestBackupAttempts', 'backupCodes', 'reports', 'pushDevices', 'diaryPushTargets']) {
-    const ref = sdk.doc(owner, name, alice);
-    await seed(name + '/' + alice, { secret: 'synthetic' });
+  for (const name of ['guestCredentials', 'guestBackupCodes', 'guestBackupAttempts', 'backupCodes', 'reports', 'pushDevices', 'diaryPushTargets', 'dataJobs', 'accountStates', 'pairCreationLocks', 'imageUploads', 'imageDeletionQueue', 'aiRequests', 'operationUsage']) {
+    const ref = sdk.doc(owner, name, 'protected-' + alice);
+    await seed(name + '/protected-' + alice, { secret: 'synthetic' });
     await denied(sdk.getDoc(ref));
     await denied(sdk.setDoc(ref, { secret: 'overwrite' }));
     await denied(sdk.deleteDoc(ref));
@@ -67,7 +67,8 @@ test('rules: guest data identity works without UI login; transfer locks guest wr
   await seed('guestCredentials/' + guest, { secretHash: 'synthetic' });
   const db = client('guest:' + guest, { dreamaryOwner: guest, dreamaryGuest: true });
   const id = 'character-' + suffix, ref = sdk.doc(db, 'characters', id);
-  await sdk.setDoc(ref, { id, userId: guest, name: 'guest' });
+  await denied(sdk.setDoc(ref, { id, userId: guest, name: 'guest' }));
+  await seed('characters/' + id, { id, userId: guest, name: 'guest' });
   await sdk.setDoc(sdk.doc(db, 'users', id), { id, name: 'profile' });
   assert.equal((await sdk.getDoc(ref)).data().userId, guest);
   await denied(sdk.updateDoc(ref, { userId: alice }));
@@ -99,4 +100,17 @@ test('rules: account metadata is owner-only; topics are public read but not publ
   await seed('topics/' + topic, { id: topic, content: 'public question' });
   assert.ok((await sdk.getDoc(sdk.doc(anonymous, 'topics', topic))).exists());
   await denied(sdk.setDoc(sdk.doc(owner, 'topics', topic), { content: 'tampered' }));
+});
+
+test('rules: deletion state blocks fresh writes and server job flags cannot be cleared by clients', async () => {
+  const uid = 'closing-' + suffix, id = 'closing-char-' + suffix, db = client(uid);
+  await seed('characters/' + id, { id, userId: uid, deleting: true });
+  await denied(sdk.setDoc(sdk.doc(db, 'users', id), { id, name: 'late profile' }));
+  await denied(sdk.updateDoc(sdk.doc(db, 'characters', id), { deleting: false }));
+  await seed('characters/' + id, { id, userId: uid, deleting: false, chatClearing: true });
+  await denied(sdk.setDoc(sdk.doc(db, 'chatMessages', 'closing-message-' + suffix), { id: 'closing-message-' + suffix, userId: uid, characterId: id, role: 'user', content: 'late' }));
+  await seed('characters/' + id, { id, userId: uid });
+  await seed('accountStates/' + uid, { deleting: true });
+  await denied(sdk.setDoc(sdk.doc(db, 'accounts', uid), { id: 'recreate' }));
+  await denied(sdk.updateDoc(sdk.doc(db, 'characters', id), { name: 'late edit' }));
 });

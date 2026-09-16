@@ -2,7 +2,7 @@
 
 import React, { CSSProperties, ReactNode, useEffect, useRef, useState } from 'react';
 import { ImageKind, reportImageLoadFailure } from '@/lib/imageDiagnostics';
-import { resolveImageFromCacheOrNetwork } from '@/lib/imageCache';
+import { readCachedImage, warmImageCache } from '@/lib/imageCache';
 
 interface ResilientImageProps {
   src: string;
@@ -24,33 +24,30 @@ export default function ResilientImage({
   fallback = null,
 }: ResilientImageProps) {
   const [image, setImage] = useState<{ source: string; display: string; failed: boolean } | null>(null);
-  const generation = useRef(0);
+  const activeSource = useRef(src);
+  const cachedObjectUrl = useRef<string | null>(null);
   const remote = /^https?:\/\//i.test(src);
 
   useEffect(() => {
-    const request = ++generation.current;
-    let objectUrl: string | null = null;
+    activeSource.current = src;
+    cachedObjectUrl.current = null;
     if (remote) {
-      // One pipeline; do not download the remote img alongside a cache fetch.
-      void resolveImageFromCacheOrNetwork(src).then(blob => {
-        if (generation.current !== request) return;
-        objectUrl = URL.createObjectURL(blob);
-        setImage({ source: src, display: objectUrl, failed: false });
-      }).catch(() => {
-        if (generation.current !== request) return;
-        // Hosts may allow img loading but disallow cross-origin fetch.
-        setImage({ source: src, display: src, failed: false });
-      });
+      // Show the newly saved remote URL immediately. Cache warming must never
+      // block the profile screen or make a valid image look like a default avatar.
+      setImage({ source: src, display: src, failed: false });
+      void warmImageCache(src);
     }
     return () => {
-      generation.current++;
       // Never revoke a caller-owned blob URL.
-      if (objectUrl) URL.revokeObjectURL(objectUrl);
+      if (cachedObjectUrl.current) URL.revokeObjectURL(cachedObjectUrl.current);
+      cachedObjectUrl.current = null;
     };
   }, [src, remote]);
 
   const current = image?.source === src ? image : null;
-  const displaySrc = remote ? current?.display : src;
+  // Derive the first remote render directly from the URL; the effect only
+  // warms cache and records the current source for subsequent error recovery.
+  const displaySrc = remote ? (current?.display ?? src) : src;
   if (!displaySrc || current?.failed) return <>{fallback}</>;
 
   return (
@@ -66,6 +63,26 @@ export default function ResilientImage({
         if (remote && displaySrc.startsWith('blob:')) {
           // A damaged/undecodable cache entry must still get one original-URL attempt.
           setImage({ source: src, display: src, failed: false });
+          return;
+        }
+        if (remote && displaySrc === src) {
+          // If the network image failed (including while offline), use a fresh
+          // cached blob when available before showing the fallback.
+          void readCachedImage(src).then(blob => {
+            if (activeSource.current !== src) return;
+            if (blob) {
+              const blobUrl = URL.createObjectURL(blob);
+              cachedObjectUrl.current = blobUrl;
+              setImage({ source: src, display: blobUrl, failed: false });
+              return;
+            }
+            reportImageLoadFailure(src, kind, 'Image decode failed');
+            setImage({ source: src, display: src, failed: true });
+          }).catch(() => {
+            if (activeSource.current !== src) return;
+            reportImageLoadFailure(src, kind, 'Image decode failed');
+            setImage({ source: src, display: src, failed: true });
+          });
           return;
         }
         reportImageLoadFailure(src, kind, 'Image decode failed');

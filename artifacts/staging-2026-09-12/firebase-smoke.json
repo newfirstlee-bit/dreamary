@@ -1,0 +1,9 @@
+{
+  "project": "dreamary-staging",
+  "completedAt": "2026-09-15T13:29:07.735Z",
+  "checks": [],
+  "cleanupComplete": true,
+  "cleanupErrors": [],
+  "failure": "Firebase check failed: app/invalid-credential",
+  "scope": "Direct Firebase verification; deployed application APIs not exercised."
+}

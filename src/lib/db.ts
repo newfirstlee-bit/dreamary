@@ -1,10 +1,13 @@
+import { CHAT_PAGE_SIZE } from './productLimits';
 import { auth, db } from './firebase';
 import { profileReadCache, topicReadCache } from './dataReadCache';
-import { getStoredGuestUserId, retireGuestIdentity, getUserId } from './auth';
-import { collection, doc, getDocs, setDoc, updateDoc, deleteDoc, getDoc, query, where, orderBy, limit, getCountFromServer, onSnapshot, runTransaction, startAfter, QueryDocumentSnapshot, DocumentData } from './dataFirestore';
+import { generateUUID, getStoredGuestUserId, retireGuestIdentity, getUserId } from './auth';
+import { collection, doc, getDocs, setDoc, updateDoc, deleteDoc, getDoc, query, where, orderBy, limit, getCountFromServer, onSnapshot, runTransaction, startAfter, endAt, QueryDocumentSnapshot, DocumentData } from './dataFirestore';
 import { getDiaryDailyDocId } from './diaryIdentity';
 import { getGuestSession } from './guestSession';
 import { apiPostJson } from './api';
+import { clearUserCache } from './appCache';
+import { copyRecentCharacterOrder } from './characterOrder';
 
 export interface OwnershipMigration {
   sourceUserId: string;
@@ -27,19 +30,30 @@ export const completeOwnershipMigration = (migration: OwnershipMigration, target
         sourceUUID: migration.sourceUserId, uid: targetUserId,
       }, { headers: { 'X-Guest-Authorization': `Guest ${migration.token}` } });
       if (result.done) { retireGuestIdentity(migration.sourceUserId); return; }
+      await new Promise(resolve => setTimeout(resolve, 250));
     }
-    throw new Error('이전할 데이터가 많습니다. 다시 로그인하여 이어서 진행해주세요.');
+    throw new Error('데이터 이전을 서버에서 계속 진행하고 있습니다. 잠시 후 다시 로그인해주세요.');
   })().finally(() => migrations.delete(key));
   migrations.set(key, request);
   return request;
 };
 
-export async function migrateGuestBackup(code: string, uid: string) {
+export type MigrationStage = 'diaries' | 'chatMessages' | 'images' | 'characters' | 'complete';
+export async function migrateGuestBackup(code: string, uid: string, onProgress?: (stage: MigrationStage) => void) {
+  onProgress?.('diaries');
   for (let page = 0; page < 100; page++) {
-    const result = await apiPostJson<{ done: boolean; sourceUUID: string }>('/api/backup/migrate', { code, uid });
-    if (result.done) { retireGuestIdentity(result.sourceUUID); return; }
+    const result = await apiPostJson<{ done: boolean; sourceUUID: string; stage?: MigrationStage }>('/api/backup/migrate', { code, uid, progressVersion: 1 });
+    if (typeof result.done !== 'boolean' || !result.sourceUUID) throw new Error('이전 상태를 확인할 수 없습니다. 다시 시도해주세요.');
+    if (result.stage) onProgress?.(result.stage);
+    if (result.done) {
+      clearUserCache(result.sourceUUID);
+      clearUserCache(uid);
+      copyRecentCharacterOrder(result.sourceUUID, uid);
+      retireGuestIdentity(result.sourceUUID);
+      return;
+    }
   }
-  throw new Error('이전할 데이터가 많습니다. 같은 백업 코드로 다시 시도해주세요.');
+  throw new Error('데이터 이전을 서버에서 계속 진행하고 있습니다. 잠시 후 같은 코드로 확인해주세요.');
 }
 
 export interface Character {
@@ -87,7 +101,7 @@ export interface ChatMessage {
 
 // Characters CRUD
 export const getCharactersByUser = async (userId: string): Promise<Character[]> => {
-  const q = query(collection(db, 'characters'), where('userId', '==', userId));
+  const q = query(collection(db, 'characters'), where('userId', '==', userId), limit(20));
   const snapshot = await getDocs(q);
   return snapshot.docs.map(doc => doc.data() as Character);
 };
@@ -97,10 +111,13 @@ export const getCharacter = async (id: string): Promise<Character | null> => {
   return d.exists() ? (d.data() as Character) : null;
 };
 
-export const saveCharacter = async (char: Character) => {
+export const saveCharacter = async (char: Character, profile?: UserProfile): Promise<Character> => {
   // Bind a new guest before creating its first remotely stored data.
   if (!auth.currentUser) await getGuestSession(char.userId);
-  await setDoc(doc(db, 'characters', char.id), char);
+  const result = await apiPostJson<{ character?: Character }>('/api/character/create', { character: char, ...(profile ? { profile } : {}) });
+  // Legacy callers without a profile remain compatible; onboarding requires the atomic server.
+  if (profile && !result.character) throw new Error('저장 서버 업데이트를 확인해주세요. 입력 내용은 유지됩니다.');
+  return result.character || char;
 };
 
 export const deleteMessage = async (msgId: string) => {
@@ -116,8 +133,9 @@ export const deleteCharacter = async (id: string) => {
   for (let page = 0; page < 100; page++) {
     const result = await apiPostJson<{ done: boolean }>('/api/character/delete', { userId, characterId: id });
     if (result.done) return;
+    await new Promise(resolve => setTimeout(resolve, 250));
   }
-  throw new Error('삭제할 데이터가 많습니다. 같은 캐릭터 삭제를 다시 시도해주세요.');
+  throw new Error('페어 삭제를 서버에서 계속 진행하고 있습니다. 잠시 후 다시 확인해주세요.');
 };
 
 // Users CRUD
@@ -150,6 +168,7 @@ export interface Topic {
 }
 
 export interface Diary {
+  answerNumber?: number;
   id: string;
   userId: string;
   characterId: string;
@@ -173,8 +192,10 @@ export { getDiaryDailyDocId };
 // Topics CRUD
 export const getTopics = async (): Promise<Topic[]> => {
   return topicReadCache.get('topics', async () => {
-    const snapshot = await getDocs(collection(db, 'topics'));
-    return snapshot.docs.map(doc => doc.data() as Topic).sort((a, b) => a.order - b.order);
+    const snapshot = await getDoc(doc(db, 'topicCatalog', 'current'));
+    const topics = snapshot.data()?.topics;
+    if (!Array.isArray(topics)) throw new Error('일기 주제를 준비 중입니다. 잠시 후 다시 시도해주세요.');
+    return topics as Topic[];
   });
 };
 
@@ -194,12 +215,6 @@ export const getTopicAnswerCount = async (topicId: string): Promise<number> => {
 };
 
 // Diaries CRUD
-export const getDiariesByUserAndChar = async (userId: string, characterId: string): Promise<Diary[]> => {
-  const q = query(collection(db, 'diaries'), where('userId', '==', userId), where('characterId', '==', characterId));
-  const snapshot = await getDocs(q);
-  return snapshot.docs.map(doc => doc.data() as Diary).sort((a, b) => b.createdAt - a.createdAt);
-};
-
 export const getDiariesByUserAndCharPage = async (
   userId: string,
   characterId: string,
@@ -209,16 +224,30 @@ export const getDiariesByUserAndCharPage = async (
   const constraints = [
     where('userId', '==', userId),
     where('characterId', '==', characterId),
-    limit(pageSize),
+    orderBy('createdAt', 'desc'),
+    orderBy('__name__', 'desc'),
+    limit(Math.max(1, Math.min(30, pageSize))),
   ];
   const q = cursor
     ? query(collection(db, 'diaries'), ...constraints, startAfter(cursor))
     : query(collection(db, 'diaries'), ...constraints);
   const snapshot = await getDocs(q);
+  const diaries = snapshot.docs.map(doc => doc.data() as Diary);
+  // Rank only the first result with one aggregate, then number this bounded page.
+  // Topic IDs/order may change and are not a user's answered-question count.
+  const rank = diaries.length ? await getDiaryAnswerNumber(diaries[0]) : 0;
   return {
-    diaries: snapshot.docs.map(doc => doc.data() as Diary),
-    nextCursor: snapshot.docs.length === pageSize ? snapshot.docs[snapshot.docs.length - 1] : null,
+    diaries: diaries.map((diary, index) => ({ ...diary, answerNumber: rank - index })),
+    nextCursor: snapshot.docs.length === Math.max(1, Math.min(30, pageSize)) ? snapshot.docs[snapshot.docs.length - 1] : null,
   };
+};
+
+export const getDiaryAnswerNumber = async (diary: Diary): Promise<number> => {
+  const snapshot = await getCountFromServer(query(collection(db, 'diaries'),
+    where('userId', '==', diary.userId), where('characterId', '==', diary.characterId),
+    orderBy('createdAt', 'asc'), orderBy('__name__', 'asc'),
+    endAt(diary.createdAt, doc(db, 'diaries', diary.id))));
+  return snapshot.data().count;
 };
 
 export const getAdjacentDiaryIds = async (
@@ -294,19 +323,6 @@ export const getDiaryCountByUserAndChar = async (userId: string, characterId: st
     console.warn('Diary count optimized query failed; skipping full diary fallback to protect Firestore quota.', error);
     return 0;
   }
-};
-
-export const subscribeDiaries = (userId: string, characterId: string, callback: (diaries: Diary[]) => void) => {
-  const q = query(
-    collection(db, 'diaries'),
-    where('userId', '==', userId),
-    where('characterId', '==', characterId)
-  );
-  return onSnapshot(q, (snapshot) => {
-    const d = snapshot.docs.map(doc => doc.data() as Diary);
-    d.sort((a, b) => b.createdAt - a.createdAt);
-    callback(d);
-  });
 };
 
 export const subscribeTodayDiary = (
@@ -391,62 +407,32 @@ export const getCharacterById = async (id: string): Promise<Character | null> =>
 };
 
 // Chat CRUD
-export const getChatMessages = async (userId: string, characterId: string): Promise<ChatMessage[]> => {
-  const q = query(
-    collection(db, 'chatMessages'),
-    where('userId', '==', userId),
-    where('characterId', '==', characterId)
-  );
+export interface ChatPage {
+  messages: ChatMessage[];
+  nextCursor: QueryDocumentSnapshot<DocumentData> | null;
+}
+export const getChatMessagesPage = async (userId: string, characterId: string, cursor?: QueryDocumentSnapshot<DocumentData> | null): Promise<ChatPage> => {
+  const constraints = [where('userId', '==', userId), where('characterId', '==', characterId),
+    orderBy('createdAt', 'desc'), orderBy('__name__', 'desc'), limit(CHAT_PAGE_SIZE)];
+  const q = cursor ? query(collection(db, 'chatMessages'), ...constraints, startAfter(cursor))
+    : query(collection(db, 'chatMessages'), ...constraints);
   const snapshot = await getDocs(q);
-  const msgs = snapshot.docs.map(doc => doc.data() as ChatMessage);
-  return msgs.sort((a: any, b: any) => (a.createdAt || a.timestamp || 0) - (b.createdAt || b.timestamp || 0));
+  return { messages: snapshot.docs.map(d => d.data() as ChatMessage).reverse(),
+    nextCursor: snapshot.size === CHAT_PAGE_SIZE ? snapshot.docs[snapshot.size - 1] : null };
 };
+export const getChatMessages = async (userId: string, characterId: string): Promise<ChatMessage[]> =>
+  (await getChatMessagesPage(userId, characterId)).messages;
 
 export const getLatestChatMessage = async (userId: string, characterId: string): Promise<ChatMessage | null> => {
-  try {
-    const q = query(
-      collection(db, 'chatMessages'),
-      where('userId', '==', userId),
-      where('characterId', '==', characterId),
-      orderBy('createdAt', 'desc'),
-      limit(1)
-    );
-    const snapshot = await getDocs(q);
-    if (snapshot.empty) return null;
-    return snapshot.docs[0].data() as ChatMessage;
-  } catch (error) {
-    console.warn('Latest chat optimized query failed; using bounded fallback to protect Firestore quota.', error);
-  }
-
-  try {
-    const q = query(
-      collection(db, 'chatMessages'),
-      where('userId', '==', userId),
-      where('characterId', '==', characterId),
-      limit(30)
-    );
-    const snapshot = await getDocs(q);
-    if (snapshot.empty) return null;
-    const messages = snapshot.docs.map(doc => doc.data() as ChatMessage);
-    messages.sort((a, b) => (b.createdAt || b.timestamp || 0) - (a.createdAt || a.timestamp || 0));
-    return messages[0] || null;
-  } catch (fallbackError) {
-    console.warn('Latest chat bounded fallback failed.', fallbackError);
-    return null;
-  }
+  const snapshot = await getDocs(query(collection(db, 'chatMessages'), where('userId', '==', userId),
+    where('characterId', '==', characterId), orderBy('createdAt', 'desc'), limit(1)));
+  return snapshot.empty ? null : snapshot.docs[0].data() as ChatMessage;
 };
 
-export const subscribeChatMessages = (userId: string, characterId: string, callback: (msgs: ChatMessage[]) => void) => {
-  const q = query(
-    collection(db, 'chatMessages'),
-    where('userId', '==', userId),
-    where('characterId', '==', characterId)
-  );
-  return onSnapshot(q, (snapshot) => {
-    const msgs = snapshot.docs.map(doc => doc.data() as ChatMessage);
-    msgs.sort((a: any, b: any) => (a.createdAt || a.timestamp || 0) - (b.createdAt || b.timestamp || 0));
-    callback(msgs);
-  });
+export const subscribeChatMessages = (userId: string, characterId: string, callback: (msgs: ChatMessage[]) => void, onError?: (error: Error) => void) => {
+  const q = query(collection(db, 'chatMessages'), where('userId', '==', userId),
+    where('characterId', '==', characterId), orderBy('createdAt', 'desc'), orderBy('__name__', 'desc'), limit(CHAT_PAGE_SIZE));
+  return onSnapshot(q, snapshot => callback(snapshot.docs.map(d => d.data() as ChatMessage).reverse()), onError);
 };
 
 export const saveChatMessage = async (message: ChatMessage) => {
@@ -457,20 +443,21 @@ export const updateChatMessage = async (msgId: string, content: string) => {
   await updateDoc(doc(db, 'chatMessages', msgId), { content });
 };
 
-export const deleteChatMessages = async (userId: string, characterId: string) => {
-  const q = query(
-    collection(db, 'chatMessages'),
-    where('userId', '==', userId),
-    where('characterId', '==', characterId)
-  );
-  const snapshot = await getDocs(q);
-  const deletePromises = snapshot.docs.map(d => deleteDoc(d.ref));
-  await Promise.all(deletePromises);
-};
-
-export const getMessageByRequestId = async (requestId: string): Promise<ChatMessage | null> => {
-  const q = query(collection(db, 'chatMessages'), where('requestId', '==', requestId));
-  const snapshot = await getDocs(q);
-  if (snapshot.empty) return null;
-  return snapshot.docs[0].data() as ChatMessage;
+const chatDeletions = new Map<string, Promise<void>>();
+export const deleteChatMessages = (userId: string, characterId: string): Promise<void> => {
+  const key = `chat_delete_${userId}_${characterId}`;
+  const running = chatDeletions.get(key);
+  if (running) return running;
+  const task = (async () => {
+  const requestId = localStorage.getItem(key) || generateUUID();
+  localStorage.setItem(key, requestId);
+  for (let page = 0; page < 100; page++) {
+    const result = await apiPostJson<{ done: boolean }>('/api/chat/delete', { userId, characterId, requestId });
+    if (result.done) { localStorage.removeItem(key); return; }
+    await new Promise(resolve => setTimeout(resolve, 250));
+  }
+  throw new Error('대화 삭제를 서버에서 계속 진행하고 있습니다. 잠시 후 다시 확인해주세요.');
+  })().finally(() => chatDeletions.delete(key));
+  chatDeletions.set(key, task);
+  return task;
 };

@@ -82,8 +82,8 @@ export default function AccountDeletionPage() {
       <main className={`app-container full-page status-surface-white ${styles.page}`}>
         <section className={styles.success}>
           <div className={styles.successIcon} aria-hidden="true">✓</div>
-          <h1>계정 삭제가 완료되었습니다</h1>
-          <p>Dreamary 계정과 계정에 연결된 캐릭터 설정, 채팅 및 일기 데이터가 삭제되었습니다.</p>
+          <h1>계정 삭제가 접수되었습니다</h1>
+          <p>계정 이용이 중지되었으며 연결된 데이터는 순차적으로 삭제됩니다. 이 화면을 닫아도 계속 처리됩니다.</p>
           <Link className={styles.homeLink} href="/">Dreamary 홈으로</Link>
         </section>
       </main>

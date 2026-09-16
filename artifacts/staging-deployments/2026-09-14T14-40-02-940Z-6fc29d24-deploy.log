@@ -1,0 +1,10 @@
+{
+  "site_id": "12c6d1e4-6439-4cf9-b3e2-a27cf0932e58",
+  "site_name": "dreamary-staging",
+  "deploy_id": "6aa80755dbe569052da330a5",
+  "deploy_url": "https://6aa80755dbe569052da330a5--dreamary-staging.netlify.app",
+  "logs": "https://app.netlify.com/projects/dreamary-staging/deploys/6aa80755dbe569052da330a5",
+  "function_logs": "https://app.netlify.com/projects/dreamary-staging/logs/functions",
+  "edge_function_logs": "https://app.netlify.com/projects/dreamary-staging/logs/edge-functions",
+  "url": "https://dreamary-staging.netlify.app"
+}

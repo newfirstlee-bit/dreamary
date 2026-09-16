@@ -65,21 +65,21 @@ export default function Home() {
   const [unwrittenChars, setUnwrittenChars] = useState<Set<string>>(new Set());
   const [charTopics, setCharTopics] = useState<Record<string, Topic | null>>({});
   const [userProfiles, setUserProfiles] = useState<Record<string, UserProfile | null>>({});
-  const [latestChat, setLatestChat] = useState<ChatMessage | null>(null);
+  const [rawLatestChat, setLatestChat] = useState<ChatMessage | null>(null);
   const [initialPingCharIds, setInitialPingCharIds] = useState<Set<string>>(new Set());
-  const [displayBgImage, setDisplayBgImage] = useState<string | null>(null);
+  const [displayBgImage, setDisplayBgImage] = useState<{ owner: string; character: string; source: string; url: string } | null>(null);
 
   const { loadCharacters, loadTopics } = useAppStore();
 
   const baseUserId = useUserId();
-  const userId = typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('demo') === 'true' 
-    ? '4b0b39a0-d691-4f5d-b562-0fc49a02e790' 
-    : baseUserId;
-  const selectedCharForBackground = characters.find(c => c.id === selectedCharId) || characters[0] || null;
+  const userId = baseUserId;
+  const latestChat = rawLatestChat?.userId === userId && rawLatestChat.characterId === selectedCharId ? rawLatestChat : null;
+  const selectedCharForBackground = characters.find(c => c.id === selectedCharId && c.userId === userId) || null;
   const targetBgImage = selectedCharForBackground?.homeBackgroundImage || selectedCharForBackground?.image || null;
 
   useEffect(() => {
     let cancelled = false;
+    let ownedUrl: string | null = null;
 
     if (!targetBgImage) {
       setDisplayBgImage(null);
@@ -90,7 +90,10 @@ export default function Home() {
 
     preloadImage(targetBgImage, 'home_background')
       .then(resolved => {
-        if (!cancelled) setDisplayBgImage(resolved);
+        if (!cancelled && resolved && userId && selectedCharId) {
+          ownedUrl = URL.createObjectURL(resolved);
+          setDisplayBgImage({ owner: userId, character: selectedCharId, source: targetBgImage, url: ownedUrl });
+        }
       })
       .catch(() => {
         if (!cancelled) setDisplayBgImage(null);
@@ -98,8 +101,9 @@ export default function Home() {
 
     return () => {
       cancelled = true;
+      if (ownedUrl) URL.revokeObjectURL(ownedUrl);
     };
-  }, [targetBgImage]);
+  }, [targetBgImage, userId, selectedCharId]);
 
   useEffect(() => {
     if (characters.length === 0) return;
@@ -108,6 +112,7 @@ export default function Home() {
 
   useEffect(() => {
     if (authLoading || !userId) return;
+    let cancelled = false;
 
     // 첫 실행만 교환일기에서 시작하고, 사용자가 홈을 누른 뒤에는 홈 이동을 존중합니다.
     if (!user && !sessionStorage.getItem('has_redirected_to_diary')) {
@@ -132,14 +137,8 @@ export default function Home() {
       try {
         if (!cachedHome) setLoading(true);
         setLoadError(null);
-        // 데모 링크 처리 (?demo=true)
-        if (typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('demo') === 'true') {
-          localStorage.setItem('dreamary_user_id', userId);
-          // 쿠키도 함께 업데이트해줍니다
-          document.cookie = "dreamary_user_id=" + userId + "; path=/; max-age=31536000";
-        }
-
         const rawChars = await withTimeout(loadCharacters(userId, status === 'authenticated'));
+        if (cancelled) return;
         const chars = sortCharactersByRecent(rawChars, userId);
         
         const hasCharacter = chars.length > 0 && chars[0]?.id !== 'dummy';
@@ -175,6 +174,7 @@ export default function Home() {
             } catch (err) {
               console.error("Failed to fetch topics for dummy:", err);
             }
+            if (cancelled) return;
             if (topics.length > 0) {
               setCharTopics({ dummy: topics[0] });
               writeUserCache<HomeCache>(userId, 'home', {
@@ -225,6 +225,7 @@ export default function Home() {
             chars.map((c, index) => todayDiaries[index] ? Promise.resolve(0) : getDiaryCountByUserAndChar(userId, c.id))
           ));
           const selectedProfile = await withTimeout(getUserProfile(initialCharId));
+          if (cancelled) return;
           newUserProfiles[initialCharId] = selectedProfile;
 
           for (let i = 0; i < chars.length; i++) {
@@ -254,36 +255,9 @@ export default function Home() {
           });
         }
       } catch (err) {
+        if (cancelled) return;
         console.error("Failed to load user data:", err);
         if (cachedHome) {
-          setLoading(false);
-          return;
-        }
-        if (!user) {
-          const dummyChar: Character = {
-            id: 'dummy',
-            userId,
-            name: t('dummy.charName') || '드림캐',
-            feeling: '',
-            title: '',
-            exampleChat: '',
-            negative: '',
-            createdAt: Date.now(),
-            dDayStartDate: Date.now()
-          };
-          setCharacters([dummyChar]);
-          setSelectedCharId('dummy');
-          setUnwrittenChars(new Set(['dummy']));
-          setCharTopics({
-            dummy: { id: 'dummy', order: 1, content: t('dummy.firstTopic') || '오늘 하루는 어땠어?' } as Topic
-          });
-          writeUserCache<HomeCache>(userId, 'home', {
-            characters: [dummyChar],
-            selectedCharId: 'dummy',
-            unwrittenCharIds: ['dummy'],
-            charTopics: { dummy: { id: 'dummy', order: 1, content: t('dummy.firstTopic') || '오늘 하루는 어땠어?' } as Topic },
-            userProfiles: {}
-          });
           setLoading(false);
           return;
         }
@@ -293,10 +267,13 @@ export default function Home() {
     };
     
     init();
+    return () => { cancelled = true; };
   }, [authLoading, user, userId, status, retryCount, router]);
 
   
   useEffect(() => {
+    let cancelled = false;
+    setLatestChat(null);
     if (selectedCharId) {
       if (selectedCharId === 'dummy') {
         setLatestChat({
@@ -317,6 +294,7 @@ export default function Home() {
             setInitialPingCharIds(prev => new Set(prev).add(selectedCharId));
           }
           const latestMessage = await getLatestChatMessage(userId!, selectedCharId);
+          if (cancelled) return;
           if (latestMessage) {
             setLatestChat(latestMessage);
             setInitialPingCharIds(prev => {
@@ -336,6 +314,7 @@ export default function Home() {
                 userProfile: profile,
                 userId: userId!,
               });
+              if (cancelled) return;
               setLatestChat({
                 id: data.savedId || Date.now().toString(),
                 userId: userId!,
@@ -352,6 +331,7 @@ export default function Home() {
             }
           }
         } catch (e) {
+          if (cancelled) return;
           console.error("Failed to fetch latest chat", e);
           setInitialPingCharIds(prev => {
             const next = new Set(prev);
@@ -360,8 +340,11 @@ export default function Home() {
           });
         }
       };
+      const preview = userId ? readUserCache<ChatMessage>(userId, 'chat-preview:' + selectedCharId) : null;
+      if (preview?.userId === userId && preview?.characterId === selectedCharId) setLatestChat(preview);
       fetchLatestChat();
     }
+    return () => { cancelled = true; };
   }, [selectedCharId, userId]);
 
   useEffect(() => {
@@ -423,7 +406,8 @@ export default function Home() {
     };
   }, [selectedCharId, userId, userProfiles]);
 
-  const selectedChar = characters.find(c => c.id === selectedCharId) || characters[0];
+  const selectedChar = characters.find(c => c.id === selectedCharId && c.userId === userId)
+    || characters.find(c => c.userId === userId);
 
   if (authError || loadError) {
     return (
@@ -442,7 +426,7 @@ export default function Home() {
     );
   }
 
-  if (loading) {
+  if (loading || status === 'checking' || characters.some(char => char.userId !== userId)) {
     return (
       <div className="app-container" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
         <Loader2 className="animate-spin" size={48} color="var(--point-color)" style={{ animation: 'spin 2s linear infinite' }} />
@@ -461,7 +445,8 @@ export default function Home() {
   };
 
   const dDay = calculateDDay();
-  const bgImage = displayBgImage;
+  const bgImage = displayBgImage?.owner === userId && displayBgImage.character === selectedCharId
+    && displayBgImage.source === targetBgImage ? displayBgImage.url : null;
   const hasBg = !!bgImage;
   const isLightMode = selectedChar?.homeTheme === 'light';
   const textColor = hasBg ? (isLightMode ? 'var(--gray-800)' : 'white') : 'var(--gray-800)';
@@ -595,7 +580,7 @@ export default function Home() {
                     if (selectedChar?.id === 'dummy') {
                       trackEvent('locked_feature_tapped', { feature_name: 'settings', screen: 'home' });
                       router.push('/onboarding?skip=true&entry_point=home_settings');
-                  } else {
+                  } else if (selectedChar) {
                       router.push(buildStaticEntityRoute('/home-settings', selectedChar.id));
                     }
                   }}

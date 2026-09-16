@@ -1,3 +1,4 @@
+import { readJsonBody, validateAiInput, reserveAiRequest, assertAiPermit, finishAiRequest, type AiPermit } from '../../src/lib/server/operationalGuard';
 import type { Config } from "@netlify/functions";
 import { adminDb } from '../../src/lib/firebase-admin';
 import { corsHeaders } from '../shared/cors';
@@ -28,14 +29,16 @@ interface Diary {
 }
 
 export default async function reqHandler(req: Request) {
+  let permit: AiPermit | undefined;
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders, status: 204 });
   }
   if (req.method !== 'POST') return new Response(null, { status: 405, headers: corsHeaders });
 
   try {
-    const { character, userProfile, topic, userEntry, userId, topicId, dateString, isAdTurn, requestId, timezoneOffsetMinutes } = await req.json();
+    const { character, userProfile, topic, userEntry, userId, topicId, dateString, isAdTurn, requestId, timezoneOffsetMinutes } = await readJsonBody(req);
     const owner = await requireDataOwner(req, userId);
+    validateAiInput(character, userProfile);
 
     if (!character || !topic || !userEntry) {
       return new Response(JSON.stringify({ error: 'Missing required fields' }), { status: 400, headers: corsHeaders });
@@ -100,6 +103,14 @@ export default async function reqHandler(req: Request) {
       return new Response(JSON.stringify({ error: 'OpenRouter API Key is not configured' }), { status: 500, headers: corsHeaders });
     }
 
+    if (typeof topic !== 'string' || topic.length > 4000) throw new DiaryAuthenticationError(400, '주제 내용을 확인해주세요.');
+    permit = await reserveAiRequest(db, owner.uid, 'diary:' + dailyDiaryId, 2, dailyDiaryRef);
+    if (permit.savedRecord) {
+      const diary = checkDiaryOwner(permit.savedRecord as Diary);
+      return Response.json({ reply: diary.charReply, savedId: diary.id, created: false, diary }, { headers: privateHeaders });
+    }
+    const activePermit = permit;
+    let completed = false;
     const userName = userProfile?.name || '나';
     const userFeeling = userProfile?.feeling || '특별한 감정 표현 없음';
     const userExtra = userProfile?.extra || '없음';
@@ -184,6 +195,7 @@ ${userEntry}
     const requestDiaryReply = async (prompt: string) => {
       const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
         method: "POST",
+        signal: permit!.signal,
         headers: {
           "Authorization": `Bearer ${apiKey}`,
           "Content-Type": "application/json"
@@ -201,7 +213,7 @@ ${userEntry}
 
       const data = await response.json();
       if (!response.ok) {
-        console.error('OpenRouter API Error:', data);
+        console.error('OpenRouter API Error', { status: response.status });
         return {
           ok: false as const,
           status: response.status,
@@ -210,11 +222,12 @@ ${userEntry}
         };
       }
 
+      if (!data.choices?.[0]?.message?.content?.trim() || data.choices?.[0]?.finish_reason !== 'stop') throw new Error('Incomplete diary reply');
       return {
         ok: true as const,
         status: response.status,
         error: '',
-        reply: data.choices[0]?.message?.content || "",
+        reply: data.choices?.[0]?.message?.content || "",
       };
     };
 
@@ -242,12 +255,7 @@ ${userEntry}
           let unexpectedSegments = findUnexpectedLanguageSegments(charReply, locale);
 
     if (unexpectedSegments.length > 0) {
-      console.warn('Diary reply contained unexpected non-Korean language segments. Retrying once.', {
-        characterId: character.id,
-        dateString,
-        requestId,
-        segments: unexpectedSegments.slice(0, 8),
-      });
+      console.warn('Diary language check failed; retrying once');
 
             aiResult = await measurePhase('diary.create', 'regeneration', () => requestDiaryReply(`${systemPrompt}\n${getKoreanOnlyRetryInstruction()}`));
             if (!aiResult.ok) {
@@ -258,12 +266,7 @@ ${userEntry}
       charReply = aiResult.reply;
       unexpectedSegments = findUnexpectedLanguageSegments(charReply, locale);
       if (unexpectedSegments.length > 0) {
-        console.warn('Diary reply still contained unexpected non-Korean language segments after retry.', {
-          characterId: character.id,
-          dateString,
-          requestId,
-          segments: unexpectedSegments.slice(0, 8),
-        });
+        console.warn('Diary language check failed after retry');
 
               controller.enqueue(encoder.encode(JSON.stringify({ error: 'AI 답변에 한국어가 아닌 문자가 포함되어 다시 생성이 필요합니다.' })));
               return;
@@ -282,11 +285,12 @@ ${userEntry}
       dateString,
       createdAt: Date.now(),
       isAdLocked: isAdTurn === true,
-      requestId,
+      ...(requestId ? { requestId } : {}),
     };
     
     const saved = await measurePhase('diary.create', 'save', () => db.runTransaction(async (transaction) => {
       await assertGuestActive(db, owner, transaction);
+      await assertAiPermit(transaction, activePermit);
       const currentCharacter = await transaction.get(characterRef);
       if (currentCharacter.data()?.userId !== owner.uid || currentCharacter.data()?.deleting) throw new DiaryAuthenticationError(403, '일기 저장 전에 소유자가 변경되었습니다.');
       const snapshot = await transaction.get(dailyDiaryRef);
@@ -298,6 +302,7 @@ ${userEntry}
       return { diary: newDiary, created: true };
     }));
     
+          completed = true;
           controller.enqueue(encoder.encode(JSON.stringify({ reply: saved.diary.charReply || charReply, savedId: saved.diary.id, created: saved.created, diary: saved.diary })));
         } catch (streamError: any) {
           console.error('Diary stream failed', { category: streamError instanceof DiaryAuthenticationError ? 'authorization' : 'processing' });
@@ -305,6 +310,7 @@ ${userEntry}
             controller.enqueue(encoder.encode(JSON.stringify({ error: streamError instanceof DiaryAuthenticationError ? streamError.message : '일기 저장에 실패했습니다. 다시 시도해주세요.' })));
           }
         } finally {
+          await finishAiRequest(db, activePermit, completed).catch(() => console.error('AI reservation release failed'));
           clearInterval(keepAlive);
           streamOpen = false;
           controller.close();
@@ -321,6 +327,7 @@ ${userEntry}
       },
     });
   } catch (error: any) {
+    if (permit && adminDb) await finishAiRequest(adminDb, permit, false).catch(() => {});
     return securityErrorResponse(error, corsHeaders);
   }
 }

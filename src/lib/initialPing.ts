@@ -2,6 +2,8 @@ import { Capacitor, CapacitorHttp } from '@capacitor/core';
 import type { Character, UserProfile } from '@/lib/db';
 import { apiFetch, getApiUrl } from '@/lib/api';
 import { diaryRequestHeaders } from '@/lib/diaryRequestHeaders';
+import { clearUserCache, writeUserCache } from '@/lib/appCache';
+import { measurePhase } from '@/lib/performanceTrace';
 
 interface InitialPingParams {
   character: Character;
@@ -15,6 +17,7 @@ export interface InitialPingResult {
 }
 
 const inFlightPings = new Map<string, Promise<InitialPingResult>>();
+const ownerQueue = new Map<string, Promise<unknown>>();
 const REQUEST_TIMEOUT_MS = 30000;
 export const INITIAL_PING_EVENT = 'dreamary:initial-ping-state';
 
@@ -130,10 +133,18 @@ export function ensureInitialPing(params: InitialPingParams): Promise<InitialPin
     let lastError: unknown;
     for (let attempt = 0; attempt < 2; attempt += 1) {
       try {
-        const result = await sendInitialPing(params);
+        const preceding = ownerQueue.get(params.userId) || Promise.resolve();
+        const task = preceding.catch(() => {}).then(() => measurePhase('chat.initial', 'api', () => sendInitialPing(params)));
+        ownerQueue.set(params.userId, task);
+        const result = await task.finally(() => { if (ownerQueue.get(params.userId) === task) ownerQueue.delete(params.userId); });
         if (typeof window !== 'undefined') {
           localStorage.setItem(`hasPinged_${params.character.id}`, 'true');
         }
+        clearUserCache(params.userId, ['chat', 'home']);
+        writeUserCache(params.userId, 'chat-preview:' + params.character.id, {
+          id: result.savedId, userId: params.userId, characterId: params.character.id,
+          role: 'assistant', content: result.reply, createdAt: Date.now(),
+        });
         emitInitialPingEvent({
           status: 'completed',
           userId: params.userId,

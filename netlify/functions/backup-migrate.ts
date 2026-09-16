@@ -1,3 +1,4 @@
+import { enqueueDataJob, advanceDataJob } from '../../src/lib/server/dataJobs';
 import type { Config } from '@netlify/functions';
 import { adminDb } from '../../src/lib/firebase-admin';
 import { corsHeaders } from '../shared/cors';
@@ -5,7 +6,6 @@ import { DiaryAuthenticationError, requireDiaryLogin } from '../../src/lib/serve
 import { verifyGuestSession, isGuestId, sameHash, secretHash, securityErrorResponse } from '../../src/lib/server/guestIdentity';
 
 export const config: Config = { path: '/api/backup/migrate' };
-const PAGE_SIZE = 20;
 export default async function handler(req: Request) {
   if (req.method === 'OPTIONS') return new Response(null, { status: 204, headers: corsHeaders });
   if (req.method !== 'POST') return new Response(null, { status: 405, headers: corsHeaders });
@@ -28,7 +28,7 @@ export default async function handler(req: Request) {
         const data = snapshot.data();
         if (!data || (data.usedByUserId && data.usedByUserId !== uid) ||
             (!data.usedByUserId && !(data.expiresAt > Date.now()))) {
-          transaction.set(attemptsRef, { uid, count: (attempts.data()?.count || 0) + 1 });
+          transaction.set(attemptsRef, { uid, count: (attempts.data()?.count || 0) + 1, expiresAt: new Date(Date.now() + 7 * 86400000) });
           return null;
         }
         return data;
@@ -48,12 +48,26 @@ export default async function handler(req: Request) {
     const credential = adminDb.collection('guestCredentials').doc(sourceUUID);
     const codeRef = codeDigest ? adminDb.collection('guestBackupCodes').doc(codeDigest) : null;
     // Pin one destination before changing data. Failure is resumable only by it.
-    await adminDb.runTransaction(async transaction => {
+    const job = await enqueueDataJob(adminDb, 'migration', uid, sourceUUID, '', async transaction => {
       const snapshot = await transaction.get(credential);
       const data = snapshot.data();
       const codeSnapshot = codeRef ? await transaction.get(codeRef) : null;
       if (data?.retired || !sameHash(data?.secretHash, hash) || (data?.migrationTarget && data.migrationTarget !== uid)) {
         throw new DiaryAuthenticationError(403, '이미 다른 계정으로 이전되었거나 인증정보가 다릅니다.');
+      }
+      const state = await transaction.get(adminDb!.collection('accountStates').doc(uid));
+      if (state.exists) throw new DiaryAuthenticationError(403, '탈퇴 처리 중인 계정입니다.');
+      const pairLock = adminDb!.collection('pairCreationLocks').doc(uid);
+      const lock = await transaction.get(pairLock);
+      if (lock.data()?.migrationSource !== sourceUUID && data?.migrationState !== 'complete') {
+        if (lock.data()?.migrationSource || lock.data()?.reserved) throw new DiaryAuthenticationError(409, '다른 페어 이전이 진행 중입니다.');
+        const [source, target] = await Promise.all([
+          transaction.get(adminDb!.collection('characters').where('userId', '==', sourceUUID).limit(data?.migrationTarget ? 20 : 6)),
+          transaction.get(adminDb!.collection('characters').where('userId', '==', uid).limit(5)),
+        ]);
+        if (!data?.migrationTarget && source.docs.some(doc => doc.data().deleting || doc.data().chatClearing)) throw new DiaryAuthenticationError(409, '삭제 중인 페어가 있습니다. 완료 후 이전해주세요.');
+        if (!data?.migrationTarget && source.size + target.size > 5) throw new DiaryAuthenticationError(409, '이전 후 페어가 5개를 초과합니다. 페어를 정리한 뒤 다시 시도해주세요.');
+        transaction.set(pairLock, { migrationSource: sourceUUID, reserved: source.size, updatedAt: Date.now() });
       }
       if (codeRef) {
         const code = codeSnapshot?.data();
@@ -63,25 +77,17 @@ export default async function handler(req: Request) {
       }
       if (!data?.migrationTarget) transaction.update(credential, { migrationTarget: uid, migrationState: 'pending' });
     });
-    const done = await adminDb.runTransaction(async transaction => {
-      const current = await transaction.get(credential);
-      if (current.data()?.retired || current.data()?.migrationTarget !== uid) throw new DiaryAuthenticationError(403, '데이터 이전 권한이 없습니다.');
-      if (current.data()?.migrationState === 'complete') return true;
-      // Move characters LAST: until all diaries are transferred the target UID
-      // must not be able to create a duplicate diary under its new daily ID.
-      const names = ['diaries', 'chatMessages', 'characters'];
-      const stage = current.data()?.migrationStage || 0;
-      const snapshot = await transaction.get(adminDb!.collection(names[stage])
-        .where('userId', '==', sourceUUID).limit(PAGE_SIZE));
-      snapshot.docs.forEach(item => transaction.update(item.ref, {
-        userId: uid, ...(stage === 2 ? { diaryOwnershipMigrated: true } : {}),
-      }));
-      const stageDone = snapshot.size < PAGE_SIZE;
-      const complete = stage === 2 && stageDone;
-      if (complete) transaction.update(credential, { migrationState: 'complete', completedAt: Date.now() });
-      else if (stageDone) transaction.update(credential, { migrationStage: stage + 1 });
-      return complete;
-    });
-    return Response.json({ success: true, done, sourceUUID }, { headers: { ...corsHeaders, 'Cache-Control': 'no-store' } });
+    // New clients amortize repeated authorization/enqueue round trips over up
+    // to three 20-document transactions. Legacy clients retain one-page steps.
+    let done = false;
+    const deadline = Date.now() + 6000;
+    for (let step = 0; step < (payload.progressVersion === 1 ? 3 : 1); step++) {
+      done = await advanceDataJob(adminDb, job);
+      if (done || Date.now() >= deadline) break;
+    }
+    const state = (await credential.get()).data();
+    if (done && state?.migrationState !== 'complete') throw new DiaryAuthenticationError(409, '이전 완료 상태를 확인할 수 없습니다. 다시 시도해주세요.');
+    const stage = done ? 'complete' : ['diaries', 'chatMessages', 'images', 'characters'][state?.migrationStage || 0];
+    return Response.json({ success: true, done, sourceUUID, stage }, { headers: { ...corsHeaders, 'Cache-Control': 'no-store' } });
   } catch (error) { return securityErrorResponse(error, corsHeaders); }
 }

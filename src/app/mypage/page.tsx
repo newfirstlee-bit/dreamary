@@ -1,11 +1,12 @@
 "use client";
+import { MAX_PAIRS } from '@/lib/productLimits';
 import { apiPostJson } from '@/lib/api';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import ResilientImage from '@/components/ResilientImage';
 import { useRouter } from 'next/navigation';
 import { useUserId } from '@/hooks/useUserId';
-import { getUserProfile, Character, UserProfile, deleteCharacter, migrateGuestBackup } from '@/lib/db';
+import { getUserProfile, Character, UserProfile, deleteCharacter, migrateGuestBackup, MigrationStage, getCharactersByUser } from '@/lib/db';
 import { Loader2, Settings, User, Plus, Heart, X, Copy, LogIn, Key, Download, LogOut, Eye, EyeOff, ChevronLeft, ChevronRight } from 'lucide-react';
 import Link from 'next/link';
 import { useLocale } from '@/lib/i18n';
@@ -22,13 +23,15 @@ import { invalidateCharacterStore, useAppStore } from '@/store/useAppStore';
 import { Browser } from '@capacitor/browser';
 import { Capacitor } from '@capacitor/core';
 import { getUserId } from '@/lib/auth';
+import { readAppliedAppVersion } from '@/lib/appVersion';
+import { useAsyncActionLock } from '@/hooks/useAsyncActionLock';
+import { copyTextToClipboard } from '@/lib/clipboard';
 
 const TERMS_URL = 'https://pickled-shovel-787.notion.site/3b5278d76e0580768273f5e88a09c3fe?source=copy_link';
 const PRIVACY_URL = 'https://pickled-shovel-787.notion.site/3b5278d76e0580ba9269f3ed205b37f6?source=copy_link';
 const APP_VERSION = process.env.NEXT_PUBLIC_APP_VERSION || '0.1.0';
 // The build configuration pairs the platform/environment label with its target.
 const APP_BUILD_LABEL = process.env.NEXT_PUBLIC_APP_CHANNEL || 'web · prod';
-const APP_VERSION_LABEL = `v${APP_VERSION} · ${APP_BUILD_LABEL}`;
 
 interface MyPageCache {
   characters: Character[];
@@ -36,6 +39,12 @@ interface MyPageCache {
 }
 
 export default function MyPage() {
+  const [appliedVersion, setAppliedVersion] = useState(APP_VERSION);
+  useEffect(() => {
+    let cancelled = false;
+    void readAppliedAppVersion(APP_VERSION).then(version => { if (!cancelled) setAppliedVersion(version); });
+    return () => { cancelled = true; };
+  }, []);
   const router = useRouter();
   const { t, locale, setLocale } = useLocale();
   const { user, status } = useAuth();
@@ -50,6 +59,7 @@ export default function MyPage() {
   
   const [selectedChar, setSelectedChar] = useState<Character | null>(null);
   const [deleteConfirmChar, setDeleteConfirmChar] = useState<Character | null>(null);
+  const { isPending: isDeletingPair, runLocked: runDeletePairLocked } = useAsyncActionLock();
 
   // 백업/이관 상태
   const [backupCode, setBackupCode] = useState<string | null>(null);
@@ -57,7 +67,26 @@ export default function MyPage() {
   const [showMigrateModal, setShowMigrateModal] = useState(false);
   const [inputBackupCode, setInputBackupCode] = useState('');
   const [isMigrating, setIsMigrating] = useState(false);
+  const [migrationStage, setMigrationStage] = useState<MigrationStage>('diaries');
+  const [migrationDots, setMigrationDots] = useState('.');
+  const migrationLock = useRef(false);
   const [copySuccess, setCopySuccess] = useState(false);
+  const { isPending: isGeneratingBackup, runLocked: runGenerateBackupLocked } = useAsyncActionLock();
+  const isPairLimitReached = characters.length >= MAX_PAIRS;
+
+  useEffect(() => {
+    if (!isMigrating) {
+      setMigrationDots('.');
+      return;
+    }
+    let count = 1;
+    setMigrationDots('.');
+    const timer = window.setInterval(() => {
+      count = count === 3 ? 0 : count + 1;
+      setMigrationDots('.'.repeat(count));
+    }, 400);
+    return () => window.clearInterval(timer);
+  }, [isMigrating]);
 
   // 계정 정보
   const [accountInfo, setAccountInfo] = useState<any>(null);
@@ -126,25 +155,25 @@ export default function MyPage() {
 
   const truncate = (name: string) => name.length > 5 ? name.slice(0, 5) + '...' : name;
 
-  const handleDeletePair = async () => {
-    if (!deleteConfirmChar) return;
-    setLoading(true);
+  const handleDeletePair = () => runDeletePairLocked(async () => {
+    const target = deleteConfirmChar;
+    if (!target) return;
     try {
-      await deleteCharacter(deleteConfirmChar.id);
-      setCharacters(prev => prev.filter(c => c.id !== deleteConfirmChar.id));
-      const newProfiles = { ...userProfiles };
-      delete newProfiles[deleteConfirmChar.id];
-      setUserProfiles(newProfiles);
+      await deleteCharacter(target.id);
+      setCharacters(prev => prev.filter(c => c.id !== target.id));
+      setUserProfiles(prev => {
+        const next = { ...prev };
+        delete next[target.id];
+        return next;
+      });
       setDeleteConfirmChar(null);
       if (userId) clearUserCache(userId);
       if (userId) invalidateCharacterStore(userId);
     } catch (error) {
       console.error(error);
       alert('삭제 중 오류가 발생했습니다.');
-    } finally {
-      setLoading(false);
     }
-  };
+  });
 
   useEffect(() => {
     if (!userId) return;
@@ -196,7 +225,7 @@ export default function MyPage() {
         if (isGuest) {
           const storedCode = localStorage.getItem('backupCode');
           const storedTime = localStorage.getItem('backupCodeTime');
-          if (storedCode && storedTime && Date.now() - Number(storedTime) < 24 * 60 * 60 * 1000) {
+          if (storedCode && storedTime && localStorage.getItem('backupCodeOwner') === userId && Date.now() - Number(storedTime) < 24 * 60 * 60 * 1000) {
             setBackupCode(storedCode);
           } else {
             localStorage.removeItem('backupCode');
@@ -213,8 +242,8 @@ export default function MyPage() {
     if (user !== undefined && userId) init();
   }, [router, user, userId, status]);
 
-  const handleGenerateBackupCode = async () => {
-    if (backupCode) {
+  const handleGenerateBackupCode = () => runGenerateBackupLocked(async () => {
+    if (backupCode && localStorage.getItem('backupCodeOwner') === userId) {
       setShowBackupModal(true);
       return;
     }
@@ -225,27 +254,37 @@ export default function MyPage() {
       setBackupCode(data.code);
       localStorage.setItem('backupCode', data.code);
       localStorage.setItem('backupCodeTime', Date.now().toString());
+      localStorage.setItem('backupCodeOwner', userId);
       setShowBackupModal(true);
     } catch (err: any) {
       alert(err.message);
     }
-  };
+  });
 
   const handleMigrate = async () => {
-    if (!inputBackupCode || !user?.uid) return;
+    if (isPairLimitReached || !inputBackupCode || !user?.uid || migrationLock.current) return;
+    migrationLock.current = true;
     setIsMigrating(true);
     try {
-      await migrateGuestBackup(inputBackupCode, user.uid);
+      await migrateGuestBackup(inputBackupCode, user.uid, setMigrationStage);
+      clearUserCache(user.uid);
+      invalidateCharacterStore();
+      const migratedCharacters = await getCharactersByUser(user.uid);
+      useAppStore.getState().setCharacters(user.uid, migratedCharacters);
       
       alert(t('mypage.migrateSuccess'));
       localStorage.setItem('migration_completed', 'true');
-      invalidateCharacterStore();
+      localStorage.removeItem('backupCode');
+      localStorage.removeItem('backupCodeTime');
+      localStorage.removeItem('backupCodeOwner');
+      setBackupCode(null);
       setShowMigrateModal(false);
       // 홈 화면으로 이동
       router.push('/');
     } catch (err: any) {
       alert(err.message);
     } finally {
+      migrationLock.current = false;
       setIsMigrating(false);
     }
   };
@@ -418,7 +457,7 @@ export default function MyPage() {
         {/* Pairs Section */}
         <section>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '15px' }}>
-            <h2 style={{ fontSize: '1.2rem', color: 'var(--foreground)' }}>{t('mypage.myPairs')} <span style={{ color: 'var(--gray-500)', fontSize: '1rem', fontWeight: 'normal' }}>({characters.length}/10)</span></h2>
+            <h2 style={{ fontSize: '1.2rem', color: 'var(--foreground)' }}>{t('mypage.myPairs')} <span style={{ color: 'var(--gray-500)', fontSize: '1rem', fontWeight: 'normal' }}>({characters.length}/{MAX_PAIRS})</span></h2>
           </div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: '15px' }}>
             {characters.map(char => {
@@ -460,21 +499,26 @@ export default function MyPage() {
             )})}
 
             {/* + 새 페어 만들기 버튼 */}
+            {characters.length >= MAX_PAIRS ? (
+              <p style={{ color: 'var(--gray-500)', fontSize: '0.8rem', textAlign: 'center', margin: '4px 0' }}>
+                {locale === 'ja' ? 'ペアは最大5つまで作成できます' : '페어는 최대 5개까지 만들 수 있어요'}
+              </p>
+            ) : (
             <button 
               onClick={() => {
-                if (characters.length >= 10) return;
+                if (characters.length >= MAX_PAIRS) return;
                 router.push('/onboarding?skip=true');
               }}
               style={{ 
                 width: '100%', 
                 padding: '16px', 
-                backgroundColor: characters.length >= 10 ? 'var(--gray-200)' : 'white', 
-                border: characters.length >= 10 ? '1px solid var(--gray-300)' : '1px solid var(--point-color)', 
+                backgroundColor: characters.length >= MAX_PAIRS ? 'var(--gray-200)' : 'white',
+                border: characters.length >= MAX_PAIRS ? '1px solid var(--gray-300)' : '1px solid var(--point-color)',
                 borderRadius: '15px', 
-                color: characters.length >= 10 ? 'var(--gray-500)' : 'var(--point-color)', 
+                color: characters.length >= MAX_PAIRS ? 'var(--gray-500)' : 'var(--point-color)',
                 fontWeight: 'bold', 
                 fontSize: '1rem',
-                cursor: characters.length >= 10 ? 'not-allowed' : 'pointer',
+                cursor: characters.length >= MAX_PAIRS ? 'not-allowed' : 'pointer',
                 display: 'flex',
                 justifyContent: 'center',
                 alignItems: 'center',
@@ -484,6 +528,7 @@ export default function MyPage() {
             >
               <Plus size={20} /> {t('mypage.newPair')}
             </button>
+            )}
           </div>
         </section>
 
@@ -506,9 +551,11 @@ export default function MyPage() {
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
                   <button 
                     onClick={handleGenerateBackupCode}
-                    style={{ width: '100%', padding: '15px', borderRadius: '12px', border: '1px solid var(--point-color)', backgroundColor: 'white', color: 'var(--point-color)', fontWeight: 'bold', fontSize: '1rem', display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '8px', cursor: 'pointer' }}
+                    disabled={isGeneratingBackup}
+                    aria-busy={isGeneratingBackup}
+                    style={{ width: '100%', padding: '15px', borderRadius: '12px', border: '1px solid var(--point-color)', backgroundColor: isGeneratingBackup ? 'var(--gray-200)' : 'white', color: isGeneratingBackup ? 'var(--gray-500)' : 'var(--point-color)', fontWeight: 'bold', fontSize: '1rem', display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '8px', cursor: isGeneratingBackup ? 'wait' : 'pointer', opacity: isGeneratingBackup ? 0.75 : 1 }}
                   >
-                    <Download size={20} /> {t('mypage.backupChatBtn')}
+                    {isGeneratingBackup ? t('mypage.backupGenerating') : <><Download size={20} /> {t('mypage.backupChatBtn')}</>}
                   </button>
                   <p style={{ fontSize: '0.8rem', lineHeight: '1.45', color: 'var(--gray-500)', textAlign: 'center', padding: '0 8px', wordBreak: 'keep-all' }}>
                     {t('mypage.backupLoginHint')}
@@ -533,8 +580,9 @@ export default function MyPage() {
                 <span style={{ fontSize: '1rem', color: 'var(--gray-800)', fontWeight: 'bold' }}>{t('mypage.uuid')}</span>
                 <button 
                   onClick={() => {
-                    navigator.clipboard.writeText(userId || '');
-                    alert(t('common.copied'));
+                    void copyTextToClipboard(userId || '').then(copied => {
+                      if (copied) alert(t('common.copied'));
+                    });
                   }} 
                   style={{ display: 'flex', alignItems: 'center', gap: '4px', background: 'var(--gray-100)', border: 'none', borderRadius: '6px', padding: '6px 10px', cursor: 'pointer', fontSize: '0.8rem', color: 'var(--gray-700)', fontWeight: 'bold' }}
                 >
@@ -603,17 +651,19 @@ export default function MyPage() {
         </section>
 
         {!isGuest && (
-          <section style={{ marginTop: '30px' }}>
+          <section style={{ marginTop: '30px', opacity: isPairLimitReached ? 0.55 : 1 }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '15px' }}>
               <h2 style={{ fontSize: '1.2rem', fontWeight: 'bold' }}>
                 {t('mypage.chatHistory')}
               </h2>
             </div>
             <button 
-              onClick={() => setShowMigrateModal(true)}
-              style={{ width: '100%', padding: '15px', borderRadius: '12px', border: 'none', backgroundColor: 'var(--gray-200)', color: 'var(--gray-800)', fontWeight: 'bold', fontSize: '1rem', display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '8px', cursor: 'pointer' }}
+              onClick={() => { if (!isPairLimitReached) setShowMigrateModal(true); }}
+              disabled={isPairLimitReached}
+              aria-disabled={isPairLimitReached}
+              style={{ width: '100%', padding: '15px', borderRadius: '12px', border: 'none', backgroundColor: 'var(--gray-200)', color: 'var(--gray-800)', fontWeight: 'bold', fontSize: '1rem', display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '8px', cursor: isPairLimitReached ? 'not-allowed' : 'pointer' }}
             >
-              {t('mypage.enterBackupCode')}
+              {isPairLimitReached ? t('mypage.migrateBlockedByPairLimit') : t('mypage.enterBackupCode')}
             </button>
           </section>
         )}
@@ -643,7 +693,7 @@ export default function MyPage() {
               textDecoration: 'none'
             }}
           >
-            {APP_VERSION_LABEL}
+            {`v${appliedVersion} · ${APP_BUILD_LABEL}`}
           </span>
         </div>
 
@@ -724,7 +774,7 @@ export default function MyPage() {
       {deleteConfirmChar && (
         <>
           <div 
-            onClick={() => setDeleteConfirmChar(null)}
+            onClick={() => { if (!isDeletingPair) setDeleteConfirmChar(null); }}
             style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.5)', zIndex: 3000 }} 
           />
           <div style={{ 
@@ -741,13 +791,16 @@ export default function MyPage() {
             <div style={{ display: 'flex', gap: '10px', width: '100%' }}>
               <button 
                 onClick={handleDeletePair}
-                style={{ flex: 1, padding: '15px', backgroundColor: '#FF3B30', color: 'white', border: 'none', borderRadius: '12px', fontSize: '1rem', fontWeight: 'bold', cursor: 'pointer' }}
+                disabled={isDeletingPair}
+                aria-busy={isDeletingPair}
+                style={{ flex: 1, padding: '15px', backgroundColor: isDeletingPair ? '#FFB3AD' : '#FF3B30', color: 'white', border: 'none', borderRadius: '12px', fontSize: '1rem', fontWeight: 'bold', cursor: isDeletingPair ? 'wait' : 'pointer', opacity: isDeletingPair ? 0.8 : 1, display: 'flex', justifyContent: 'center', alignItems: 'center' }}
               >
-                {t('common.delete')}
+                {isDeletingPair ? <span className="loading-dots" aria-label="삭제 중">...</span> : t('common.delete')}
               </button>
               <button 
                 onClick={() => setDeleteConfirmChar(null)}
-                style={{ flex: 1, padding: '15px', backgroundColor: 'var(--gray-100)', color: 'var(--foreground)', border: 'none', borderRadius: '12px', fontSize: '1rem', fontWeight: 'bold', cursor: 'pointer' }}
+                disabled={isDeletingPair}
+                style={{ flex: 1, padding: '15px', backgroundColor: 'var(--gray-100)', color: 'var(--foreground)', border: 'none', borderRadius: '12px', fontSize: '1rem', fontWeight: 'bold', cursor: isDeletingPair ? 'not-allowed' : 'pointer', opacity: isDeletingPair ? 0.55 : 1 }}
               >
                 {t('common.cancel')}
               </button>
@@ -771,17 +824,17 @@ export default function MyPage() {
             <h2 style={{ fontSize: '1.2rem', fontWeight: 'bold', marginBottom: '10px' }}>
               {t('mypage.backupCreated')}
             </h2>
-            <div style={{ fontSize: '2rem', fontWeight: 'bold', letterSpacing: '2px', color: 'var(--point-color)', margin: '20px 0' }}>
+            <div style={{ fontSize: '2rem', fontWeight: 'bold', letterSpacing: '2px', color: 'var(--point-color)', margin: '20px 0', userSelect: 'text', WebkitUserSelect: 'text' }}>
               {backupCode}
             </div>
             <p style={{ fontSize: '0.9rem', color: 'var(--gray-500)', marginBottom: '25px', lineHeight: '1.5' }} dangerouslySetInnerHTML={{ __html: t('mypage.backupGuide') }}>
             </p>
             <button 
-              onClick={() => {
-                navigator.clipboard.writeText(backupCode || '');
+              onClick={() => void copyTextToClipboard(backupCode || '').then(copied => {
+                if (!copied) return;
                 setCopySuccess(true);
                 setTimeout(() => setCopySuccess(false), 2000);
-              }}
+              })}
               style={{ width: '100%', padding: '15px', backgroundColor: copySuccess ? 'var(--gray-300)' : 'var(--gray-100)', color: 'var(--foreground)', border: 'none', borderRadius: '12px', fontSize: '1rem', fontWeight: 'bold', cursor: 'pointer', marginBottom: '10px', transition: 'all 0.2s' }}
             >
               {copySuccess ? t('common.copied') : t('mypage.copyCodeBtn')}
@@ -800,7 +853,7 @@ export default function MyPage() {
       {showMigrateModal && (
         <>
           <div 
-            onClick={() => setShowMigrateModal(false)}
+            onClick={() => { if (!isMigrating) setShowMigrateModal(false); }}
             style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.5)', zIndex: 3000 }} 
           />
           <div style={{ 
@@ -812,20 +865,31 @@ export default function MyPage() {
               {t('mypage.migrateTitle')}
             </h2>
             <p style={{ fontSize: '0.9rem', color: 'var(--gray-500)', marginBottom: '25px', lineHeight: '1.5' }}>
-              {t('mypage.migrateGuide')}
+              {isMigrating ? `${t('mypage.migrationStages.' + migrationStage)}${migrationDots}` : t('mypage.migrateGuide')}
             </p>
             <input 
               className="placeholder-regular"
               type="text"
+              disabled={isMigrating}
               value={inputBackupCode}
               onChange={(e) => setInputBackupCode(e.target.value.toUpperCase())}
+              onPaste={(e) => {
+                const pasted = e.clipboardData.getData('text').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 8);
+                if (!pasted) return;
+                e.preventDefault();
+                setInputBackupCode(pasted);
+              }}
               placeholder={t('mypage.backupCodePh')}
               maxLength={8}
+              inputMode="text"
+              autoCapitalize="characters"
+              autoCorrect="off"
+              spellCheck={false}
               style={{ width: '100%', padding: '15px', borderRadius: '12px', border: '1px solid var(--border-color)', fontSize: '1.1rem', textAlign: 'center', letterSpacing: '2px', fontWeight: 'bold', marginBottom: '20px', outline: 'none' }}
             />
             <div style={{ display: 'flex', gap: '10px', width: '100%' }}>
               <button 
-                onClick={() => setShowMigrateModal(false)}
+                onClick={() => { if (!isMigrating) setShowMigrateModal(false); }}
                 style={{ flex: 1, padding: '15px', backgroundColor: 'var(--gray-100)', color: 'var(--foreground)', border: 'none', borderRadius: '12px', fontSize: '1rem', fontWeight: 'bold', cursor: 'pointer' }}
               >
                 {t('common.cancel')}

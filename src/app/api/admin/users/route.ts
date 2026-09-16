@@ -5,7 +5,7 @@ import { adminDb } from '@/lib/firebase-admin';
 export const runtime = 'nodejs';
 
 const DEFAULT_PAGE_SIZE = 20;
-const MAX_PAGE_SIZE = 50;
+const MAX_PAGE_SIZE = 20;
 
 function parsePageSize(value: string | null) {
   const size = Number(value || DEFAULT_PAGE_SIZE);
@@ -30,15 +30,20 @@ export async function GET(req: Request) {
 
     const url = new URL(req.url);
     const pageSize = parsePageSize(url.searchParams.get('pageSize'));
-    const cursor = Number(url.searchParams.get('cursor') || 0);
+    const rawCursor = url.searchParams.get('cursor');
+    let cursor: [number, string] | null = null;
+    if (rawCursor) {
+      try { const value = JSON.parse(rawCursor); if (Array.isArray(value) && Number.isFinite(value[0]) && typeof value[1] === 'string') cursor = value as [number, string]; else return NextResponse.json({ error: '목록을 새로고침해주세요.' }, { status: 400 }); }
+      catch { return NextResponse.json({ error: '목록을 새로고침해주세요.' }, { status: 400 }); }
+    }
 
     let accountQuery: FirebaseFirestore.Query = adminDb
       .collection('accounts')
-      .orderBy('createdAt', 'desc')
+      .orderBy('createdAt', 'desc').orderBy('__name__', 'desc')
       .limit(pageSize);
 
-    if (Number.isFinite(cursor) && cursor > 0) {
-      accountQuery = accountQuery.startAfter(cursor);
+    if (cursor) {
+      accountQuery = accountQuery.startAfter(...cursor);
     }
 
     const accountSnap = await accountQuery.get();
@@ -65,7 +70,7 @@ export async function GET(req: Request) {
 
     return NextResponse.json({
       users,
-      nextCursor: accountSnap.docs.length === pageSize && lastCreatedAt > 0 ? String(lastCreatedAt) : null,
+      nextCursor: accountSnap.docs.length === pageSize && lastCreatedAt > 0 ? JSON.stringify([lastCreatedAt, lastDoc.id]) : null,
     });
   } catch (error: any) {
     console.error('Admin users failed:', error);

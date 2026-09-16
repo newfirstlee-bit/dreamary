@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, Suspense } from 'react';
+import { useEffect, useState, useRef, Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useUserId } from '@/hooks/useUserId';
 import { getDiariesByUserAndCharPage, getTopics, getUserProfile, Character, Diary, Topic } from '@/lib/db';
@@ -12,6 +12,7 @@ import Link from 'next/link';
 import { useLocale } from '@/lib/i18n';
 import { buildStaticEntityRoute } from '@/lib/navigation';
 import { formatKoreanNameTemplate } from '@/lib/koreanJosa';
+import { writeUserCache } from '@/lib/appCache';
 
 const DIARY_HISTORY_PAGE_SIZE = 10;
 
@@ -32,13 +33,15 @@ function DiaryHistoryContent() {
   const userId = useUserId();
   const { status } = useAuth();
   const loadCharacters = useAppStore(state => state.loadCharacters);
+  const requestGeneration = useRef(0);
 
   const fetchDiaries = async (userId: string, charId: string, cursor?: QueryDocumentSnapshot<DocumentData> | null, isCurrent = () => true) => {
+    const generation = ++requestGeneration.current;
     const [page, profile] = await Promise.all([
       getDiariesByUserAndCharPage(userId, charId, DIARY_HISTORY_PAGE_SIZE, cursor),
       getUserProfile(charId)
     ]);
-    if (!isCurrent()) return;
+    if (!isCurrent() || generation !== requestGeneration.current) return;
     setDiaries(prev => {
       const nextDiaries = cursor ? [...prev, ...page.diaries] : page.diaries;
       return nextDiaries.sort((a, b) => Number(b.createdAt || 0) - Number(a.createdAt || 0));
@@ -85,7 +88,7 @@ function DiaryHistoryContent() {
       }
     };
     init();
-    return () => { cancelled = true; };
+    return () => { cancelled = true; requestGeneration.current++; };
   }, [router, userId, status, loadCharacters]);
 
   const handleCharSelect = async (charId: string) => {
@@ -133,7 +136,7 @@ function DiaryHistoryContent() {
     }
   };
 
-  if (loading) {
+  if (loading || status === 'checking' || characters.some(char => char.userId !== userId)) {
     return (
       <div className="app-container" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
         <Loader2 className="animate-spin" size={48} color="var(--point-color)" style={{ animation: 'spin 2s linear infinite' }} />
@@ -200,7 +203,11 @@ function DiaryHistoryContent() {
           </div>
         ) : (
           diaries.map(diary => (
-            <Link key={diary.id} href={buildStaticEntityRoute('/diary/history', diary.id)} style={{ textDecoration: 'none', color: 'inherit' }}>
+            <Link key={diary.id} href={buildStaticEntityRoute('/diary/history', diary.id)} onClick={() => {
+              const character = characters.find(c => c.id === diary.characterId && c.userId === userId);
+              if (userId && character && diary.userId === userId) writeUserCache(userId, 'diary-detail:' + diary.id,
+                { diary, character, userProfile, topic: topics.find(t => t.id === diary.topicId) || null });
+            }} style={{ textDecoration: 'none', color: 'inherit' }}>
               <div style={{ 
                 backgroundColor: 'var(--white)', 
                 padding: '20px', 
@@ -213,7 +220,7 @@ function DiaryHistoryContent() {
               }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px' }}>
                   <span style={{ color: 'var(--point-color)', fontSize: '0.8rem', fontWeight: 'bold' }}>
-                    {(topics.find(t => t.id === diary.topicId)?.order || 1)}{t('common.nthQuestion')}
+                    {diary.answerNumber ? `${diary.answerNumber}${t('common.nthQuestion')}` : t('common.question')}
                   </span>
                   <span style={{ color: 'var(--gray-500)', fontSize: '0.8rem', fontWeight: 500 }}>
                     {(diary.dateString || '').replace(/-/g, '.')}

@@ -1,5 +1,8 @@
+import { assertServerEnvironment } from './server/environmentGuard';
 import { initializeApp, getApps, cert } from 'firebase-admin/app';
 import { getFirestore } from 'firebase-admin/firestore';
+
+assertServerEnvironment();
 
 if (!getApps().length) {
   try {

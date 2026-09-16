@@ -1,0 +1,22 @@
+{
+  "project": "dreamary-staging",
+  "checkedAt": "2026-09-13T14:20:19.177Z",
+  "checks": [
+    {
+      "collection": "diaries",
+      "firstPage": 30,
+      "secondPage": 5,
+      "passed": true
+    },
+    {
+      "collection": "chatMessages",
+      "firstPage": 30,
+      "secondPage": 5,
+      "passed": true
+    }
+  ],
+  "failure": false,
+  "cleanupComplete": true,
+  "cleanupErrors": [],
+  "scope": "Admin SDK synthetic queries: 70 documents, pages of 30+5, equal timestamps. Does not exercise client rules, UI, AI or push delivery."
+}

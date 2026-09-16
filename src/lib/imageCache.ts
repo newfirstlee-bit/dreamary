@@ -2,6 +2,8 @@ const DB_NAME = 'dreamary-image-cache';
 const DB_VERSION = 1;
 const STORE_NAME = 'images';
 const MAX_CACHE_AGE_MS = 30 * 24 * 60 * 60 * 1000;
+const MAX_CACHE_BYTES = 50 * 1024 * 1024;
+const MAX_CACHE_ITEMS = 100;
 const FETCH_TIMEOUT_MS = 8000;
 const RETRY_DELAYS_MS = [0, 500];
 const CACHE_IO_TIMEOUT_MS = 1000;
@@ -52,11 +54,12 @@ export async function readCachedImage(url: string): Promise<Blob | null> {
       db.close();
     };
     const timer = setTimeout(() => finish(null), CACHE_IO_TIMEOUT_MS);
-    const transaction = db.transaction(STORE_NAME, 'readonly');
+    const transaction = db.transaction(STORE_NAME, 'readwrite');
     const request = transaction.objectStore(STORE_NAME).get(url);
     request.onsuccess = () => {
       const record = request.result as CachedImageRecord | undefined;
       if (!record || Date.now() - record.savedAt > MAX_CACHE_AGE_MS) {
+        if (record) transaction.objectStore(STORE_NAME).delete(url);
         finish(null);
         return;
       }
@@ -69,12 +72,32 @@ export async function readCachedImage(url: string): Promise<Blob | null> {
 }
 
 async function writeCachedImage(url: string, blob: Blob): Promise<void> {
+  if (blob.size > MAX_CACHE_BYTES) return;
   const db = await openImageDb();
   if (!db) return;
 
   await new Promise<void>((resolve) => {
     const transaction = db.transaction(STORE_NAME, 'readwrite');
-    transaction.objectStore(STORE_NAME).put({ url, blob, savedAt: Date.now() } satisfies CachedImageRecord);
+    const store = transaction.objectStore(STORE_NAME);
+    store.put({ url, blob, savedAt: Date.now() } satisfies CachedImageRecord);
+    // Cursor avoids materializing all cached blobs, including old uncapped DBs.
+    const rows: { key: IDBValidKey; size: number; savedAt: number }[] = [];
+    const cursor = store.openCursor();
+    cursor.onsuccess = () => {
+      const item = cursor.result;
+      if (item) {
+        const record = item.value as CachedImageRecord;
+        if (Date.now() - record.savedAt > MAX_CACHE_AGE_MS) item.delete();
+        else rows.push({ key: item.key, size: record.blob.size, savedAt: record.savedAt });
+        item.continue(); return;
+      }
+      rows.sort((a, b) => b.savedAt - a.savedAt);
+      let bytes = 0;
+      rows.forEach((row, index) => {
+        bytes += row.size;
+        if (index >= MAX_CACHE_ITEMS || bytes > MAX_CACHE_BYTES) store.delete(row.key);
+      });
+    };
     transaction.oncomplete = () => {
       db.close();
       resolve();

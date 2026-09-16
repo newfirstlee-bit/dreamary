@@ -1,0 +1,75 @@
+{
+  "project": "dreamary-staging",
+  "url": "https://dreamary-staging.netlify.app",
+  "checkedAt": "2026-09-15T12:26:13.092Z",
+  "checks": [
+    {
+      "name": "password-login-owner",
+      "passed": true
+    },
+    {
+      "name": "password-login-other",
+      "passed": true
+    },
+    {
+      "name": "data-session-login",
+      "passed": true
+    },
+    {
+      "name": "custom-token-exchange-login",
+      "passed": true
+    },
+    {
+      "name": "custom-token-identity-login",
+      "passed": true
+    },
+    {
+      "name": "forged-data-owner-denied",
+      "passed": true
+    },
+    {
+      "name": "unauthenticated-pair-denied",
+      "passed": true
+    },
+    {
+      "name": "concurrent-five-pair-limit",
+      "passed": true
+    },
+    {
+      "name": "pair-retry-idempotent",
+      "passed": true
+    },
+    {
+      "name": "foreign-pair-write-denied",
+      "passed": true
+    },
+    {
+      "name": "guest-registration",
+      "passed": true
+    },
+    {
+      "name": "data-session-guest",
+      "passed": true
+    },
+    {
+      "name": "custom-token-exchange-guest",
+      "passed": true
+    },
+    {
+      "name": "custom-token-identity-guest",
+      "passed": true
+    },
+    {
+      "name": "guest-pair-create",
+      "passed": true
+    },
+    {
+      "name": "guest-wrong-key-denied",
+      "passed": true
+    }
+  ],
+  "failure": null,
+  "cleanupComplete": true,
+  "cleanupErrors": [],
+  "scope": "Deployed authentication and pair APIs. AI, indexed histories, queues, push and native UI not exercised. Shared registration usage counters are retained."
+}

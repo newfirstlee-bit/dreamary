@@ -37,6 +37,10 @@ export default function LoginPage() {
     try {
       const email = `${id}@dreamary.internal`;
       const guestUserId = getStoredGuestUserId();
+      const storedBackupCode = typeof window !== 'undefined' ? localStorage.getItem('backupCode') : null;
+      const storedBackupCodeTime = typeof window !== 'undefined' ? Number(localStorage.getItem('backupCodeTime')) : 0;
+      const hasIssuedBackupCode = Boolean(storedBackupCode && Number.isFinite(storedBackupCodeTime) &&
+        storedBackupCodeTime > 0 && Date.now() - storedBackupCodeTime < 24 * 60 * 60 * 1000);
 
       // 로그인을 먼저 수행하여 UI 응답성 확보
       const credential = await signInWithEmailAndPassword(auth, email, password);
@@ -63,7 +67,7 @@ export default function LoginPage() {
       }
 
       // Migration은 백그라운드에서 non-blocking 처리
-      if (guestUserId && guestUserId !== credential.user.uid) {
+      if (guestUserId && guestUserId !== credential.user.uid && !hasIssuedBackupCode) {
         prepareOwnershipMigration(guestUserId)
           .then(migration => completeOwnershipMigration(migration, credential.user.uid))
           .then(() => {
@@ -102,6 +106,13 @@ export default function LoginPage() {
       </header>
 
       <form onSubmit={handleLogin} style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+        {process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID === 'dreamary-staging' && (
+          <p style={{ margin: 0, fontSize: '0.9rem', color: 'var(--gray-600)' }}>
+            {locale === 'ja'
+              ? 'テスト環境です。移行済みのテストアカウント、またはこの環境で作成したアカウントを使用してください。'
+              : '테스트 환경입니다. 이전된 테스트 계정 또는 이 환경에서 만든 계정을 사용해주세요.'}
+          </p>
+        )}
         <div>
           <label style={{ display: 'block', marginBottom: '8px', fontWeight: 'bold', fontSize: '0.9rem' }}>{t('auth.id')}</label>
           <input

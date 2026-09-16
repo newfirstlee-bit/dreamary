@@ -1,0 +1,104 @@
+const { test } = require('node:test');
+const assert = require('node:assert/strict');
+const fs = require('node:fs/promises');
+const path = require('node:path');
+const os = require('node:os');
+const { Timestamp, GeoPoint } = require('firebase-admin/firestore');
+const { encode, decode, exportBackup, restoreDemo } = require('./operations/backup.cjs');
+const { prepare } = require('./operations/prepare.cjs');
+const { buildEnvironment } = require('./build-app.cjs');
+function database(seed = []) {
+  const rows = new Map(seed), db = { projectId: 'demo-backup-test' };
+  db.doc = path => ({ path, set: async value => rows.set(path, value), listCollections: async () => [] });
+  const collection = name => {
+    const query = (cap = 20, cursor = '') => ({ orderBy: () => query(cap, cursor), limit: n => query(n, cursor), startAfter: doc => query(cap, typeof doc === 'string' ? doc : doc.id),
+      get: async () => { assert.ok(cap <= 20); const docs = [...rows].filter(([p]) => p.startsWith(name + '/') && p.split('/')[1] > cursor).sort(([a], [b]) => a.localeCompare(b)).slice(0,cap).map(([p,v]) => ({ id: p.split('/')[1], ref: db.doc(p), data: () => v })); return { docs, size: docs.length }; }, doc: id => db.doc(name + '/' + id) });
+    return query();
+  };
+  db.collection = collection;
+  db.listCollections = async () => [...new Set([...rows.keys()].map(p => p.split('/')[0]))].map(collection);
+  return { db, rows };
+}
+test('backup: lossless types, paged export, encrypted file, authenticated restore and wrong-key refusal', async () => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'dreamary-backup-test-'));
+  const file = path.join(dir, 'backup.enc'), pass = 'synthetic-only-backup-passphrase';
+  const { db } = database(Array.from({ length: 43 }, (_, i) => ['diaries/d' + i, { text: 'synthetic private text', at: new Timestamp(123,456), point: new GeoPoint(37,127), bytes: Buffer.from('bytes'), values: [null, true, Infinity, NaN], collision: { type: 'timestamp' } }]));
+  const target = database();
+  const previousHost = process.env.FIRESTORE_EMULATOR_HOST;
+  process.env.FIRESTORE_EMULATOR_HOST = '127.0.0.1:8080';
+  try {
+    assert.equal((await exportBackup(db, file, pass, 100)).documents, 43);
+    assert.equal((await fs.readFile(file)).includes(Buffer.from('synthetic private text')), false);
+    await assert.rejects(restoreDemo(target.db, file, 'another-synthetic-passphrase'));
+    assert.equal(target.rows.size, 0);
+    assert.equal((await restoreDemo(target.db, file, pass)).documents, 43);
+    const restored = target.rows.get('diaries/d0');
+    assert.ok(restored.at.isEqual(new Timestamp(123,456)));
+    assert.ok(restored.point.isEqual(new GeoPoint(37,127)));
+    assert.ok(restored.bytes.equals(Buffer.from('bytes')));
+    assert.ok(Number.isNaN(restored.values[3]));
+    assert.deepEqual(decode(encode({ type: 'timestamp' }), target.db), { type: 'timestamp' });
+    await assert.rejects(exportBackup(db, file, pass)); // Existing good copy cannot be overwritten or removed.
+    assert.equal((await restoreDemo(database().db, file, pass)).documents, 43);
+    const tampered = await fs.readFile(file); tampered[45] ^= 1; await fs.writeFile(file, tampered);
+    const untouched = database(); await assert.rejects(restoreDemo(untouched.db, file, pass)); assert.equal(untouched.rows.size, 0);
+    await assert.rejects(restoreDemo({ ...target.db, projectId: 'production' }, file, pass));
+  } finally { if (previousHost === undefined) delete process.env.FIRESTORE_EMULATOR_HOST; else process.env.FIRESTORE_EMULATOR_HOST = previousHost; await fs.rm(dir, { recursive: true, force: true }); }
+});
+test('topic preparation reads 20 per page, dry run writes nothing and apply stores one bounded catalog', async () => {
+  const { db, rows } = database(Array.from({ length: 45 }, (_, i) => ['topics/t' + i, { content: '주제', order: 45 - i }]));
+  const options = { action: 'catalog', 'max-docs': '1000', apply: false };
+  const result = await prepare(db, options); assert.equal(result.topics, 45); assert.equal(rows.has('topicCatalog/current'), false);
+  await prepare(db, { ...options, apply: true }); assert.equal(rows.get('topicCatalog/current').topics[0].order, 1);
+  await assert.rejects(prepare(db, { ...options, 'max-docs': '20' }));
+});
+test('test app has an explicit demo project and loopback API, never production data', () => {
+  const env = buildEnvironment('test', { NEXT_PUBLIC_FIREBASE_PROJECT_ID: 'demo-dreamary-security' });
+  assert.equal(env.NEXT_PUBLIC_API_URL, 'http://127.0.0.1:3000');
+  assert.throws(() => buildEnvironment('test', { NEXT_PUBLIC_FIREBASE_PROJECT_ID: 'dreamary-1a9af' }));
+});
+
+test('staging isolation rejects production credentials and prevents Next env defaults leaking into test builds', async () => {
+  const { isolatedEnvironment, validateStaging } = require('./runtime-environment.cjs');
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'dreamary-env-test-'));
+  const input = { PATH: process.env.PATH, NEXT_PUBLIC_FIREBASE_PROJECT_ID: 'dreamary-1a9af', FIREBASE_SERVICE_ACCOUNT_KEY: '{"project_id":"dreamary-1a9af"}', OPENROUTER_API_KEY: 'synthetic-production-key' };
+  try {
+    await fs.writeFile(path.join(dir, '.env.local'), 'UNKNOWN_PRODUCTION_SECRET=synthetic-secret\nNEXT_PUBLIC_MIXPANEL_TOKEN=synthetic-tracking\n');
+    assert.throws(() => isolatedEnvironment('branch', input, dir), /staging/);
+    const demo = isolatedEnvironment('test', input, dir);
+    assert.equal(demo.OPENROUTER_API_KEY, ''); assert.equal(demo.FIREBASE_SERVICE_ACCOUNT_KEY, ''); assert.equal(demo.UNKNOWN_PRODUCTION_SECRET, '');
+    assert.equal(demo.NEXT_PUBLIC_FIREBASE_PROJECT_ID, 'demo-dreamary-security');
+    const staging = { DREAMARY_ENVIRONMENT:'staging', NEXT_PUBLIC_FIREBASE_PROJECT_ID:'dreamary-staging', NEXT_PUBLIC_API_URL:'https://dreamary-staging.netlify.app', NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN:'dreamary-staging.firebaseapp.com' };
+    await fs.writeFile(path.join(dir, '.env.staging.local'), Object.entries(staging).map(([k,v])=>k+'='+v).join('\n'));
+    const result = isolatedEnvironment('branch', input, dir);
+    assert.equal(result.NEXT_PUBLIC_FIREBASE_PROJECT_ID, 'dreamary-staging');
+    assert.equal(result.NEXT_PUBLIC_MIXPANEL_TOKEN, ''); assert.equal(result.PATH, input.PATH);
+    assert.throws(()=>validateStaging({...result,FIREBASE_SERVICE_ACCOUNT_KEY:input.FIREBASE_SERVICE_ACCOUNT_KEY}), /서비스 계정/);
+    assert.throws(()=>validateStaging({...result,NEXT_PUBLIC_API_URL:'https://dreamary.netlify.app'}));
+    assert.throws(()=>validateStaging(result,true), /서비스 계정/);
+    assert.throws(()=>validateStaging({...result,FIRESTORE_EMULATOR_HOST:'localhost:8080'}));
+    assert.equal(input.OPENROUTER_API_KEY, 'synthetic-production-key');
+  } finally { await fs.rm(dir,{recursive:true,force:true}); }
+});
+
+test('deployed staging functions reject a production service account before database initialization', () => {
+  const vm = require('node:vm'), ts = require('typescript'), source = require('node:fs').readFileSync(require.resolve('../src/lib/server/environmentGuard.ts'),'utf8');
+  const exports = {};
+  vm.runInNewContext(ts.transpileModule(source,{compilerOptions:{module:ts.ModuleKind.CommonJS}}).outputText,{exports,process:{env:{}},require:()=>({default:require('../app-build-targets.json')})});
+  const env={DREAMARY_ENVIRONMENT:'staging',NEXT_PUBLIC_FIREBASE_PROJECT_ID:'dreamary-staging',NEXT_PUBLIC_API_URL:'https://dreamary-staging.netlify.app',FIREBASE_SERVICE_ACCOUNT_KEY:'{"project_id":"dreamary-staging"}'};
+  assert.doesNotThrow(()=>exports.assertServerEnvironment(env));
+  assert.throws(()=>exports.assertServerEnvironment({...env,FIREBASE_SERVICE_ACCOUNT_KEY:'{"project_id":"dreamary-1a9af"}'}));
+  assert.throws(()=>exports.assertServerEnvironment({...env,FIREBASE_SERVICE_ACCOUNT_KEY:''}));
+  assert.throws(()=>exports.assertServerEnvironment({...env,FIRESTORE_EMULATOR_HOST:'127.0.0.1:8080'}));
+});
+
+test('mail endpoints load without a delivery key in isolated builds', async () => {
+  const vm = require('node:vm'), ts = require('typescript');
+  for (const file of ['src/app/api/auth/find-id/route.ts', 'netlify/functions/reset-password.mts', 'netlify/functions/auth-reset-password.ts']) {
+    const source = await fs.readFile(path.join(__dirname,'..',file),'utf8');
+    let constructions=0; const exports={};
+    vm.runInNewContext(ts.transpileModule(source,{fileName:file.replace(/\.mts$/, '.ts'),compilerOptions:{module:ts.ModuleKind.CommonJS}}).outputText,{exports,process:{env:{}},require:name=>name==='resend'?{Resend:class{constructor(){constructions++;throw new Error('No mail key');}}}:name==='next/server'?{NextResponse:{}}:name==='node:crypto'?require(name):{},console});
+    assert.equal(constructions,0,file);
+    assert.equal(typeof (exports.POST||exports.default),'function');
+  }
+});

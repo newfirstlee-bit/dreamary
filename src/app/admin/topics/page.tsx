@@ -1,5 +1,5 @@
 "use client";
-import { apiFetch } from '@/lib/api';
+import { apiPostJson, apiFetch } from '@/lib/api';
 
 import { useEffect, useState, useRef } from 'react';
 import { getTopics, saveTopic, deleteTopic, getTopicAnswerCount, Topic } from '@/lib/db';
@@ -7,6 +7,9 @@ import { Loader2, Trash2, GripVertical, Edit2 } from 'lucide-react';
 
 export default function AdminTopics() {
   const [topics, setTopics] = useState<Topic[]>([]);
+  const [cursor, setCursor] = useState<{ order: number; id: string } | null>(null);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [maximumOrder, setMaximumOrder] = useState(0);
   const [loading, setLoading] = useState(true);
   const [bulkInput, setBulkInput] = useState('');
   const [saving, setSaving] = useState(false);
@@ -17,11 +20,14 @@ export default function AdminTopics() {
   const dragItem = useRef<number | null>(null);
   const dragOverItem = useRef<number | null>(null);
 
-  const fetchTopics = async () => {
-    setLoading(true);
+  const fetchTopics = async (more = false) => {
+    if (more) setLoadingMore(true); else setLoading(true);
     try {
-      const data = await getTopics();
-      setTopics(data);
+      const result = await apiPostJson<{ topics: Topic[]; cursor: { order: number; id: string } | null; maximumOrder: number }>('/api/admin/topics-data', { action: 'list', cursor: more ? cursor : undefined });
+      const data = result.topics;
+      setTopics(previous => more ? [...previous, ...data] : data);
+      setCursor(result.cursor);
+      setMaximumOrder(result.maximumOrder);
       
       const counts: Record<string, number> = {};
       
@@ -38,12 +44,13 @@ export default function AdminTopics() {
           })
         );
       }
-      setAnswerCounts(counts);
+      setAnswerCounts(previous => more ? { ...previous, ...counts } : counts);
     } catch (error) {
       console.error("Failed to fetch topics:", error);
       alert("일기 주제를 불러오는 중 오류가 발생했습니다.");
     } finally {
       setLoading(false);
+      setLoadingMore(false);
     }
   };
 
@@ -56,7 +63,7 @@ export default function AdminTopics() {
     setSaving(true);
     const lines = bulkInput.split('\n').map(l => l.trim()).filter(l => l.length > 0);
     
-    let currentMaxOrder = topics.length > 0 ? Math.max(...topics.map(t => t.order)) : 0;
+    let currentMaxOrder = maximumOrder;
     
     for (const line of lines) {
       currentMaxOrder++;
@@ -91,10 +98,12 @@ export default function AdminTopics() {
     setLoading(true);
     
     try {
-      const res = await apiFetch('/api/admin/translate-topics', { method: 'POST' });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Failed to translate');
-      alert(`총 ${data.count}개의 항목이 성공적으로 번역되었습니다.`);
+      let cursor: string | null = null, count = 0;
+      do {
+        const data: { cursor: string | null; count: number } = await apiPostJson('/api/admin/translate-topics', { cursor });
+        cursor = data.cursor; count += data.count;
+      } while (cursor);
+      alert(`총 ${count}개의 항목이 성공적으로 번역되었습니다.`);
     } catch (err: any) {
       alert(`번역 중 오류가 발생했습니다: ${err.message}`);
     }
@@ -131,6 +140,7 @@ export default function AdminTopics() {
 
   const handleSort = async () => {
     if (dragItem.current === null || dragOverItem.current === null) return;
+    const orders = topics.map(topic => topic.order).sort((a, b) => a - b);
     const _topics = [...topics];
     const draggedItemContent = _topics.splice(dragItem.current, 1)[0];
     _topics.splice(dragOverItem.current, 0, draggedItemContent);
@@ -144,8 +154,8 @@ export default function AdminTopics() {
     // Save new orders
     setSaving(true);
     for (let i = 0; i < _topics.length; i++) {
-      if (_topics[i].order !== i + 1) {
-        _topics[i].order = i + 1;
+      if (_topics[i].order !== orders[i]) {
+        _topics[i].order = orders[i];
         await saveTopic(_topics[i]);
       }
     }
@@ -188,7 +198,7 @@ export default function AdminTopics() {
 
       <div style={{ backgroundColor: 'white', padding: '20px', borderRadius: '12px', border: '1px solid #ddd' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '15px' }}>
-          <h3 style={{ fontSize: '1.1rem', fontWeight: 'bold' }}>등록된 질문 목록 (총 {topics.length}개)</h3>
+          <h3 style={{ fontSize: '1.1rem', fontWeight: 'bold' }}>등록된 질문 목록 ({topics.length}개 표시)</h3>
           {selectedIds.size > 0 && (
             <button onClick={handleDeleteSelected} style={{ padding: '6px 12px', backgroundColor: '#FF3B30', color: 'white', border: 'none', borderRadius: '6px', fontWeight: 'bold', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '4px' }}>
               <Trash2 size={16} /> 선택 삭제 ({selectedIds.size})
@@ -207,6 +217,7 @@ export default function AdminTopics() {
         </div>
 
         <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+          {cursor && <button disabled={loadingMore} onClick={() => fetchTopics(true)}>{loadingMore ? '불러오는 중…' : '주제 20개 더보기'}</button>}
           {topics.map((t, index) => (
             <div 
               key={t.id} 

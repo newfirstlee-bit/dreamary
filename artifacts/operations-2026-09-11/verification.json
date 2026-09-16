@@ -1,0 +1,100 @@
+{
+  "date": "2026-09-11",
+  "baseCommit": "2b9d257feef43b77690ed029313d5a9acbb94d16",
+  "scope": "uncommitted local operations/scalability changes",
+  "checks": {
+    "regression": {
+      "command": "npm run test:regression (npm run build prebuild)",
+      "passed": 59,
+      "failed": 0
+    },
+    "rules": {
+      "project": "demo-dreamary-security",
+      "passed": 7,
+      "failed": 0
+    },
+    "encryptedRestore": {
+      "passed": 1,
+      "failed": 0,
+      "syntheticDocuments": 23
+    },
+    "checkApp": {
+      "command": "npm run check:app",
+      "exitCode": 0,
+      "target": "branch"
+    },
+    "webBuild": {
+      "command": "npm run build",
+      "exitCode": 0
+    },
+    "demoAppBuild": {
+      "command": "npm run build:app:test",
+      "exitCode": 0,
+      "note": "CI demo configuration; no real test Firebase provisioned"
+    },
+    "capacitorSync": {
+      "platforms": [
+        "ios",
+        "android"
+      ],
+      "exitCode": 0
+    },
+    "iosBuild": {
+      "scheme": "App",
+      "configuration": "Debug",
+      "sdk": "iphonesimulator",
+      "codeSigning": false,
+      "exitCode": 0
+    },
+    "androidBuild": {
+      "task": "assembleDebug",
+      "exitCode": 0
+    },
+    "clientSecretScan": {
+      "files": 94,
+      "filesContainingKnownServerSecrets": 0
+    },
+    "diffCheck": {
+      "exitCode": 0
+    }
+  },
+  "sourceLogs": {
+    "check-app": {
+      "sha256": "18367abd4a8e882bd6add4490f63fd8fafe19fea893b28eb86ba36f45409cbbe",
+      "bytes": 20728
+    },
+    "web-build": {
+      "sha256": "0d72fcbbff3695eab3d092f29bddad935012455cc80984a8371ea47c8d1b4a43",
+      "bytes": 25635
+    },
+    "test-build": {
+      "sha256": "a17883488b25ac39420282ee927e6269e69f0d95128f968be2177c67a9dc1c98",
+      "bytes": 20951
+    },
+    "rules": {
+      "sha256": "c0be1ca7961b863646ae0f1584f2f7210b867725bfa1168d703619d91835d697",
+      "bytes": 2050
+    },
+    "cap-sync": {
+      "sha256": "cfaf456821e56589d129bee2acaa29732484722b729c8f9ede5d96ebe5479e52",
+      "bytes": 1343
+    },
+    "ios-build": {
+      "sha256": "d8a7b96e6660b0f321d63aa9474f333924b92a5834bf498f4306ea3c0d39662b",
+      "bytes": 12649
+    },
+    "android-build": {
+      "sha256": "5f3921fbaad0ddd2236b9c7b2141ae4003e37d306de2da19d55c7cc941d8c9c4",
+      "bytes": 48098
+    }
+  },
+  "notPerformed": [
+    "production deployment",
+    "production rules/index mutations",
+    "production backup export",
+    "physical-device UI and external push receipt tests",
+    "paid plan changes",
+    "OTA installation",
+    "remote CI execution"
+  ]
+}

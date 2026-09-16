@@ -1,0 +1,24 @@
+{
+  "date": "2026-09-13",
+  "firebaseProjectCreated": true,
+  "netlifySiteCreated": true,
+  "regression": {
+    "pass": 67,
+    "fail": 0
+  },
+  "demoAppBuild": "passed",
+  "checkApp": "passed",
+  "stagingFirebase": {
+    "firestore": "asia-northeast3; production mode",
+    "authenticationEmailPassword": "enabled",
+    "rules": "published and matches local content ignoring final newline",
+    "indexes": "15/15 READY; remote definitions match local"
+  },
+  "publicNetlifyEnvironment": "normalized staging values verified against local",
+  "secretNetlifyEnvironment": "four staging secrets stored after explicit authorization for default free-plan scopes",
+  "stagingDeployment": "ready: 6aa6aa3da06f6a1a5a2eedec; HTTP 200",
+  "nativeSyncAndBuild": "check:app, ios/android sync, iOS Simulator and Android Debug passed",
+  "externalBlocker": null,
+  "productionMutations": false,
+  "latestEvidenceDirectory": "artifacts/staging-2026-09-13"
+}

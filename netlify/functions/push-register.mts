@@ -1,3 +1,5 @@
+import { consumeOperation, readJsonBody } from '../../src/lib/server/operationalGuard';
+import { DiaryAuthenticationError } from '../../src/lib/server/diaryAuthentication';
 import type { Config } from "@netlify/functions";
 import { FieldValue } from 'firebase-admin/firestore';
 import { corsHeaders } from '../shared/cors';
@@ -24,7 +26,7 @@ export default async function reqHandler(req: Request) {
     }
 
     const uid = await verifyFirebaseIdTokenRest(idToken);
-    const body = await req.json();
+    const body = await readJsonBody(req, 8192);
     const deviceId = typeof body?.deviceId === 'string' ? body.deviceId : '';
     const pushToken = typeof body?.pushToken === 'string' ? body.pushToken : '';
     const platform = body?.platform === 'ios' || body?.platform === 'android' ? body.platform : 'unknown';
@@ -32,11 +34,14 @@ export default async function reqHandler(req: Request) {
     const dateString = typeof body?.dateString === 'string' ? body.dateString : '';
     const locale = typeof body?.locale === 'string' ? body.locale : 'ko';
 
-    if (!deviceId || !pushToken) {
+    if (!deviceId || deviceId.length > 128 || !pushToken || pushToken.length > 4096 || platform === 'unknown') {
       return new Response(JSON.stringify({ error: '푸시 토큰 정보가 필요합니다.' }), { status: 400, headers: corsHeaders });
     }
 
     const { firestore } = getFirebaseAdminServices();
+    await consumeOperation(firestore, 'push-register', uid, 30);
+    const state = await firestore.collection('accountStates').doc(uid).get();
+    if (state.exists) throw new DiaryAuthenticationError(403, '탈퇴 처리 중인 계정입니다.');
     const todayDateString = getTodayKstDateString();
     let candidates = {};
     try {
@@ -44,7 +49,7 @@ export default async function reqHandler(req: Request) {
     } catch (candidateError) {
       // Push registration must not fail just because the optional diary-topic
       // candidate cache could not be rebuilt. The cache is refreshed again when
-      // a diary is completed and by the scheduler fallback path.
+      // a diary is completed when the user registers again.
       console.warn('Push candidate rebuild skipped during registration:', candidateError);
     }
     const safeDeviceId = sanitizeDocId(`${uid}_${deviceId}`);
@@ -52,6 +57,13 @@ export default async function reqHandler(req: Request) {
     const targetRef = firestore.collection('diaryPushTargets').doc(uid);
 
     await firestore.runTransaction(async transaction => {
+      const [existing, target, active, deletionState] = await Promise.all([
+        transaction.get(deviceRef), transaction.get(targetRef),
+        transaction.get(firestore.collection('pushDevices').where('uid', '==', uid).where('diaryPushEnabled', '==', true).limit(5)),
+        transaction.get(firestore.collection('accountStates').doc(uid)),
+      ]);
+      if (deletionState.exists) throw new DiaryAuthenticationError(403, '탈퇴 처리 중인 계정입니다.');
+      if (!existing.data()?.diaryPushEnabled && active.size >= 5) throw new DiaryAuthenticationError(409, '알림은 최대 5개 기기에 등록할 수 있습니다. 다른 기기의 알림을 먼저 꺼주세요.');
       transaction.set(deviceRef, {
         id: safeDeviceId,
         uid,
@@ -68,7 +80,7 @@ export default async function reqHandler(req: Request) {
 
       transaction.set(targetRef, {
         uid,
-        enabled: true,
+        enabled: true, deviceCursor: '',
         locale,
         latestCharacterId: characterId,
         lastDiaryDate: dateString || '',
@@ -82,6 +94,6 @@ export default async function reqHandler(req: Request) {
     return new Response(JSON.stringify({ success: true }), { headers: corsHeaders });
   } catch (error: any) {
     console.error('Push Register Error:', error);
-    return new Response(JSON.stringify({ error: error?.message || '푸시 등록 중 오류가 발생했습니다.' }), { status: 500, headers: corsHeaders });
+    return new Response(JSON.stringify({ error: error?.message || '푸시 등록 중 오류가 발생했습니다.' }), { status: error instanceof DiaryAuthenticationError ? error.status : 500, headers: corsHeaders });
   }
 }

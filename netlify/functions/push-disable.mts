@@ -1,5 +1,5 @@
 import type { Config } from "@netlify/functions";
-import { FieldValue } from 'firebase-admin/firestore';
+import { FieldPath, FieldValue } from 'firebase-admin/firestore';
 import { corsHeaders } from '../shared/cors';
 import { getFirebaseAdminServices, sanitizeDocId, verifyFirebaseIdTokenRest } from '../shared/push-shared.mts';
 
@@ -43,10 +43,14 @@ export default async function reqHandler(req: Request) {
         updatedAt: FieldValue.serverTimestamp(),
       }, { merge: true });
     } else {
-      const deviceSnap = await firestore.collection('pushDevices').where('uid', '==', uid).get();
-      for (let start = 0; start < deviceSnap.docs.length; start += 450) {
+      let cursor: string | undefined;
+      for (;;) {
+        let query = firestore.collection('pushDevices').where('uid', '==', uid).orderBy(FieldPath.documentId()).limit(20);
+        if (cursor) query = query.startAfter(cursor);
+        const deviceSnap = await query.get();
+        if (deviceSnap.empty) break;
         const batch = firestore.batch();
-        deviceSnap.docs.slice(start, start + 450).forEach(doc => {
+        deviceSnap.docs.forEach(doc => {
           batch.set(doc.ref, {
             diaryPushEnabled: false,
             disabledAt: FieldValue.serverTimestamp(),
@@ -54,6 +58,8 @@ export default async function reqHandler(req: Request) {
           }, { merge: true });
         });
         await batch.commit();
+        if (deviceSnap.size < 20) break;
+        cursor = deviceSnap.docs[deviceSnap.docs.length - 1].id;
       }
     }
 

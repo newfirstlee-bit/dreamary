@@ -1,5 +1,7 @@
 "use client";
-import { apiFetch, apiPostJson } from '@/lib/api';
+import { apiPostJson } from '@/lib/api';
+import { sendChatRequest } from '@/lib/chatRequest';
+import { MAX_CHAT_INPUT } from '@/lib/productLimits';
 import { showAd } from "@/lib/ads";
 
 import { useEffect, useState, useRef, ReactNode, useCallback, Suspense } from 'react';
@@ -8,7 +10,7 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import { Capacitor } from '@capacitor/core';
 import { useUserId } from '@/hooks/useUserId';
 import { auth } from '@/lib/firebase';
-import { getCharacterById, Character, getUserProfile, UserProfile, getChatMessages, subscribeChatMessages, ChatMessage, saveChatMessage, deleteChatMessages, unlockMessageAd, updateChatMessage, deleteMessage } from '@/lib/db';
+import { getCharacterById, Character, getUserProfile, UserProfile, getChatMessages, getChatMessagesPage, ChatPage, subscribeChatMessages, ChatMessage, saveChatMessage, deleteChatMessages, unlockMessageAd, updateChatMessage, deleteMessage } from '@/lib/db';
 import { Loader2, ChevronLeft, MoreVertical, Send, User, MoreHorizontal, Lock, Pencil, Trash2, Siren } from 'lucide-react';
 import AdModal from '@/components/AdModal';
 import ErrorModal from '@/components/ErrorModal';
@@ -22,6 +24,8 @@ import { buildStaticEntityRoute, resolveStaticEntityId } from '@/lib/navigation'
 import { ensureInitialPing } from '@/lib/initialPing';
 import { logAdDiagnostic } from '@/lib/adDiagnostics';
 import { useAsyncActionLock } from '@/hooks/useAsyncActionLock';
+import { useChatKeyboard } from '@/hooks/useChatKeyboard';
+import { readPendingChat, pendingReply, type PendingChat } from '@/lib/pendingChat';
 
 // polyfill for crypto.randomUUID() which fails on HTTP (non-HTTPS) mobile
 const generateId = (): string => {
@@ -42,13 +46,22 @@ function ChatDetailContent({ params }: { params: { id: string } }) {
   const [character, setCharacter] = useState<Character | null>(null);
   const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [historyCursor, setHistoryCursor] = useState<ChatPage['nextCursor']>(null);
+  const [loadingHistory, setLoadingHistory] = useState(false);
+  const historyLoadingRef = useRef(false);
+  const viewGeneration = useRef(0);
+  const pendingSend = useRef<PendingChat | null>(null);
+  const [recoveryPending, setRecoveryPending] = useState(false);
   const [inputMsg, setInputMsg] = useState("");
   const [isTyping, setIsTyping] = useState(false);
   const { isPending: isSending, runLocked: runChatSendLocked } = useAsyncActionLock();
+  const { isPending: isDeletingChat, runLocked: runDeleteLocked } = useAsyncActionLock();
   const [streamingContent, setStreamingContent] = useState('');
   const [streamingMessageId, setStreamingMessageId] = useState<string | null>(null);
   const [showSettings, setShowSettings] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const deleteFailureRef = useRef(false);
+  const [deleteFailed, setDeleteFailed] = useState(false);
   const [reportTarget, setReportTarget] = useState<ChatMessage | null>(null);
   
   // Message Edit/Delete States
@@ -58,6 +71,7 @@ function ChatDetailContent({ params }: { params: { id: string } }) {
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const chatAreaRef = useRef<HTMLDivElement>(null);
+  useChatKeyboard(chatAreaRef);
   const isAutoScrollEnabled = useRef(true);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const inputAreaRef = useRef<HTMLDivElement>(null);
@@ -112,6 +126,7 @@ function ChatDetailContent({ params }: { params: { id: string } }) {
   const [adFailureMessage, setAdFailureMessage] = useState('');
   const [modalResolver, setModalResolver] = useState<((didOpen: boolean) => void) | null>(null);
 
+  const adResolverRef = useRef<((didOpen: boolean) => void) | null>(null);
   const confirmAd = () => {
     showAd((result) => {
       setAdModalOpen(false);
@@ -121,6 +136,7 @@ function ChatDetailContent({ params }: { params: { id: string } }) {
         }
         modalResolver(result.didOpen);
         setModalResolver(null);
+        adResolverRef.current = null;
       }
     });
   };
@@ -129,6 +145,7 @@ function ChatDetailContent({ params }: { params: { id: string } }) {
     setAdModalOpen(false);
     if (modalResolver) {
       modalResolver(false);
+      adResolverRef.current = null;
       setModalResolver(null);
     }
   };
@@ -149,65 +166,103 @@ function ChatDetailContent({ params }: { params: { id: string } }) {
     alert(t('report.success'));
   };
 
-  const loadMessages = async () => {
-    if (!userId) return;
-    const history = await getChatMessages(userId, characterId);
-    setMessages(history);
-  };
-
   useEffect(() => {
     if (!userId) return; // auth 초기화 전에는 실행하지 않음
     trackEvent('Chat_Opened', { character_id: characterId });
     
+    let cancelled = false;
+    let unsubscribe: (() => void) | undefined;
+    let recoveryTimer: ReturnType<typeof setTimeout> | undefined;
+    let recoveryChecks = 0;
+    viewGeneration.current++;
+    setMessages([]);
+    setCharacter(null);
+    setIsTyping(false);
+    setStreamingContent('');
+    historyLoadingRef.current = false;
+    setLoadingHistory(false);
+    setHistoryCursor(null);
+    setLoading(true);
+    const pending = readPendingChat(userId, characterId);
+    pendingSend.current = pending;
+    setInputMsg(pending ? '' : (loadDraft(characterId, 'chat') || ''));
+    setRecoveryPending(Boolean(pending));
+    const completePending = () => {
+      localStorage.removeItem(`chat_pending_${userId}_${characterId}`);
+      clearDraft(characterId, 'chat');
+      pendingSend.current = null;
+      setRecoveryPending(false);
+      if (recoveryTimer) clearTimeout(recoveryTimer);
+    };
+    const recoverPending = async () => {
+      if (cancelled || !pending || !pendingSend.current) return;
+      try {
+        const result = await apiPostJson<{ status: string; reply?: ChatMessage }>('/api/chat/status', { userId, characterId, requestId: pending.id });
+        if (cancelled || !pendingSend.current) return;
+        if (result.status === 'complete' && result.reply) {
+          const reply = result.reply;
+          if (reply.userId !== userId || reply.characterId !== characterId || reply.requestId !== pending.id) throw new Error('Reply identity mismatch');
+          setMessages(previous => previous.some(m => m.id === reply.id) ? previous : [...previous, reply]);
+          completePending();
+          clearUserCache(userId, ['chat', 'home']);
+          return;
+        }
+        if (result.status === 'failed' || (result.status === 'missing' && Date.now() - pending.createdAt > 15000)) {
+          setRecoveryPending(false);
+          setInputMsg(pending.text);
+          saveDraft(characterId, pending.text, 'chat');
+          setErrorModalOpen(true);
+          return;
+        }
+      } catch {
+        if (cancelled) return;
+        // A network failure is not evidence that the server stopped generating.
+      }
+      if (!cancelled && ++recoveryChecks < 12) recoveryTimer = setTimeout(recoverPending, 5000);
+      else if (!cancelled) { setRecoveryPending(false); setErrorModalOpen(true); }
+    };
     const init = async () => {
       try {
         const char = await getCharacterById(characterId);
-        if (!char) {
-          router.replace('/chat');
-          return;
-        }
+        if (cancelled) return;
+        if (!char || char.userId !== userId) { router.replace('/chat'); return; }
         setCharacter(char);
-
-        const draft = loadDraft(char.id, 'chat');
-        if (draft) {
-          setInputMsg(draft);
-          draftLoaded.current = true;
-        }
-
-        const profile = await getUserProfile(char.id);
+        const [profile, page] = await Promise.all([getUserProfile(char.id), getChatMessagesPage(userId, char.id)]);
+        if (cancelled) return;
         setUserProfile(profile);
-
-        const history = await getChatMessages(userId, char.id);
-        // Render the authoritative one-time read immediately. The realtime
-        // listener can be delayed or unavailable on a first WebView mount;
-        // waiting for it made a chat with a visible preview appear blank.
-        setMessages(history);
-        if (history.length === 0) {
-          triggerInitialPing(char, profile);
-        }
-
-        const unsubscribe = subscribeChatMessages(userId!, char.id, (msgs) => {
-          setMessages(msgs);
-        });
-
-        return () => unsubscribe();
-      } catch (error) {
-        console.error('Failed to load chat:', error);
+        setMessages(page.messages);
+        setHistoryCursor(page.nextCursor);
+        if (pending && pendingReply(page.messages, pending)) completePending();
+        else if (pending) void recoverPending();
+        if (!page.messages.length) void triggerInitialPing(char, profile);
+        let previousWindow = new Set(page.messages.map(m => m.id));
+        unsubscribe = subscribeChatMessages(userId, char.id, incoming => {
+          if (cancelled) return;
+          if (pendingSend.current && pendingReply(incoming, pendingSend.current)) completePending();
+          if (!incoming.length) { setMessages([]); setHistoryCursor(null); return; }
+          const ids = new Set(incoming.map(m => m.id));
+          const oldest = incoming[0];
+          const oldWindow = previousWindow;
+          setMessages(previous => {
+            const older = previous.filter(m => !ids.has(m.id) && (!oldWindow.has(m.id) ||
+              (oldest && (m.createdAt < oldest.createdAt || (m.createdAt === oldest.createdAt && m.id < oldest.id)))));
+            return [...older, ...incoming].sort((a, b) => a.createdAt - b.createdAt || a.id.localeCompare(b.id));
+          });
+          previousWindow = ids;
+        }, () => { if (!cancelled) setErrorModalOpen(true); });
+      } catch {
+        if (!cancelled) setErrorModalOpen(true);
       } finally {
-        setLoading(false);
+        if (!cancelled) setLoading(false);
       }
     };
-    
-    let unsub: (() => void) | void;
-    init().then(res => { unsub = res; });
-    return () => {
-      if (unsub) unsub();
-    };
+    void init();
+    return () => { cancelled = true; if (recoveryTimer) clearTimeout(recoveryTimer); viewGeneration.current++; adResolverRef.current?.(false); adResolverRef.current = null; unsubscribe?.(); };
   }, [characterId, router, userId]);
 
   useEffect(() => {
     if (isAutoScrollEnabled.current && !editingMessageId) {
-      messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+      chatAreaRef.current?.scrollTo({ top: chatAreaRef.current.scrollHeight, behavior: 'smooth' });
     }
     if (messages.length > 0) {
       localStorage.setItem(`chat_read_${characterId}`, messages[messages.length - 1].id);
@@ -267,31 +322,65 @@ function ChatDetailContent({ params }: { params: { id: string } }) {
 
   const triggerInitialPing = async (char: Character, profile: UserProfile | null) => {
     if (!userId) return;
+    const generation = viewGeneration.current;
     setIsTyping(true);
     try {
       await ensureInitialPing({ character: char, userProfile: profile, userId });
-      clearUserCache(userId, ['chat', 'home']);
+      clearUserCache(userId, ['chat', 'home', 'chat-preview:' + characterId]);
     } catch (error) {
       console.error('Initial ping failed:', error);
     } finally {
-      setIsTyping(false);
+      if (generation === viewGeneration.current) setIsTyping(false);
     }
   };
 
+  const loadOlderMessages = async () => {
+    if (!userId || !historyCursor || historyLoadingRef.current) return;
+    const generation = viewGeneration.current;
+    historyLoadingRef.current = true;
+    setLoadingHistory(true);
+    isAutoScrollEnabled.current = false;
+    const oldHeight = chatAreaRef.current?.scrollHeight || 0;
+    const oldTop = chatAreaRef.current?.scrollTop || 0;
+    try {
+      const page = await getChatMessagesPage(userId, characterId, historyCursor);
+      if (generation !== viewGeneration.current) return;
+      setHistoryCursor(page.nextCursor);
+      setMessages(previous => Array.from(new Map([...page.messages, ...previous].map(m => [m.id, m])).values())
+        .sort((a, b) => a.createdAt - b.createdAt || a.id.localeCompare(b.id)));
+      requestAnimationFrame(() => {
+        if (generation === viewGeneration.current && chatAreaRef.current)
+          chatAreaRef.current.scrollTop = oldTop + chatAreaRef.current.scrollHeight - oldHeight;
+      });
+    } catch { if (generation === viewGeneration.current) setErrorModalOpen(true); }
+    finally { if (generation === viewGeneration.current) { historyLoadingRef.current = false; setLoadingHistory(false); } }
+  };
+
   const handleSend = async () => {
-    if (!inputMsg.trim() || !character) return;
+    if (!inputMsg.trim() || !character || !userId || isDeletingChat || isTyping || recoveryPending || inputMsg.trim().length > MAX_CHAT_INPUT) return;
 
     await runChatSendLocked(async () => {
+      const generation = viewGeneration.current;
+      const isCurrent = () => generation === viewGeneration.current;
       const userText = inputMsg.trim();
-      const requestId = generateId();
+      const pendingKey = `chat_pending_${userId}_${character.id}`;
+      let previous = pendingSend.current;
+      try { previous = JSON.parse(localStorage.getItem(pendingKey) || 'null') || previous; } catch {};
+      const pending = previous && previous.text === userText && previous.owner === userId && previous.character === character.id
+        ? previous : { text: userText, owner: userId!, character: character.id, id: generateId(), createdAt: Date.now() };
+      pendingSend.current = pending;
+      localStorage.setItem(pendingKey, JSON.stringify(pending));
+      saveDraft(character.id, userText, 'chat');
+      const requestId = pending.id;
 
       const userMsg: ChatMessage = {
-        id: Date.now().toString(),
+        id: 'user_' + requestId,
         userId: userId!,
         characterId: character.id,
         role: 'user',
         content: userText,
-        createdAt: Date.now()
+        createdAt: pending.createdAt,
+        requestId,
       };
 
       // Note: Since we have subscribeChatMessages, it will automatically update 'messages' state.
@@ -325,20 +414,22 @@ function ChatDetailContent({ params }: { params: { id: string } }) {
       let savedId = '';
       let attemptedAdTurn = false;
       let userMessagePersisted = false;
+      let aiRequested = false;
       try {
         // Save before calling AI so the server can build context, but remove it again if sending fails.
         await saveChatMessage(userMsg);
         userMessagePersisted = true;
+        if (!isCurrent()) throw new Error('VIEW_CHANGED');
         if (userId) clearUserCache(userId, ['chat', 'home']);
 
         const isAdTurn = shouldShowChatAd();
-        const isNativeChat = Capacitor.isNativePlatform();
         attemptedAdTurn = isAdTurn;
 
         let adWaitPromise = Promise.resolve(true);
         if (isAdTurn) {
           setAdModalOpen(true);
           adWaitPromise = new Promise<boolean>((resolve) => {
+            adResolverRef.current = resolve;
             setModalResolver(() => (didOpen: boolean) => resolve(didOpen));
           });
           const adOpened = await adWaitPromise;
@@ -350,60 +441,32 @@ function ChatDetailContent({ params }: { params: { id: string } }) {
         }
 
         // Get recent 10 messages for context
-        const contextMessages = [...messages, userMsg].slice(-10);
+        if (!isCurrent()) throw new Error('VIEW_CHANGED');
+        const contextMessages = [...messages.filter(m => m.id !== userMsg.id), userMsg].slice(-10);
 
-        const res = await apiFetch('/api/chat', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            character,
-            userProfile,
-            messages: contextMessages,
-            isFirstPing: false,
-            userId: userId,
-            isAdTurn: false,
-            requestId
-          })
-        });
-
-        if (!res.ok) {
-          throw new Error('Failed to fetch from API');
-        }
-
-        const reader = res.body?.getReader();
-        if (!reader) throw new Error('Streaming not supported');
-
-        savedId = res.headers.get('X-Message-Id') || '';
-        if (savedId) {
-          setStreamingMessageId(savedId);
-        }
-
-        const decoder = new TextDecoder('utf-8');
-        let done = false;
-        let assistantReply = '';
-
-        while (!done) {
-          const { value, done: readerDone } = await reader.read();
-          done = readerDone;
-          if (value) {
-            const chunk = decoder.decode(value, { stream: true });
-            const pieces = chunk.match(/.{1,3}/g) || [];
-
-            for (const piece of pieces) {
-              assistantReply += piece;
-              setStreamingContent(assistantReply);
-              await new Promise(resolve => setTimeout(resolve, 50));
-            }
-          }
-        }
-
+        aiRequested = true;
+        localStorage.setItem(pendingKey, JSON.stringify({ ...pending, phase: 'requested' }));
+        clearDraft(character.id, 'chat');
+        const result = await sendChatRequest({
+          character, userProfile, messages: contextMessages, isFirstPing: false,
+          userId, isAdTurn: false, requestId,
+        }, (text, id) => { if (isCurrent()) { setStreamingContent(text); setStreamingMessageId(id); } });
+        if (!result.savedId || typeof result.reply !== 'string') throw new Error('Missing saved reply');
+        savedId = result.savedId;
+        localStorage.removeItem(pendingKey);
+        clearDraft(character.id, 'chat');
+        recordSuccessfulChatTurn();
+        if (!isCurrent()) return;
+        setMessages(previous => previous.some(m => m.id === savedId) ? previous : [...previous, {
+          id: savedId, userId: userId!, characterId: character.id, role: 'assistant',
+          content: result.reply, createdAt: Date.now(), requestId,
+        }].sort((a, b) => a.createdAt - b.createdAt) as ChatMessage[]);
+        pendingSend.current = null;
         setStreamingContent('');
         setStreamingMessageId(null);
         success = true;
 
         if (success) {
-          recordSuccessfulChatTurn();
-          clearDraft(character.id, 'chat');
 
           trackEvent('Chat_Response_Received', {
             character_id: character.id,
@@ -414,17 +477,30 @@ function ChatDetailContent({ params }: { params: { id: string } }) {
         }
       } catch (error) {
         console.error('Send failed:', error);
+        if (userMessagePersisted && !aiRequested) await deleteMessage(userMsg.id).catch(() => {});
+        if (!isCurrent()) return;
         closeAdModal();
         setStreamingMessageId(null);
 
-        setMessages(prev => prev.filter(m => m.id !== userMsg.id));
-        if (userMessagePersisted) {
-          deleteMessage(userMsg.id).catch(deleteError => {
-            console.warn('Failed to remove unsent chat message:', deleteError);
-          });
+        if (!aiRequested) {
+          setMessages(prev => prev.filter(m => m.id !== userMsg.id));
+          setInputMsg(userText);
+          saveDraft(character.id, userText, 'chat');
+        } else {
+          // The request may have reached the server even when the client timed
+          // out. Keep the composer empty and show the pending indicator until
+          // the subscription/recovery path observes the matching reply.
+          setRecoveryPending(true);
+          window.setTimeout(() => {
+            if (pendingSend.current?.id !== requestId || !isCurrent()) return;
+            pendingSend.current = null;
+            localStorage.removeItem(pendingKey);
+            setRecoveryPending(false);
+            setInputMsg(userText);
+            saveDraft(character.id, userText, 'chat');
+            setErrorModalOpen(true);
+          }, 60000);
         }
-        setInputMsg(userText);
-        saveDraft(character.id, userText, 'chat');
         if ((error as Error)?.message !== 'AD_OPEN_FAILED') {
           if (attemptedAdTurn) {
             logAdDiagnostic('chat', 'app_server_request_failed', { characterId: character.id, requestId }, error);
@@ -432,23 +508,36 @@ function ChatDetailContent({ params }: { params: { id: string } }) {
           setErrorModalOpen(true);
         }
       } finally {
-        setIsTyping(false);
+        if (isCurrent()) { setIsTyping(false); setStreamingContent(''); }
       }
     });
   };
 
-  const handleDeleteChat = async () => {
+  const handleDeleteChat = () => runDeleteLocked(async () => {
+    if (deleteFailureRef.current || isSending || isTyping || recoveryPending) return;
+    const generation = viewGeneration.current;
     try {
       if (!userId) return;
       await deleteChatMessages(userId, characterId);
+      clearDraft(characterId, 'chat');
+      clearUserCache(userId, ['chat', 'home', `chat-preview:${characterId}`]);
+      if (generation !== viewGeneration.current) return;
+      pendingSend.current = null;
+      localStorage.removeItem(`chat_pending_${userId}_${characterId}`);
+      setHistoryCursor(null);
       setMessages([]);
       setShowSettings(false);
       setShowDeleteConfirm(false);
-      if (character) triggerInitialPing(character, userProfile);
+      setInputMsg('');
+      if (character) void triggerInitialPing(character, userProfile);
     } catch (error) {
-      alert(t('chat.deleteFailed'));
+      if (generation === viewGeneration.current) {
+        deleteFailureRef.current = true;
+        setDeleteFailed(true);
+        alert(t('chat.deleteFailed'));
+      }
     }
-  };
+  });
 
   const insertActionBracket = () => {
     if (!inputRef.current) return;
@@ -609,8 +698,12 @@ function ChatDetailContent({ params }: { params: { id: string } }) {
         ref={chatAreaRef} 
         className="chat-scroll-area"
         onScroll={handleScroll} 
-        style={{ flex: 1, overflowY: 'auto', padding: '20px', display: 'flex', flexDirection: 'column', gap: '15px', overscrollBehavior: 'none' }}
+        style={{ padding: '20px', display: 'flex', flexDirection: 'column', gap: '15px', overscrollBehavior: 'none' }}
       >
+        {historyCursor && <button onClick={loadOlderMessages} disabled={loadingHistory}
+          style={{ alignSelf: 'center', padding: '10px 16px', borderRadius: '12px', background: 'white', color: 'var(--foreground)', border: '1px solid var(--border-color)' }}>
+          {loadingHistory ? (locale === 'ja' ? '読み込み中…' : '불러오는 중…') : (locale === 'ja' ? '以前の会話をもっと見る' : '이전 대화 더보기')}
+        </button>}
         {messages.filter(msg => msg.id !== streamingMessageId).map((msg, idx, filteredMessages) => {
           const isUser = msg.role === 'user';
           const showProfile = !isUser && (idx === 0 || filteredMessages[idx - 1].role === 'user');
@@ -697,11 +790,11 @@ function ChatDetailContent({ params }: { params: { id: string } }) {
                             }
                             try {
                               await unlockMessageAd(msg.id);
+                              setMessages(previous => previous.map(item => item.id === msg.id ? { ...item, isAdLocked: false } : item));
                               logAdDiagnostic('chat', 'ad_completed', { characterId: character.id, messageId: msg.id, action: 'unlock_existing_message' });
                             } catch (e) {
                               logAdDiagnostic('chat', 'ad_unlock_failed', { characterId: character.id, messageId: msg.id, action: 'unlock_existing_message' }, e);
                             }
-                            loadMessages();
                           });
                         }}
                         style={{
@@ -823,7 +916,7 @@ function ChatDetailContent({ params }: { params: { id: string } }) {
           </div>
         )}
 
-        {isTyping && !streamingContent && (
+        {(isTyping || recoveryPending) && !streamingContent && (
           <div style={{ display: 'flex', justifyContent: 'flex-start', gap: '10px', alignItems: 'flex-end', marginBottom: '20px' }}>
             {character?.image && (
               <div style={{ width: '36px', height: '36px', borderRadius: '50%', backgroundColor: 'var(--gray-200)', overflow: 'hidden', position: 'relative', flexShrink: 0 }}>
@@ -857,6 +950,7 @@ function ChatDetailContent({ params }: { params: { id: string } }) {
           <div style={{ display: 'flex', gap: '10px', alignItems: 'center', marginTop: '5px' }}>
             <textarea
               ref={inputRef}
+              maxLength={MAX_CHAT_INPUT}
               className="chat-message-input"
               rows={1}
               value={inputMsg}
@@ -868,7 +962,7 @@ function ChatDetailContent({ params }: { params: { id: string } }) {
                 }
                 resizeChatInput(e.target);
               }}
-              onFocus={() => window.setTimeout(() => messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }), 100)}
+              onFocus={() => window.setTimeout(() => chatAreaRef.current?.scrollTo({ top: chatAreaRef.current.scrollHeight, behavior: 'smooth' }), 100)}
               onKeyDown={(e) => {
                 if (e.key === 'Enter' && !e.shiftKey) {
                   e.preventDefault();
@@ -896,8 +990,8 @@ function ChatDetailContent({ params }: { params: { id: string } }) {
       {/* Settings Bottom Sheet */}
       {showSettings && (
         <>
-          <div onClick={() => setShowSettings(false)} style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.5)', zIndex: 100 }} />
-          <div style={{ position: 'absolute', bottom: 0, left: 0, right: 0, backgroundColor: 'white', borderTopLeftRadius: '20px', borderTopRightRadius: '20px', padding: '25px', zIndex: 101, display: 'flex', flexDirection: 'column', gap: '15px' }}>
+          <div onClick={() => setShowSettings(false)} style={{ position: 'fixed', inset: 0, backgroundColor: 'rgba(0,0,0,0.5)', zIndex: 2000 }} />
+          <div style={{ position: 'fixed', bottom: 0, left: 0, right: 0, width: '100%', maxWidth: '480px', margin: '0 auto', maxHeight: 'calc(var(--app-viewport-height, 100dvh) - var(--safe-top) - 24px)', overflowY: 'auto', backgroundColor: 'white', borderTopLeftRadius: '20px', borderTopRightRadius: '20px', padding: '25px 25px calc(25px + var(--bottom-ui-safe-gap))', zIndex: 2001, display: 'flex', flexDirection: 'column', gap: '15px' }}>
             <h3 style={{ fontSize: '1.2rem', fontWeight: 'bold', marginBottom: '10px' }}>{t('chat.settings')}</h3>
             
             <button 
@@ -916,7 +1010,7 @@ function ChatDetailContent({ params }: { params: { id: string } }) {
             <div style={{ height: '1px', backgroundColor: 'var(--border-color)', margin: '10px 0' }} />
             
             <button 
-              onClick={() => { setShowDeleteConfirm(true); setShowSettings(false); }}
+              onClick={() => { deleteFailureRef.current = false; setDeleteFailed(false); setShowDeleteConfirm(true); setShowSettings(false); }}
               style={{ padding: '15px', borderRadius: '12px', backgroundColor: '#FFF0F0', border: '1px solid #FFCDCD', color: 'red', textAlign: 'left', fontSize: '1rem', fontWeight: 'bold', cursor: 'pointer' }}
             >
               {t('chat.deleteAll')}
@@ -928,7 +1022,7 @@ function ChatDetailContent({ params }: { params: { id: string } }) {
       {showDeleteConfirm && (
         <>
           <div 
-            onClick={() => setShowDeleteConfirm(false)}
+            onClick={() => { if (!isDeletingChat) { deleteFailureRef.current = false; setDeleteFailed(false); setShowDeleteConfirm(false); } }}
             style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.5)', zIndex: 3000 }} 
           />
           <div style={{ 
@@ -945,12 +1039,15 @@ function ChatDetailContent({ params }: { params: { id: string } }) {
             <div style={{ display: 'flex', gap: '10px', width: '100%' }}>
               <button 
                 onClick={handleDeleteChat}
-                style={{ flex: 1, padding: '15px', backgroundColor: '#FF3B30', color: 'white', border: 'none', borderRadius: '12px', fontSize: '1rem', fontWeight: 'bold', cursor: 'pointer' }}
+                disabled={isDeletingChat || deleteFailed || isSending || isTyping || recoveryPending}
+                aria-busy={isDeletingChat}
+                style={{ flex: 1, padding: '15px', backgroundColor: isDeletingChat || deleteFailed ? '#FFB3AD' : '#FF3B30', color: 'white', border: 'none', borderRadius: '12px', fontSize: '1rem', fontWeight: 'bold', cursor: isDeletingChat ? 'wait' : 'not-allowed', opacity: isDeletingChat || deleteFailed ? 0.8 : 1, display: 'flex', justifyContent: 'center', alignItems: 'center' }}
               >
-                {t('common.delete')}
+                {isDeletingChat ? <span className="loading-dots" aria-label={locale === 'ja' ? '削除中' : '삭제 중'}>...</span> : t('common.delete')}
               </button>
               <button 
-                onClick={() => setShowDeleteConfirm(false)}
+                onClick={() => { if (!isDeletingChat) { deleteFailureRef.current = false; setDeleteFailed(false); setShowDeleteConfirm(false); } }}
+                disabled={isDeletingChat}
                 style={{ flex: 1, padding: '15px', backgroundColor: 'var(--gray-100)', color: 'var(--foreground)', border: 'none', borderRadius: '12px', fontSize: '1rem', fontWeight: 'bold', cursor: 'pointer' }}
               >
                 {t('common.cancel')}

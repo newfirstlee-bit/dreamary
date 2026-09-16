@@ -1,3 +1,4 @@
+import { consumeOperation, readJsonBody } from '../../src/lib/server/operationalGuard';
 import type { Config } from '@netlify/functions';
 import { adminDb } from '../../src/lib/firebase-admin';
 import { corsHeaders } from '../shared/cors';
@@ -5,7 +6,7 @@ import { DiaryAuthenticationError } from '../../src/lib/server/diaryAuthenticati
 import { isGuestId, secretHash, sameHash, issueGuestSession, securityErrorResponse } from '../../src/lib/server/guestIdentity';
 import { logGuestSessionFailure, type GuestSessionStage } from '../../src/lib/server/guestSessionDiagnostics';
 
-export const config: Config = { path: '/api/guest/session' };
+export const config: Config = { path: '/api/guest/session', rateLimit: { windowSize: 60, windowLimit: 20, aggregateBy: ['ip', 'domain'] } };
 export default async function handler(req: Request) {
   if (req.method === 'OPTIONS') return new Response(null, { status: 204, headers: corsHeaders });
   if (req.method !== 'POST') return new Response(null, { status: 405, headers: corsHeaders });
@@ -13,7 +14,7 @@ export default async function handler(req: Request) {
   try {
     if (!adminDb) throw new DiaryAuthenticationError(503, '서버 설정이 필요합니다.');
     stage = 'request-validation';
-    const { userId, secret } = await req.json();
+    const { userId, secret } = await readJsonBody(req, 2048);
     if (!isGuestId(userId) || typeof secret !== 'string' || !/^[a-f0-9]{64}$/.test(secret)) {
       throw new DiaryAuthenticationError(400, '비로그인 인증정보가 필요합니다.');
     }
@@ -26,7 +27,7 @@ export default async function handler(req: Request) {
     const initial = await ref.get();
     if (initial.exists) {
       if (initial.data()?.retired || !sameHash(initial.data()?.secretHash, hash)) throw new DiaryAuthenticationError(403, '이미 다른 인증키에 연결되었거나 사용이 종료된 ID입니다.');
-      return Response.json({ token, expiresAt: Date.now() + 15 * 60 * 1000 }, {
+      return Response.json({ token, expiresAt: Date.now() + 15 * 60 * 1000, migrationState: initial.data()?.migrationState || null }, {
         headers: { ...corsHeaders, 'Cache-Control': 'no-store' },
       });
     }
@@ -42,6 +43,10 @@ export default async function handler(req: Request) {
       }
     }
     stage = 'credential-transaction';
+      const network = secretHash(req.headers.get('x-nf-client-connection-ip') || 'unidentified-network');
+      await consumeOperation(adminDb, 'guest-registration', network, 20);
+      await consumeOperation(adminDb, 'guest-registration-global', 'global', 500);
+
     await adminDb.runTransaction(async transaction => {
       const current = await transaction.get(ref);
       if (current.exists) {

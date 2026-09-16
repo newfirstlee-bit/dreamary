@@ -1,5 +1,5 @@
 "use client";
-import { apiFetch } from '@/lib/api';
+import { apiPostJson } from '@/lib/api';
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
@@ -22,20 +22,13 @@ export default function ResetPasswordPage() {
     setSuccess(false);
 
     try {
-      const res = await apiFetch('/.netlify/functions/reset-password', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id, email })
-      });
-      const data = await res.json();
-      
-      if (!res.ok) {
-        throw new Error(data.error?.startsWith('auth.') ? t(data.error) : (data.error || t('auth.resetFailed')));
-      }
+      // Keep the app on the same canonical Netlify function as the production
+      // web flow. The legacy function uses a separate Firebase REST path.
+      await apiPostJson('/api/auth/reset-password', { id, email });
 
       setSuccess(true);
     } catch (err: any) {
-      setError(err.message);
+      setError(err.message?.startsWith('auth.') ? t(err.message) : t('auth.resetFailed'));
     } finally {
       setLoading(false);
     }

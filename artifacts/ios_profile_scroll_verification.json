@@ -1,0 +1,24 @@
+{
+  "journey": "iOS user profile edit scroll verification",
+  "device": "iPhone 17 Pro simulator (iOS 26.5)",
+  "results": [
+    {
+      "action": "Build and launch the Capacitor app in the iOS simulator",
+      "status": "PASSED",
+      "commands": ["xcodebuild", "xcrun simctl install", "xcrun simctl launch"],
+      "comment": "The real WKWebView loaded the user profile edit static route."
+    },
+    {
+      "action": "Capture the profile edit scroll container at its initial position",
+      "status": "PASSED",
+      "commands": ["xcrun simctl io screenshot"],
+      "comment": "The profile image, name, gender and feeling fields were visible at the top."
+    },
+    {
+      "action": "Move the dedicated scroll container to its maximum scroll position and capture it",
+      "status": "PASSED",
+      "commands": ["WKWebView evaluateJavaScript test hook", "xcrun simctl io screenshot"],
+      "comment": "The full additional-settings textarea and fixed Save button were visible at the bottom. The temporary test hook was removed afterward."
+    }
+  ]
+}

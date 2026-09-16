@@ -1,5 +1,5 @@
-type Operation = 'diary.create' | 'diary.edit';
-type Phase = 'api' | 'lookup' | 'generation' | 'regeneration' | 'save' | 'delete';
+type Operation = 'diary.create' | 'diary.edit' | 'character.create' | 'chat.initial';
+type Phase = 'api' | 'lookup' | 'generation' | 'regeneration' | 'save' | 'delete' | 'images';
 
 /** Fixed labels only: never include diary text, tokens, UID or image URLs. */
 export async function measurePhase<T>(operation: Operation, phase: Phase, action: () => Promise<T>): Promise<T> {

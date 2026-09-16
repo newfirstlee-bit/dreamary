@@ -9,15 +9,15 @@ import { Loader2, User } from 'lucide-react';
 import { useLocale, getDateLocale } from '@/lib/i18n';
 import { trackEvent } from '@/lib/mixpanel';
 import { withTimeout } from '@/lib/async';
-import { readUserCache, writeUserCache } from '@/lib/appCache';
+import { clearUserCache, readUserCache, writeUserCache } from '@/lib/appCache';
 import { useAuth } from '@/components/AuthContext';
 import { sortCharactersByRecent, touchRecentCharacter } from '@/lib/characterOrder';
-import { getCharactersWithGuestRecovery } from '@/lib/ownership';
 import { buildStaticEntityRoute } from '@/lib/navigation';
 import { useAppStore } from '@/store/useAppStore';
-import { INITIAL_PING_EVENT } from '@/lib/initialPing';
+import { INITIAL_PING_EVENT, isInitialPingPending } from '@/lib/initialPing';
 
 interface ChatListCache {
+  authMode?: 'authenticated' | 'guest';
   characters: Character[];
   lastMessages: Record<string, ChatMessage | null>;
 }
@@ -28,19 +28,27 @@ export default function ChatList() {
   const [loading, setLoading] = useState(true);
   const [characters, setCharacters] = useState<Character[]>([]);
   const [lastMessages, setLastMessages] = useState<Record<string, ChatMessage | null>>({});
+  const [pendingPings, setPendingPings] = useState<Set<string>>(new Set());
   const userId = useUserId();
   const { status } = useAuth();
   const { loadCharacters } = useAppStore();
 
   useEffect(() => {
-    if (!userId) return;
+    if (!userId || status === 'checking') return;
+    let cancelled = false;
+    const authMode = status === 'authenticated' ? 'authenticated' : 'guest';
 
     const cachedChat = readUserCache<ChatListCache>(userId, 'chat');
-    if (cachedChat) {
+    if (cachedChat?.authMode === authMode) {
       setCharacters(cachedChat.characters);
       setLastMessages(cachedChat.lastMessages);
+      setPendingPings(new Set(cachedChat.characters.filter(char => isInitialPingPending(userId, char.id)).map(char => char.id)));
       setLoading(false);
+      return;
     }
+    setCharacters([]);
+    setLastMessages({});
+    setLoading(true);
 
     const showGuestChat = () => {
       const dummyChar: Character = {
@@ -68,6 +76,7 @@ export default function ChatList() {
       };
       setLastMessages(dummyMessages);
       writeUserCache<ChatListCache>(userId, 'chat', {
+        authMode,
         characters: [dummyChar],
         lastMessages: dummyMessages
       });
@@ -79,26 +88,35 @@ export default function ChatList() {
           await withTimeout(loadCharacters(userId, status === 'authenticated')),
           userId
         );
+        if (cancelled) return;
         
         if (chars.length === 0) {
           if (status === 'guest') showGuestChat();
           else {
             setCharacters([]);
             setLastMessages({});
-            writeUserCache<ChatListCache>(userId, 'chat', { characters: [], lastMessages: {} });
+            writeUserCache<ChatListCache>(userId, 'chat', { authMode, characters: [], lastMessages: {} });
           }
           setLoading(false);
           return;
         }
 
         setCharacters(chars);
+        setPendingPings(new Set(chars.filter(char => isInitialPingPending(userId, char.id)).map(char => char.id)));
         setLoading(false);
 
         const messagesObj: Record<string, ChatMessage | null> = {};
         await withTimeout(Promise.all(chars.map(async (char) => {
-          messagesObj[char.id] = await getLatestChatMessage(userId, char.id);
+          const preview: ChatMessage | null = readUserCache<ChatMessage>(userId, 'chat-preview:' + char.id);
+          messagesObj[char.id] = preview?.userId === userId && preview.characterId === char.id ? preview : await getLatestChatMessage(userId, char.id);
         })));
+        if (cancelled) return;
 
+        for (const char of chars) {
+          const preview: ChatMessage | null = readUserCache<ChatMessage>(userId, 'chat-preview:' + char.id);
+          if (preview?.userId === userId && preview.characterId === char.id &&
+              preview.createdAt >= (messagesObj[char.id]?.createdAt || 0)) messagesObj[char.id] = preview;
+        }
         const sortedChars = [...chars].sort((a, b) => {
           const msgA = messagesObj[a.id];
           const msgB = messagesObj[b.id];
@@ -118,18 +136,20 @@ export default function ChatList() {
         setCharacters(sortedChars);
         setLastMessages(messagesObj);
         writeUserCache<ChatListCache>(userId, 'chat', {
+          authMode,
           characters: sortedChars,
           lastMessages: messagesObj
         });
       } catch (error) {
+        if (cancelled) return;
         console.error('Failed to load characters:', error);
-        if (!cachedChat && status === 'guest') showGuestChat();
       } finally {
-        setLoading(false);
+        if (!cancelled) setLoading(false);
       }
     };
     init();
-  }, [userId, t, status]);
+    return () => { cancelled = true; };
+  }, [userId, t, status, loadCharacters]);
 
   useEffect(() => {
     if (!userId) return;
@@ -144,8 +164,14 @@ export default function ChatList() {
       }>).detail;
 
       if (!detail || detail.userId !== userId) return;
+      setPendingPings(previous => {
+        const next = new Set(previous);
+        if (detail.status === 'started') next.add(detail.characterId); else next.delete(detail.characterId);
+        return next;
+      });
 
       if (detail.status === 'completed' && detail.reply) {
+        clearUserCache(userId, ['chat']);
         setLastMessages(prev => ({
           ...prev,
           [detail.characterId]: {
@@ -165,7 +191,7 @@ export default function ChatList() {
     return () => window.removeEventListener(INITIAL_PING_EVENT, handleInitialPingState);
   }, [locale, userId]);
 
-  if (loading) {
+  if (loading || status === 'checking' || characters.some(char => char.userId !== userId)) {
     return (
       <div className="app-container" style={{ display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
         <Loader2 className="animate-spin" size={32} color="var(--point-color)" />
@@ -182,7 +208,9 @@ export default function ChatList() {
       <div style={{ display: 'flex', flexDirection: 'column' }}>
         {characters.map(char => {
           const lastMsg = lastMessages[char.id];
-          const subtitle = lastMsg ? lastMsg.content : t('chat.newMessage');
+          const subtitle = lastMsg ? lastMsg.content : pendingPings.has(char.id)
+            ? <span style={{ display: 'inline-flex', gap: 4 }} aria-label={locale === 'ja' ? '返信中' : '답장 작성 중'}>{[0, 1, 2].map(i => <span key={i} className="typing-dot" style={{ animationDelay: `${i * 0.2}s` }} />)}</span>
+            : t('chat.newMessage');
           
           let showN = false;
           if (typeof window !== 'undefined') {

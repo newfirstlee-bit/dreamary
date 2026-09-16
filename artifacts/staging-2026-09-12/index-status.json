@@ -1,0 +1,27 @@
+{
+  "project": "dreamary-staging",
+  "checkedAt": "2026-09-11T22:17:45.262Z",
+  "expected": 15,
+  "indexes": [
+    {
+      "name": "projects/dreamary-staging/databases/(default)/collectionGroups/diaries/indexes/CICAgOjXh4EK",
+      "state": "CREATING",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "userId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "createdAt",
+          "order": "DESCENDING"
+        },
+        {
+          "fieldPath": "__name__",
+          "order": "DESCENDING"
+        }
+      ]
+    }
+  ],
+  "more": false
+}

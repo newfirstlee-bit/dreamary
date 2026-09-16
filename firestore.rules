@@ -7,7 +7,7 @@ service cloud.firestore {
     }
     function owns(data) { return signedIn() && data.userId == ownerId(); }
     function mayWrite() {
-      return signedIn() && (!request.auth.token.get('dreamaryGuest', false) ||
+      return signedIn() && !exists(/databases/$(database)/documents/accountStates/$(ownerId())) && (!request.auth.token.get('dreamaryGuest', false) ||
         !get(/databases/$(database)/documents/guestCredentials/$(ownerId())).data.keys().hasAny(['migrationTarget', 'retired']));
     }
     function ownsCharacter(id) {
@@ -15,17 +15,17 @@ service cloud.firestore {
     }
     match /characters/{id} {
       allow read: if owns(resource.data);
-      allow create: if mayWrite() && owns(request.resource.data) && request.resource.data.id == id &&
-        !request.resource.data.keys().hasAny(['diaryOwnershipMigrated', 'deleting']);
+      // Server serializes creation and enforces the five-pair limit.
+      allow create: if false;
       allow update: if mayWrite() && owns(resource.data) && owns(request.resource.data) &&
         !resource.data.get('deleting', false) &&
-        !request.resource.data.diff(resource.data).affectedKeys().hasAny(['userId', 'id', 'diaryOwnershipMigrated', 'deleting']);
+        !request.resource.data.diff(resource.data).affectedKeys().hasAny(['userId', 'id', 'diaryOwnershipMigrated', 'deleting', 'chatClearing', 'chatEpoch']);
       // Cascading deletion is performed by the authenticated server endpoint.
       allow delete: if false;
     }
     match /users/{characterId} {
       allow read: if ownsCharacter(characterId);
-      allow create, update: if mayWrite() && ownsCharacter(characterId) && request.resource.data.id == characterId;
+      allow create, update: if mayWrite() && ownsCharacter(characterId) && !get(/databases/$(database)/documents/characters/$(characterId)).data.get('deleting', false) && request.resource.data.id == characterId;
       allow delete: if false;
     }
     match /diaries/{id} {
@@ -39,16 +39,20 @@ service cloud.firestore {
     match /chatMessages/{id} {
       allow read: if owns(resource.data);
       allow create: if mayWrite() && owns(request.resource.data) && request.resource.data.id == id &&
-        request.resource.data.role == 'user' && ownsCharacter(request.resource.data.characterId);
+        request.resource.data.role == 'user' && request.resource.data.content is string && request.resource.data.content.size() <= 4000 && ownsCharacter(request.resource.data.characterId) &&
+        !get(/databases/$(database)/documents/characters/$(request.resource.data.characterId)).data.get('chatClearing', false) &&
+        !get(/databases/$(database)/documents/characters/$(request.resource.data.characterId)).data.get('deleting', false);
       allow update: if mayWrite() && owns(resource.data) &&
         request.resource.data.diff(resource.data).affectedKeys().hasOnly(['content', 'isAdLocked']);
       allow delete: if mayWrite() && owns(resource.data);
     }
     match /accounts/{uid} {
-      allow get, create, update: if signedIn() && !request.auth.token.get('dreamaryGuest', false) && uid == ownerId();
+      allow get: if signedIn() && !request.auth.token.get('dreamaryGuest', false) && uid == ownerId();
+      allow create, update: if mayWrite() && !request.auth.token.get('dreamaryGuest', false) && uid == ownerId();
       allow list, delete: if false;
     }
     match /topics/{id} { allow read: if true; allow write: if false; }
+    match /topicCatalog/{id} { allow get: if id == 'current'; allow list, write: if false; }
     // Includes credential hashes, backup codes/attempts, reports, push targets,
     // future unknown collections. Admin SDK uses IAM, not client rules.
     match /{document=**} { allow read, write: if false; }

@@ -1,0 +1,13 @@
+{
+  "database": {
+    "locationId": "asia-northeast3",
+    "type": "FIRESTORE_NATIVE",
+    "pointInTimeRecoveryEnablement": "POINT_IN_TIME_RECOVERY_DISABLED"
+  },
+  "indexes": [],
+  "indexPageTruncated": false,
+  "backupSchedules": {
+    "errorCode": 7,
+    "details": "The caller does not have permission"
+  }
+}

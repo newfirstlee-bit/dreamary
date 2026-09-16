@@ -1,6 +1,6 @@
 import { createHash, timingSafeEqual } from 'node:crypto';
 import { SignJWT, jwtVerify } from 'jose';
-import { DiaryAuthenticationError, projectId, requireDiaryLogin } from './diaryAuthentication';
+import { assertClientProtocol, DiaryAuthenticationError, projectId, requireDiaryLogin } from './diaryAuthentication';
 import type { Firestore, Transaction } from 'firebase-admin/firestore';
 
 export const isGuestId = (value: unknown): value is string =>
@@ -40,6 +40,7 @@ export async function verifyGuestSession(token: string): Promise<DataOwner> {
   }
 }
 export async function requireDataOwner(req: Request, claimed: unknown): Promise<DataOwner> {
+  assertClientProtocol(req);
   const header = req.headers.get('Authorization') || '';
   if (header.startsWith('Guest ')) {
     const owner = await verifyGuestSession(header.slice(6));
@@ -50,6 +51,9 @@ export async function requireDataOwner(req: Request, claimed: unknown): Promise<
 }
 type Reader = Pick<Transaction, 'get'>;
 export async function assertGuestActive(db: Firestore, owner: DataOwner, transaction?: Reader) {
+  const stateRef = db.collection('accountStates').doc(owner.uid);
+  const state = transaction ? await transaction.get(stateRef) : await stateRef.get();
+  if (state.exists) throw new DiaryAuthenticationError(403, '탈퇴 처리 중이거나 사용이 종료된 계정입니다.');
   if (owner.kind !== 'guest') return;
   const ref = db.collection('guestCredentials').doc(owner.uid);
   const snapshot = transaction ? await transaction.get(ref) : await ref.get();

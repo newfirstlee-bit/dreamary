@@ -38,7 +38,7 @@ export async function GET(req: Request) {
     const [accountDoc, userDoc, charSnap] = await Promise.all([
       db.collection('accounts').doc(userId).get(),
       db.collection('users').doc(userId).get(),
-      db.collection('characters').where('userId', '==', userId).orderBy('createdAt', 'desc').get(),
+      db.collection('characters').where('userId', '==', userId).orderBy('createdAt', 'desc').limit(20).get(),
     ]);
 
     const characters = charSnap.docs.map<any>(doc => {

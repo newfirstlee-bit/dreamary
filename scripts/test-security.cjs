@@ -30,17 +30,22 @@ function memoryDb(seed = {}) {
   const stats = { reads: 0, writes: 0 };
   let queue = Promise.resolve();
   const snapshot = (key, data) => ({ exists: data !== undefined, id: key.split('/').at(-1), ref: doc(key), data: () => data === undefined ? undefined : structuredClone(data) });
-  const doc = key => ({ key, get: async () => { stats.reads++; return snapshot(key, rows.get(key)); },
+  const doc = key => ({ key, id: key.split('/').at(-1), path: key, get: async () => { stats.reads++; return snapshot(key, rows.get(key)); },
     set: async value => { rows.set(key, structuredClone(value)); stats.writes++; },
     update: async value => { rows.set(key, { ...rows.get(key), ...structuredClone(value) }); stats.writes++; },
     delete: async () => { rows.delete(key); stats.writes++; },
   });
-  const query = (name, filters = [], cap) => ({
-    where: (field, op, value) => { assert.equal(op, '=='); return query(name, [...filters, [field, value]], cap); },
-    limit: value => query(name, filters, value),
+  const query = (name, filters = [], cap, orders = [], cursor = null) => ({
+    where: (field, op, value) => query(name, [...filters, [field, op, value]], cap, orders, cursor),
+    limit: value => query(name, filters, value, orders, cursor),
+    orderBy: (field, direction = 'asc') => query(name, filters, cap, [...orders, [field, direction]], cursor),
+    startAfter: (...values) => query(name, filters, cap, orders, values),
     get: async () => {
       assert.ok(cap && cap <= 20, 'All server queries must be bounded');
-      const entries = [...rows].filter(([key, value]) => key.startsWith(name + '/') && filters.every(([field, expected]) => value[field] === expected)).slice(0, cap);
+      const fieldValue = ([key, data], field) => field === '__name__' ? key.split('/').at(-1) : data[field];
+      const compare = (a, b) => { for (let i = 0; i < orders.length; i++) { const [field, dir] = orders[i], left = fieldValue(a, field), right = Array.isArray(b) && b.length === 2 && typeof b[1] === 'object' ? fieldValue(b, field) : b[i]; if (left !== right) return (left < right ? -1 : 1) * (dir === 'desc' ? -1 : 1); } return 0; };
+      const entries = [...rows].filter(([key, value]) => key.startsWith(name + '/') && filters.every(([field, op, expected]) => op === '==' ? value[field] === expected : op === '<=' ? value[field] <= expected : false))
+        .sort(compare).filter(entry => !cursor || compare(entry, cursor) > 0).slice(0, cap);
       stats.reads += Math.max(1, entries.length);
       return { empty: !entries.length, size: entries.length, docs: entries.map(([key, data]) => snapshot(key, data)) };
     },
@@ -80,13 +85,17 @@ async function fixture(seed = {}, overrides = {}) {
   const load = file => {
     file = path.resolve(root, file);
     if (!path.extname(file)) file += '.ts';
+    if (file.endsWith('.json')) return { default: JSON.parse(fs.readFileSync(file, 'utf8')) };
     if (modules.has(file)) return modules.get(file).exports;
     const module = { exports: {} }; modules.set(file, module);
     const compiled = ts.transpileModule(fs.readFileSync(file, 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText;
     const requireLocal = name => {
       if (name === 'jose') return { ...jose, createRemoteJWKSet: () => jose.createLocalJWKSet({ keys: [jwk] }) };
       if (name === 'node:crypto') return nodeCrypto;
-      if (name === 'firebase-admin/firestore') return { FieldValue: { serverTimestamp: () => 123 } };
+      if (name === 'node:http2') return require(name);
+      if (name === 'firebase-admin/app') return { getApps: () => [{}] };
+      if (name === 'firebase-admin/messaging') return { getMessaging: () => ({}) };
+      if (name === 'firebase-admin/firestore') return { Timestamp: { now: () => Date.now(), fromMillis: value => value, fromDate: date => date.getTime() }, FieldValue: { serverTimestamp: () => 123 } };
       if (name === 'firebase-admin/auth') return { getAuth: () => ({
         createCustomToken: async (uid, claims) => JSON.stringify({ uid, claims }),
         deleteUser: async () => {},
@@ -101,12 +110,12 @@ async function fixture(seed = {}, overrides = {}) {
       throw new Error('Unexpected dependency ' + name);
     };
     vm.runInNewContext(compiled, { module, exports: module.exports, require: requireLocal,
-      process: { env }, URL, Request, Response, Buffer, TextEncoder, TextDecoder, ReadableStream, AbortController,
+      process: { env }, URL, Request, Response, Buffer, TextEncoder, TextDecoder, ReadableStream, AbortController, AbortSignal, crypto: nodeCrypto,
       setTimeout, clearTimeout, setInterval, clearInterval, performance,
-      console: { info() {}, error(...args) { errorLogs.push(args); }, warn() {} },
-      fetch: async () => { generations++;
-        if (env.CHAT_STREAM) return new Response('data: ' + JSON.stringify({ choices: [{ delta: { content: '테스트 답변' } }] }) + '\n\ndata: [DONE]\n');
-        return Response.json({ choices: [{ message: { content: '테스트 답변' } }] });
+      console: { log() {}, info() {}, error(...args) { errorLogs.push(args); }, warn() {} },
+      fetch: async () => { generations++; env.ON_FETCH?.(); if (env.FETCH_BARRIER) await env.FETCH_BARRIER;
+        if (env.CHAT_STREAM) return new Response('data: ' + JSON.stringify({ choices: [{ delta: { content: '테스트 답변' }, finish_reason: 'stop' }] }) + '\n\ndata: [DONE]\n');
+        return Response.json({ choices: [{ message: { content: '테스트 답변' }, finish_reason: 'stop' }] });
       },
     }, { filename: file });
     return module.exports;
@@ -207,7 +216,7 @@ test('diary edit: no credentials / another UID fail before reads; owner fields c
   assert.equal((await f.run('diary-edit', { ...body, field: 'userId' }, auth)).status, 400);
   assert.equal((await f.run('diary-edit', body, auth)).status, 200);
   assert.equal(f.db.rows.get('diaries/d').userEntry, 'new');
-  assert.equal(f.db.stats.reads, 1);
+  assert.equal(f.db.stats.reads, 2); // account deletion state + diary owner
   assert.equal((await f.run('diary-edit', { ...body, diaryId: 'missing' }, auth)).status, 403);
 });
 
@@ -294,7 +303,8 @@ test('client: login token refresh cannot send after logout or owner switch; no u
   const user = { uid: 'alice', getIdToken: () => new Promise(resolve => { complete = resolve; }) };
   const auth = { currentUser: user };
   const client = loadClient('src/lib/diaryRequestHeaders.ts', {
-    './firebase': { auth }, './auth': { getStoredGuestUserId: () => guestId },
+    './firebase': { auth },
+    './auth': { getStoredGuestUserId: () => guestId },
     './guestSession': { getGuestSession: async () => 'bound-guest-token' },
   });
   await assert.rejects(client.diaryRequestHeaders({ userId: 'bob' }));
@@ -319,7 +329,7 @@ test('client: web and native send the same trusted authorization and timezone; n
     } });
     await api.apiPostJson('/api/diary/edit', { userId: 'alice' }, { headers: { authorization: 'Bearer stale-token' } });
     assert.equal(requests.length, 1);
-    assert.equal(requests[0].headers.Authorization, 'Bearer current-token');
+    assert.equal(new Headers(requests[0].headers).get('Authorization'), 'Bearer current-token');
     assert.equal('authorization' in requests[0].headers, false);
     assert.equal(typeof requests[0].data.timezoneOffsetMinutes, 'number');
   }
@@ -328,7 +338,12 @@ test('client: web and native send the same trusted authorization and timezone; n
 test('client guest key: concurrent requests share registration; retry after lost response retains key', async () => {
   const storage = new Map(); let calls = 0; const sent = [];
   const client = loadClient('src/lib/guestSession.ts', {
+    './firebase': { auth: { currentUser: null } },
     './auth': { getStoredGuestUserId: () => guestId },
+    './guestPersistence': {
+      readGuestSecret: async userId => storage.get('dreamary_guest_secret_' + userId) || null,
+      persistGuestSecret: async () => undefined,
+    },
     './api': { apiPostJson: async (_endpoint, data) => {
       sent.push(data.secret); calls++;
       if (calls === 1) throw new Error('response lost');
@@ -388,7 +403,9 @@ test('character delete: bounded cascade preserves another owner and finishes on 
   const body = { userId: 'alice', characterId: 'c' };
   assert.equal((await (await f.run('character-delete', body, auth)).json()).done, false);
   assert.equal(f.db.rows.get('characters/c').deleting, true);
-  assert.equal((await (await f.run('character-delete', body, auth)).json()).done, true);
+  let done = false;
+  for (let page = 0; page < 3 && !done; page++) done = (await (await f.run('character-delete', body, auth)).json()).done;
+  assert.equal(done, true);
   assert.ok(f.db.rows.has('diaries/other')); assert.equal(f.db.rows.has('users/c'), false);
 });
 
@@ -401,8 +418,12 @@ test('account cleanup: includes interrupted guest transfers, private metadata an
     'diaries/bob': { userId: 'bob' }, 'accounts/alice': { id: 'alias' },
   });
   for (let i = 0; i < 25; i++) f.db.rows.set('diaries/d' + i, { userId: 'alice' });
-  await f.load('src/lib/server/accountCleanup.ts').cleanupAccountData(f.db, 'alice');
-  assert.equal(f.db.rows.size, 2);
+  const jobs = f.load('src/lib/server/dataJobs.ts');
+  const ref = await jobs.enqueueDataJob(f.db, 'account-delete', 'alice');
+  let done = false;
+  for (let step = 0; step < 60 && !done; step++) done = await jobs.advanceDataJob(f.db, ref);
+  assert.equal(done, true);
+  assert.equal(f.db.rows.size, 3); // includes the durable completion receipt
   assert.deepEqual(f.db.rows.get('guestCredentials/' + guestId), { retired: true });
   assert.ok(f.db.rows.has('diaries/bob'));
   assert.equal((await f.run('guest-session', { userId: guestId, secret })).status, 403);
@@ -419,4 +440,236 @@ test('data session client: simultaneous DB operations share one authentication; 
   assert.equal(requests, 1); assert.equal(auth.currentUser, null);
   auth.currentUser = { uid: 'alice' };
   assert.equal(await client.ensureDataSession(), 'login:alice'); assert.equal(requests, 2);
+});
+
+test('pair creation: concurrent requests cannot pass five; replay is idempotent and old pairs survive', async () => {
+  const f = await fixture(); const auth = 'Bearer ' + await f.loginToken();
+  const results = await Promise.all(Array.from({ length: 8 }, (_, i) => f.run('character-create', { character: { id: 'c' + i, name: '페어', userId: 'alice' } }, auth)));
+  assert.equal(results.filter(r => r.status === 200).length, 5);
+  assert.equal(results.filter(r => r.status === 409).length, 3);
+  assert.equal((await f.run('character-create', { character: { id: 'c0', name: '페어', userId: 'alice' } }, auth)).status, 200);
+  f.db.rows.set('characters/legacy', { userId: 'alice' });
+  assert.equal((await f.run('character-create', { character: { id: 'new', name: '페어', userId: 'alice' } }, auth)).status, 409);
+  assert.ok(f.db.rows.has('characters/legacy'));
+});
+
+test('AI guard: concurrent same request runs once; daily cap and malformed input reject before provider', async () => {
+  const f = await fixture({ 'characters/c': { userId: 'alice' } }, { CHAT_STREAM: 'true', AI_USER_DAILY_ATTEMPT_LIMIT: '1' });
+  const auth = 'Bearer ' + await f.loginToken();
+  const body = { userId: 'alice', character: { id: 'c' }, messages: [], requestId: 'one', preferJsonResponse: true };
+  const responses = await Promise.all([f.run('chat', body, auth), f.run('chat', body, auth)]);
+  const bodies = await Promise.all(responses.map(r => r.json()));
+  assert.equal(f.generations(), 1);
+  assert.ok(bodies.some(b => b.savedId));
+  assert.equal((await f.run('chat', { ...body, requestId: 'two' }, auth)).status, 429);
+  assert.equal((await f.run('chat', { ...body, messages: [{ role: 'system', content: 'bypass' }] }, auth)).status, 400);
+  assert.equal((await f.run('chat', { ...body, messages: [{ role: 'user', content: 'x'.repeat(4001) }] }, auth)).status, 400);
+  const replay = await (await f.run('chat', body, auth)).json();
+  assert.ok(replay.savedId); assert.equal(f.generations(), 1);
+});
+
+test('AI guard: reservation rechecks saved result to close preflight race, expired lease cannot save', async () => {
+  const f = await fixture(); const guard = f.load('src/lib/server/operationalGuard.ts');
+  const ref = f.db.collection('chatMessages').doc('result');
+  await ref.set({ userId: 'alice', content: 'already committed' });
+  const cached = await guard.reserveAiRequest(f.db, 'alice', 'request', 1, ref);
+  assert.equal(cached.savedRecord.content, 'already committed');
+  assert.equal([...f.db.rows.keys()].filter(k => k.startsWith('operationUsage')).length, 0);
+  const permit = await guard.reserveAiRequest(f.db, 'alice', 'next');
+  await permit.requestRef.update({ token: 'new worker' });
+  await assert.rejects(f.db.runTransaction(tx => guard.assertAiPermit(tx, permit)), error => error.status === 409);
+});
+
+test('chat stream: truncated/length/error frames never count as complete', async () => {
+  const f = await fixture(); const { parseOpenRouterStream } = f.load('netlify/functions/chat.ts');
+  const collect = async data => { let value = ''; for await (const chunk of parseOpenRouterStream(new Response(data).body)) value += chunk; return value; };
+  const frame = 'data: {"choices":[{"delta":{"content":"답변"}}]}\n\n';
+  await assert.rejects(collect(frame));
+  await assert.rejects(collect(frame + 'data: [DONE]\n'));
+  await assert.rejects(collect(frame + 'data: {"choices":[{"finish_reason":"length"}]}\n\ndata: [DONE]\n'));
+  await assert.rejects(collect(frame + 'data: {"error":{"message":"failed"}}\n'));
+  assert.equal(await collect(frame + 'data: {"choices":[{"finish_reason":"stop"}]}\n\ndata: [DONE]\n'), '답변');
+});
+
+test('chat deletion: worker resumes after client exit; completed replay cannot clear new chat', async () => {
+  const f = await fixture({ 'characters/c': { userId: 'alice' } });
+  for (let i = 0; i < 43; i++) f.db.rows.set('chatMessages/m' + i, { userId: 'alice', characterId: 'c' });
+  const auth = 'Bearer ' + await f.loginToken(); const body = { userId: 'alice', characterId: 'c', requestId: 'clear-once' };
+  assert.equal((await (await f.run('chat-delete', body, auth)).json()).done, false);
+  const key = [...f.db.rows.keys()].find(k => k.startsWith('dataJobs/'));
+  const jobs = f.load('src/lib/server/dataJobs.ts'), ref = f.db.collection('dataJobs').doc(key.split('/')[1]);
+  assert.equal(await jobs.advanceDataJob(f.db, ref), false);
+  assert.equal(await jobs.advanceDataJob(f.db, ref), true);
+  f.db.rows.set('chatMessages/new', { userId: 'alice', characterId: 'c' });
+  assert.equal((await (await f.run('chat-delete', body, auth)).json()).done, true);
+  assert.equal(f.db.rows.get('characters/c').chatClearing, false);
+  assert.ok(f.db.rows.has('chatMessages/new'));
+});
+
+test('account job: interrupted sources, images, Auth cleanup survive bounded worker restarts', async () => {
+  const f = await fixture({
+    ['guestCredentials/' + guestId]: { migrationTarget: 'alice' },
+    'characters/c': { userId: guestId }, 'users/c': { name: 'profile' },
+    'accounts/alice': { id: 'alias' }, 'imageUploads/image': { uid: 'alice', deleteUrl: 'https://ibb.co/synthetic/private' },
+    'diaries/bob': { userId: 'bob' },
+  });
+  for (let i = 0; i < 45; i++) f.db.rows.set('diaries/d' + i, { userId: 'alice' });
+  const jobs = f.load('src/lib/server/dataJobs.ts');
+  const ref = await jobs.enqueueDataJob(f.db, 'account-delete', 'alice', '', '', async tx => tx.set(f.db.collection('accountStates').doc('alice'), { deleting: true }));
+  let done = false;
+  for (let step = 0; step < 60 && !done; step++) done = await jobs.advanceDataJob(f.db, ref);
+  assert.equal(done, true);
+  assert.deepEqual(f.db.rows.get('guestCredentials/' + guestId), { retired: true });
+  assert.ok(f.db.rows.has('imageDeletionQueue/image'));
+  for (const key of ['characters/c', 'users/c', 'accounts/alice', 'imageUploads/image', 'diaries/d44']) assert.equal(f.db.rows.has(key), false, key);
+  assert.ok(f.db.rows.has('diaries/bob'));
+});
+
+test('push: 201 due targets are drained, success is not repeated, legacy devices have another page', async () => {
+  const f = await fixture(); const queue = f.load('src/lib/server/diaryPushQueue.ts');
+  for (let i = 0; i < 201; i++) {
+    f.db.rows.set('diaryPushTargets/u' + i, { enabled: true, nextNotifyAt: 1, locale: 'ko' });
+    f.db.rows.set('pushDevices/d' + i, { uid: 'u' + i, diaryPushEnabled: true, pushToken: 'token' + i, platform: 'android' });
+  }
+  let sent = 0; const messaging = { send: async () => { sent++; return 'ok'; } };
+  const result = await queue.drainDiaryPushQueue(f.db, messaging, 18000);
+  assert.equal(result.targets, 201); assert.equal(sent, 201);
+  assert.equal((await queue.drainDiaryPushQueue(f.db, messaging)).targets, 0);
+  f.db.rows.set('diaryPushTargets/legacy', { enabled: true, nextNotifyAt: 1 });
+  for (let i = 0; i < 8; i++) f.db.rows.set('pushDevices/legacy' + i, { uid: 'legacy', diaryPushEnabled: true, pushToken: 'l' + i, platform: 'android' });
+  const ref = f.db.collection('diaryPushTargets').doc('legacy');
+  assert.equal((await queue.processDiaryPushTarget(f.db, messaging, ref)).sent, 5);
+  await ref.update({ nextNotifyAt: 1 });
+  assert.equal((await queue.processDiaryPushTarget(f.db, messaging, ref)).sent, 3);
+});
+
+test('push: transient failure retries only failed device; invalid tokens and deleted accounts stop', async () => {
+  const f = await fixture({ 'diaryPushTargets/u': { enabled: true, nextNotifyAt: 1 } });
+  for (const id of ['good', 'retry', 'invalid']) f.db.rows.set('pushDevices/' + id, { uid: 'u', diaryPushEnabled: true, pushToken: id, platform: 'android' });
+  const calls = [], queue = f.load('src/lib/server/diaryPushQueue.ts'), ref = f.db.collection('diaryPushTargets').doc('u');
+  let failing = true;
+  const messaging = { send: async ({ token }) => { calls.push(token); if (token === 'invalid') throw { code: 'messaging/registration-token-not-registered' }; if (token === 'retry' && failing) throw new Error('offline'); } };
+  assert.equal((await queue.processDiaryPushTarget(f.db, messaging, ref)).failed, 1);
+  assert.equal(f.db.rows.get('pushDevices/invalid').diaryPushEnabled, false);
+  failing = false; await ref.update({ nextNotifyAt: 1 });
+  assert.equal((await queue.processDiaryPushTarget(f.db, messaging, ref)).sent, 1);
+  assert.equal(calls.filter(c => c === 'good').length, 1);
+  f.db.rows.set('accountStates/u', { deleting: true }); await ref.update({ nextNotifyAt: 1 });
+  assert.equal((await queue.processDiaryPushTarget(f.db, messaging, ref)).sent, 0);
+  assert.equal(f.db.rows.get('diaryPushTargets/u').enabled, false);
+});
+
+test('deletion: a second clear cannot race the active job; a deleted pair ID cannot be recreated', async () => {
+  const f = await fixture({ 'characters/c': { userId: 'alice' } });
+  for (let i = 0; i < 25; i++) f.db.rows.set('chatMessages/m' + i, { userId: 'alice', characterId: 'c' });
+  const auth = 'Bearer ' + await f.loginToken(), body = { userId: 'alice', characterId: 'c', requestId: 'first' };
+  assert.equal((await f.run('chat-delete', body, auth)).status, 200);
+  assert.equal((await f.run('chat-delete', { ...body, requestId: 'second' }, auth)).status, 409);
+  for (let i = 0; i < 4; i++) await f.run('character-delete', body, auth);
+  assert.equal((await f.run('character-create', { character: { id: 'c', name: 'replay', userId: 'alice' } }, auth)).status, 409);
+});
+
+test('protocol: default accepts previous clients; explicit minimum blocks old mutations before DB reads', async () => {
+  const f = await fixture({}, { MIN_CLIENT_PROTOCOL: '1' });
+  const body = { userId: 'alice', character: { id: 'c' }, messages: [] }, auth = 'Bearer ' + await f.loginToken();
+  assert.equal((await f.run('chat', body, auth)).status, 426);
+  assert.equal(f.db.stats.reads, 0);
+  assert.equal((await f.run('chat', body, auth, { 'X-Client-Protocol': '1' })).status, 403);
+});
+
+test('initial ping: the real colon request ID remains compatible and can run again after clearing', async () => {
+  const f = await fixture({ 'characters/c': { userId: 'alice' } }, { CHAT_STREAM: 'true' });
+  const auth = 'Bearer ' + await f.loginToken(), body = { userId: 'alice', character: { id: 'c' }, isFirstPing: true, messages: [], requestId: 'initial-ping:alice:c' };
+  const first = await (await f.run('chat', body, auth)).json(); assert.ok(first.savedId);
+  assert.equal((await (await f.run('chat-delete', { userId: 'alice', characterId: 'c', requestId: 'clear' }, auth)).json()).done, true);
+  const second = await (await f.run('chat', body, auth)).json(); assert.ok(second.savedId);
+  assert.notEqual(first.savedId, second.savedId); assert.equal(f.generations(), 2);
+});
+
+test('chat clear fences an AI generation that finishes after clearing has completed', async () => {
+  let release, entered;
+  const barrier = new Promise(resolve => { release = resolve; });
+  const called = new Promise(resolve => { entered = resolve; });
+  const f = await fixture({ 'characters/c': { userId: 'alice' } }, { CHAT_STREAM: 'true', FETCH_BARRIER: barrier, ON_FETCH: entered });
+  const auth = 'Bearer ' + await f.loginToken();
+  const response = f.run('chat', { userId: 'alice', character: { id: 'c' }, messages: [], preferJsonResponse: true, requestId: 'in-flight' }, auth);
+  await called;
+  assert.equal((await (await f.run('chat-delete', { userId: 'alice', characterId: 'c', requestId: 'clear' }, auth)).json()).done, true);
+  release(); const result = await (await response).json(); assert.ok(result.error);
+  assert.equal([...f.db.rows.keys()].filter(key => key.startsWith('chatMessages/')).length, 0);
+});
+
+test('guest completion proof retires only the verified completed guest, never pending, rejected or logged-in identities', async () => {
+  for (const [state, loggedIn, reject, expected] of [['complete', false, false, 1], ['pending', false, false, 0], [null, false, true, 0], ['complete', true, false, 0]]) {
+    let retired = 0;
+    const client = loadClient('src/lib/guestSession.ts', {
+      './firebase': { auth: { currentUser: loggedIn ? { uid: 'alice' } : null } },
+      './auth': { getStoredGuestUserId: () => guestId, retireGuestIdentity: id => { assert.equal(id, guestId); retired++; } },
+      './guestPersistence': { readGuestSecret: async () => secret, persistGuestSecret: async () => undefined },
+      './api': { apiPostJson: async () => {
+        if (reject) throw new Error('wrong secret');
+        return { token: 'verified', expiresAt: Date.now() + 900000, migrationState: state };
+      } },
+    }, { localStorage: { getItem: () => secret } });
+    if (reject || expected) await assert.rejects(client.getGuestSession(guestId));
+    else assert.equal(await client.getGuestSession(guestId), 'verified');
+    assert.equal(retired, expected);
+  }
+});
+
+test('backup progress advances bounded pages, keeps characters last, and proves complete on same-key reconnect', async () => {
+  const f = await fixture(); const token = await f.bind();
+  for (let i = 0; i < 45; i++) f.db.rows.set('diaries/p' + i, { userId: guestId });
+  f.db.rows.set('characters/progress', { userId: guestId });
+  const backup = await (await f.run('backup-generate', { sourceUUID: guestId }, 'Guest ' + token)).json();
+  const payload = { code: backup.code, uid: 'alice', progressVersion: 1 };
+  const auth = 'Bearer ' + await f.loginToken();
+  const first = await (await f.run('backup-migrate', payload, auth)).json();
+  assert.equal(first.done, false); assert.equal(first.stage, 'chatMessages');
+  assert.equal(f.db.rows.get('characters/progress').userId, guestId);
+  assert.equal([...f.db.rows].filter(([k,v]) => k.startsWith('diaries/') && v.userId === 'alice').length, 45);
+  const second = await (await f.run('backup-migrate', payload, auth)).json();
+  assert.equal(second.done, true); assert.equal(second.stage, 'complete');
+  assert.equal(f.db.rows.get('characters/progress').userId, 'alice');
+  const reconnect = await f.run('guest-session', { userId: guestId, secret });
+  assert.equal((await reconnect.json()).migrationState, 'complete');
+  assert.equal((await f.run('guest-session', { userId: guestId, secret: 'ef'.repeat(32) })).status, 403);
+  assert.equal((await f.run('data-session', { userId: guestId }, 'Guest ' + token)).status, 403);
+  assert.equal((await (await f.run('backup-migrate', payload, auth)).json()).done, true);
+});
+
+test('password recovery allows client protocol preflight and never mutates credentials without mail configuration', async () => {
+  let reads = 0, updates = 0, sends = 0, events = [];
+  const db = { collection: () => ({ where() { return this; }, limit(n) { assert.equal(n, 1); return this; }, get: async () => { reads++; return { empty: false, docs: [{ id: 'test-user' }] }; } }) };
+  const make = (enabled, rejectMail = false) => loadClient('netlify/functions/reset-password.mts', {
+    '../shared/cors': { corsHeaders: { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-Client-Protocol' } },
+    resend: { Resend: class { emails = { send: async data => { sends++; events.push('send'); assert.equal(data.from, 'sender@example.test'); return { error: rejectMail ? { message: 'recipient blocked' } : null }; } }; } },
+    'google-auth-library': { GoogleAuth: class { async getClient() { return { getAccessToken: async () => ({ token: 'fake-token' }) }; } } },
+    'firebase-admin/app': { getApps: () => [{}] },
+    'firebase-admin/firestore': { getFirestore: () => db },
+  }, { process: { env: { ...(enabled ? { RESEND_API_KEY: 'fake', RESEND_AUTH_FROM: 'sender@example.test' } : {}), FIREBASE_SERVICE_ACCOUNT_KEY: JSON.stringify({ project_id: 'test' }) } },
+    fetch: async () => { updates++; events.push('update'); return Response.json({}); }, console: { error() {}, warn() {} } }).default;
+  const request = () => new Request('https://test.invalid/reset', { method: 'POST', body: JSON.stringify({ id: 'test', email: 'recipient@example.test' }) });
+  const disabled = make(false);
+  assert.equal((await disabled(request())).status, 503);
+  assert.deepEqual([reads, updates, sends], [0,0,0]);
+  const preflight = await disabled(new Request('https://test.invalid/reset', { method: 'OPTIONS' }));
+  assert.equal(preflight.status, 204); assert.match(preflight.headers.get('Access-Control-Allow-Headers'), /X-Client-Protocol/);
+  assert.equal((await make(true)(request())).status, 200);
+  assert.deepEqual([reads, updates, sends], [1,1,1]); assert.deepEqual(events, ['send', 'update']);
+  const updatesBeforeRejectedMail = updates;
+  assert.equal((await make(true, true)(request())).status, 503);
+  assert.equal(updates, updatesBeforeRejectedMail);
+});
+
+test('password recovery screen uses the canonical production mail function', () => {
+  const source = fs.readFileSync(path.join(root, 'src/app/(auth)/reset-password/page.tsx'), 'utf8');
+  assert.match(source, /apiPostJson\('\/api\/auth\/reset-password'/);
+  assert.doesNotMatch(source, /\.netlify\/functions\/reset-password/);
+});
+
+test('canonical password recovery never changes credentials before mail acceptance', () => {
+  const source = fs.readFileSync(path.join(root, 'netlify/functions/auth-reset-password.ts'), 'utf8');
+  assert.ok(source.indexOf('resend.emails.send') < source.indexOf('adminAuth.updateUser'));
+  assert.match(source, /auth\.mailDeliveryFailed/);
 });

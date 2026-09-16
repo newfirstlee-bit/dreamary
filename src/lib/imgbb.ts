@@ -1,3 +1,5 @@
+import { apiPostJson } from './api';
+import { getUserId } from './auth';
 interface ImageCompressionOptions {
   enabled?: boolean;
   maxDimension?: number;
@@ -162,21 +164,18 @@ function verifyUploadedImage(url: string): Promise<void> {
   });
 }
 
-async function uploadFileToImgbb(file: File, apiKey: string, signal?: AbortSignal): Promise<string> {
-  const formData = new FormData();
-  formData.append('image', file);
-
-  const response = await fetch(`https://api.imgbb.com/1/upload?key=${apiKey}`, {
-    method: 'POST',
-    body: formData,
-    signal,
+async function uploadFileToImgbb(file: File, signal?: AbortSignal): Promise<string> {
+  if (signal?.aborted) throw new Error('이미지 업로드가 취소되었습니다.');
+  if (file.size > 2 * 1024 * 1024) throw new Error('이미지 크기를 2MB 이하로 줄여주세요.');
+  const image = await new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result).split(',')[1]);
+    reader.onerror = () => reject(new Error('이미지를 읽지 못했습니다.'));
+    reader.readAsDataURL(file);
   });
-
-  if (!response.ok) throw new Error('Failed to upload image');
-  const data = await response.json();
-  const url = data?.data?.url;
-  if (typeof url !== 'string' || !url) throw new Error('ImgBB returned an invalid image URL');
-  return url;
+  const result = await apiPostJson<{ url: string }>('/api/images/upload', { userId: getUserId(), image }, { signal, readTimeout: 30000 });
+  if (signal?.aborted) throw new Error('이미지 업로드가 취소되었습니다.');
+  return result.url;
 }
 
 export async function uploadImageToImgbb(
@@ -185,14 +184,7 @@ export async function uploadImageToImgbb(
 ): Promise<string> {
   const uploadFile = await compressImageFile(file, options.compression);
 
-  // You need an API key from imgbb (https://api.imgbb.com/)
-  // Using a generic/temporary one if not provided in env, but it's recommended to add NEXT_PUBLIC_IMGBB_API_KEY
-  const apiKey = process.env.NEXT_PUBLIC_IMG_BB_API_KEY || process.env.NEXT_PUBLIC_IMGBB_API_KEY || '';
-  if (!apiKey) {
-    throw new Error('IMGBB API Key is missing. Please set NEXT_PUBLIC_IMG_BB_API_KEY.');
-  }
-
-  const firstUrl = await uploadFileToImgbb(uploadFile, apiKey, options.signal);
+  const firstUrl = await uploadFileToImgbb(uploadFile, options.signal);
   try {
     await verifyUploadedImage(firstUrl);
     return firstUrl;
@@ -200,8 +192,9 @@ export async function uploadImageToImgbb(
     console.warn('ImgBB returned an unavailable URL; retrying with a unique image payload.', firstError);
   }
 
+  if (options.signal?.aborted) throw new Error('이미지 업로드가 취소되었습니다.');
   const uniqueFile = await createDeduplicationSafeImage(uploadFile);
-  const retryUrl = await uploadFileToImgbb(uniqueFile, apiKey, options.signal);
+  const retryUrl = await uploadFileToImgbb(uniqueFile, options.signal);
   await verifyUploadedImage(retryUrl);
   return retryUrl;
 }

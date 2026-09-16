@@ -4,7 +4,7 @@
   "private": true,
   "scripts": {
     "dev": "NEXT_PUBLIC_APP_VERSION=$npm_package_version next dev -H 0.0.0.0",
-    "prebuild": "node scripts/check-netlify-functions.cjs && npm run test:server-runtime",
+    "prebuild": "node scripts/check-netlify-functions.cjs && npm run test:regression",
     "build": "NEXT_PUBLIC_APP_VERSION=$npm_package_version next build",
     "build:app": "node scripts/build-app.cjs branch",
     "build:app:release": "node scripts/build-app.cjs release",
@@ -17,7 +17,18 @@
     "test:server-runtime": "node --no-experimental-require-module --test scripts/test-server-runtime.cjs",
     "cap:sync": "npx cap sync",
     "start": "next start",
-    "lint": "next lint"
+    "lint": "next lint",
+    "build:app:test": "node scripts/build-app.cjs test",
+    "test:operations": "node --test scripts/test-operations.cjs",
+    "test:regression": "node --no-experimental-require-module --test scripts/test-security.cjs scripts/test-performance.cjs scripts/test-app-login.cjs scripts/test-netlify-functions.cjs scripts/test-server-runtime.cjs scripts/test-operations.cjs scripts/test-staging-deploy.cjs scripts/test-ota.cjs",
+    "test:ota": "node --test scripts/test-ota.cjs",
+    "ota:package": "node scripts/ota-bundle.cjs",
+    "ota:host": "node scripts/ota-host.cjs",
+    "test:emulator": "npm run test:rules && node --test scripts/test-operations-emulator.cjs",
+    "build:staging": "node scripts/build-staging.cjs",
+    "deploy:staging": "node scripts/deploy-staging.cjs --execute",
+    "deploy:staging:check": "node scripts/deploy-staging.cjs --check",
+    "test:deployment": "node --test scripts/test-staging-deploy.cjs"
   },
   "dependencies": {
     "@capacitor/android": "^8.4.2",
@@ -31,6 +42,7 @@
     "@capacitor/push-notifications": "^8.1.2",
     "@capacitor/splash-screen": "^8.0.2",
     "@capacitor/status-bar": "^8.0.3",
+    "@capawesome/capacitor-live-update": "8.4.2",
     "@capgo/capacitor-native-navigation": "^8.3.0",
     "@netlify/functions": "^5.3.0",
     "@opentelemetry/api": "^1.9.1",

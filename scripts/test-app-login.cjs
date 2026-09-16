@@ -11,11 +11,11 @@ vm.runInNewContext(ts.transpileModule(fs.readFileSync(require.resolve('../src/li
 const { loginFailureKind } = moduleUnderTest.exports;
 
 test('branch build pairs the preview API and label; release must be explicit', () => {
-  const input = { NEXT_PUBLIC_FIREBASE_PROJECT_ID: 'dreamary-1a9af' };
+  const input = { NEXT_PUBLIC_FIREBASE_PROJECT_ID: 'dreamary-staging' };
   const branch = buildEnvironment('branch', input);
-  assert.equal(branch.NEXT_PUBLIC_API_URL, 'https://deploy-preview-2--dreamary.netlify.app');
+  assert.equal(branch.NEXT_PUBLIC_API_URL, 'https://dreamary-staging.netlify.app');
   assert.equal(branch.NEXT_PUBLIC_APP_CHANNEL, 'app · dev');
-  assert.equal(buildEnvironment('release', input).NEXT_PUBLIC_API_URL, 'https://dreamary.netlify.app');
+  assert.equal(buildEnvironment('release', { NEXT_PUBLIC_FIREBASE_PROJECT_ID: 'dreamary-1a9af' }).NEXT_PUBLIC_API_URL, 'https://dreamary.netlify.app');
   assert.throws(() => buildEnvironment(undefined, input));
   assert.equal(input.NEXT_PUBLIC_API_URL, undefined);
 });
@@ -72,7 +72,7 @@ test('real login form distinguishes credential rejection, post-login 404, and su
     } }).outputText, { exports, require: name => {
       assert.ok(name in mocks, `Unexpected dependency: ${name}`);
       return mocks[name];
-    }, console: { error() {} } });
+    }, process: { env: { NEXT_PUBLIC_FIREBASE_PROJECT_ID: 'dreamary-staging' } }, console: { error() {} } });
     const tree = exports.default();
     const form = tree.props.children.find(child => child?.type === 'form');
     await form.props.onSubmit({ preventDefault() {} });

@@ -23,7 +23,7 @@ export default function AdminUsers() {
 
   const fetchUsers = async (cursor?: string | null) => {
     try {
-      cursor ? setLoadingMore(true) : setLoading(true);
+      if (cursor) setLoadingMore(true); else setLoading(true);
       const params = new URLSearchParams({ pageSize: '20' });
       if (cursor) params.set('cursor', cursor);
       const response = await fetch(`/api/admin/users?${params.toString()}`);

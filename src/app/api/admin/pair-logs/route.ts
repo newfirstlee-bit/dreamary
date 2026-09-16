@@ -5,7 +5,7 @@ import { adminDb } from '@/lib/firebase-admin';
 export const runtime = 'nodejs';
 
 const DEFAULT_PAGE_SIZE = 20;
-const MAX_PAGE_SIZE = 50;
+const MAX_PAGE_SIZE = 20;
 
 function parsePageSize(value: string | null) {
   const size = Number(value || DEFAULT_PAGE_SIZE);
@@ -32,7 +32,12 @@ export async function GET(req: Request) {
     const characterId = url.searchParams.get('characterId') || '';
     const type = url.searchParams.get('type') === 'chats' ? 'chats' : 'diaries';
     const pageSize = parsePageSize(url.searchParams.get('pageSize'));
-    const cursor = Number(url.searchParams.get('cursor') || 0);
+    const rawCursor = url.searchParams.get('cursor');
+    let cursor: [number, string] | null = null;
+    if (rawCursor) {
+      try { const value = JSON.parse(rawCursor); if (Array.isArray(value) && Number.isFinite(value[0]) && typeof value[1] === 'string') cursor = value as [number, string]; else return NextResponse.json({ error: '목록을 새로고침해주세요.' }, { status: 400 }); }
+      catch { return NextResponse.json({ error: '목록을 새로고침해주세요.' }, { status: 400 }); }
+    }
 
     if (!userId || !characterId) {
       return NextResponse.json({ error: 'Missing userId or characterId' }, { status: 400 });
@@ -42,11 +47,11 @@ export async function GET(req: Request) {
       .collection(getCollectionName(type))
       .where('userId', '==', userId)
       .where('characterId', '==', characterId)
-      .orderBy('createdAt', 'desc')
+      .orderBy('createdAt', 'desc').orderBy('__name__', 'desc')
       .limit(pageSize);
 
-    if (Number.isFinite(cursor) && cursor > 0) {
-      query = query.startAfter(cursor);
+    if (cursor) {
+      query = query.startAfter(...cursor);
     }
 
     const snapshot = await query.get();
@@ -62,7 +67,7 @@ export async function GET(req: Request) {
     return NextResponse.json({
       ...(character?.userId === userId ? { character } : {}),
       items,
-      nextCursor: snapshot.docs.length === pageSize && lastCreatedAt > 0 ? String(lastCreatedAt) : null,
+      nextCursor: snapshot.docs.length === pageSize && lastCreatedAt > 0 ? JSON.stringify([lastCreatedAt, lastDoc.id]) : null,
     });
   } catch (error: any) {
     console.error('Admin pair logs failed:', error);

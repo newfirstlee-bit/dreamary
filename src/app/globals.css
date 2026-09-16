@@ -61,6 +61,21 @@ body.is-keyboard-open {
   animation: dreamarySpin 0.9s linear infinite;
 }
 
+.loading-dots {
+  display: inline-block;
+  font-size: 1.7em;
+  line-height: 1;
+  min-width: 1.6em;
+  letter-spacing: 0.08em;
+  animation: loadingDots 1s ease-in-out infinite;
+}
+
+@keyframes loadingDots {
+  0%, 20% { opacity: 0.3; }
+  50% { opacity: 1; }
+  80%, 100% { opacity: 0.3; }
+}
+
 body {
   background-color: var(--background);
   color: var(--foreground);
@@ -305,7 +320,7 @@ body.has-full-page-overlay .tab-page {
   flex-shrink: 0;
   display: flex;
   flex-direction: column;
-  padding: 10px 15px max(10px, var(--safe-bottom));
+  padding: 10px 15px max(10px, var(--bottom-ui-safe-gap));
   background-color: white;
   border-top: 1px solid var(--border-color);
 }
@@ -329,7 +344,15 @@ body.is-keyboard-open .chat-input-area {
   padding-bottom: 8px;
 }
 
-body.is-ios-app.is-keyboard-open .chat-detail-page .chat-input-area {
+.chat-scroll-area {
+  flex: 1 1 0;
+  height: 0;
+  min-height: 0;
+  overflow-y: scroll;
+  touch-action: pan-y;
+}
+
+body.is-ios-app.is-keyboard-open:not(.chat-native-keyboard-resize) .chat-detail-page .chat-input-area {
   position: fixed;
   left: 50%;
   bottom: var(--keyboard-height);
@@ -339,7 +362,11 @@ body.is-ios-app.is-keyboard-open .chat-detail-page .chat-input-area {
   z-index: 1200;
 }
 
-body.is-ios-app.is-keyboard-open .chat-detail-page .chat-scroll-area {
+body.is-ios-app.is-keyboard-open:not(.chat-native-keyboard-resize) .chat-detail-page .chat-scroll-area {
+  padding-bottom: calc(var(--keyboard-height) + var(--chat-input-area-height, 72px) + 24px) !important;
+}
+
+body.is-ios-app.is-keyboard-open.chat-native-keyboard-resize .chat-detail-page .chat-scroll-area {
   padding-bottom: calc(var(--chat-input-area-height, 72px) + 24px) !important;
 }
 

@@ -1,0 +1,20 @@
+{
+  "checkedAt": "2026-09-13T14:15:33.016Z",
+  "javascriptFiles": 67,
+  "stagingApiPresent": true,
+  "stagingProjectPresent": true,
+  "serverSecretHits": 0,
+  "bundleMismatches": 0,
+  "roots": [
+    "ios/App/App/public",
+    "android/app/src/main/assets/public",
+    "/tmp/dreamary-staging-ios-build/Build/Products/Debug-iphonesimulator/App.app/public"
+  ],
+  "checkApp": true,
+  "capacitorSync": true,
+  "iosSimulatorBuild": true,
+  "androidDebugBuild": true,
+  "physicalDeviceUI": false,
+  "androidApkBundleMismatches": 0,
+  "androidApkSha256": "e784b3bfa644a5853c1a092394d064b71d0a2159b369b46a9b149af126752525"
+}

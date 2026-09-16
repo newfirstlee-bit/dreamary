@@ -1,0 +1,12 @@
+{
+  "branch": {
+    "enabled": true,
+    "origin": "https://ota--dreamary-staging.netlify.app",
+    "publicKey": "-----BEGIN PUBLIC KEY-----\nMIIBojANBgkqhkiG9w0BAQEFAAOCAY8AMIIBigKCAYEAprzDkk3rx1nZRfOn8KdI\nwscArfQI4TdLGJLDbHU4cBxUtrQn8AmBZZhjkeKuOkj2WPWpAQB4AK8BPORCkXn6\n8Ha8rKzCls+u67W7nV7AaxRBbRhCLJSfTkZCphBNf6TRoUyqJKa/jquc5Kq1alAe\nb3sEe6rIhf3Hi78e+vq2toyiCIrK4dH0CP89kyy6Vfh0tXIfJbi/2x6O4kjYSWPa\nC2Z9eMUse5hUKAsgX7sOV9xjlbrEMm7Pt/WoUhLWpA13OBdzyGFK6vCntcJd39pz\nSM16Y3277i9azZM8KRJG+p/3KgVOnm1keJGhh+YAe9EicQPRcvCNkhHD2wxvJlXO\nbt64SsphdAaC9/h/gjEOXQT9j9INhDbjgkA6bSl8hxvdYB+oqiR4JEiIibkJgHSE\nEEGp3v9e5FlNP80VhMWGrkEsC4O/2ZKD+gMSHSGTSuUdKZ7hWVznho1hYTmYDWkt\nkJfadYmPWRA+poxqHIxbV6GooCmTkgehPEoGCReXv/VfAgMBAAE=\n-----END PUBLIC KEY-----\n"
+  },
+  "release": {
+    "enabled": false,
+    "origin": "",
+    "publicKey": ""
+  }
+}

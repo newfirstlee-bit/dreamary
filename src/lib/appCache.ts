@@ -51,6 +51,9 @@ export function clearUserCache(ownerId: string, sections?: string[]) {
   try {
     if (sections) {
       sections.forEach(section => localStorage.removeItem(cacheKey(ownerId, section)));
+      if (sections.includes('diary')) Object.keys(localStorage)
+        .filter(key => key.startsWith(cacheKey(ownerId, 'diary-detail:')))
+        .forEach(key => localStorage.removeItem(key));
       return;
     }
     const ownerPrefix = `${CACHE_PREFIX}:${ownerId}:`;

@@ -1,3 +1,5 @@
+import { assertServerEnvironment } from './environmentGuard';
+import { readTopicCatalog } from './topicCatalog';
 import { cert, getApps, initializeApp } from 'firebase-admin/app';
 import { getFirestore, Timestamp } from 'firebase-admin/firestore';
 import { getMessaging } from 'firebase-admin/messaging';
@@ -5,7 +7,7 @@ import { formatKoreanNameTemplate } from '../koreanJosa';
 
 export const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+  'Access-Control-Allow-Headers': 'Content-Type, X-Client-Protocol, Authorization',
   'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
   'Access-Control-Expose-Headers': 'X-Message-Id',
 };
@@ -13,6 +15,7 @@ export const corsHeaders = {
 export const KST_DAILY_PUSH_HOUR_UTC = 11;
 
 export function getFirebaseAdminServices() {
+  assertServerEnvironment();
   if (!getApps().length) {
     const rawServiceAccount = process.env.FIREBASE_SERVICE_ACCOUNT_KEY;
     if (!rawServiceAccount) throw new Error('FIREBASE_SERVICE_ACCOUNT_KEY is not set');
@@ -32,7 +35,7 @@ export async function verifyFirebaseIdTokenRest(idToken: string) {
   const res = await fetch(`https://identitytoolkit.googleapis.com/v1/accounts:lookup?key=${apiKey}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ idToken }),
+    body: JSON.stringify({ idToken }), signal: AbortSignal.timeout(10000),
   });
   const data = await res.json();
   if (data.error) throw new Error(data.error.message || 'Token verification failed');
@@ -95,8 +98,8 @@ export async function buildDiaryPushCandidates(firestore: any, uid: string, loca
         empty: !snapshot.exists || snapshot.data()?.userId !== uid,
         docs: snapshot.exists && snapshot.data()?.userId === uid ? [snapshot] : [],
       }))
-      : firestore.collection('characters').where('userId', '==', uid).get(),
-    firestore.collection('topics').get(),
+      : firestore.collection('characters').where('userId', '==', uid).limit(20).get(),
+    readTopicCatalog(firestore).then(topics => ({ docs: topics.map(topic => ({ id: topic.id, data: () => topic })) })),
   ]);
 
   const topics = topicsSnap.docs
@@ -162,4 +165,56 @@ export async function buildDiaryPushCandidates(firestore: any, uid: string, loca
   }));
 
   return Object.fromEntries(entries.filter(Boolean) as Array<readonly [string, any]>);
+}
+
+export interface DiaryPushCandidate {
+  characterId: string;
+  lastDiaryDate: string;
+  nextTopicOrder: number;
+  nextTopicContent: string;
+  nextTopicId: string;
+  updatedAtMs: number;
+}
+
+export function normalizeDiaryPushCandidate(value: any): DiaryPushCandidate | null {
+  if (!value || typeof value !== 'object') return null;
+  const characterId = typeof value.characterId === 'string' ? value.characterId : '';
+  const nextTopicOrder = Number(value.nextTopicOrder || 0);
+  const nextTopicContent = typeof value.nextTopicContent === 'string' ? value.nextTopicContent.trim() : '';
+  if (!characterId || !Number.isFinite(nextTopicOrder) || nextTopicOrder <= 0 || !nextTopicContent) return null;
+
+  return {
+    characterId,
+    lastDiaryDate: typeof value.lastDiaryDate === 'string' ? value.lastDiaryDate : '',
+    nextTopicOrder,
+    nextTopicContent,
+    nextTopicId: typeof value.nextTopicId === 'string' ? value.nextTopicId : '',
+    updatedAtMs: Number(value.updatedAtMs || 0),
+  };
+}
+
+export function pickDiaryPushCandidate(candidates: any, todayDateString: string): DiaryPushCandidate | null {
+  if (!candidates || typeof candidates !== 'object') return null;
+
+  return Object.values(candidates).reduce<DiaryPushCandidate | null>((best, raw) => {
+    const candidate = normalizeDiaryPushCandidate(raw);
+    if (!candidate || candidate.lastDiaryDate === todayDateString) return best;
+    if (!best) return candidate;
+    if (candidate.nextTopicOrder !== best.nextTopicOrder) {
+      return candidate.nextTopicOrder > best.nextTopicOrder ? candidate : best;
+    }
+    return candidate.updatedAtMs > best.updatedAtMs ? candidate : best;
+  }, null);
+}
+
+export function hasUnresolvedNameTemplateText(value: string) {
+  return /{(?:유저|캐릭터|ユーザー|キャラクター)}/.test(value);
+}
+
+export function candidatesNeedNameTemplateRebuild(candidates: any) {
+  if (!candidates || typeof candidates !== 'object') return false;
+  return Object.values(candidates).some(raw => {
+    const candidate = normalizeDiaryPushCandidate(raw);
+    return candidate ? hasUnresolvedNameTemplateText(candidate.nextTopicContent) : false;
+  });
 }

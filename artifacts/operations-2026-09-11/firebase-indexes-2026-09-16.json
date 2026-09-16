@@ -1,0 +1,10 @@
+{
+  "project": "dreamary-1a9af",
+  "database": "(default)",
+  "checkedAt": "2026-09-16T06:15:26Z",
+  "expected": 15,
+  "remote": 15,
+  "ready": 15,
+  "method": "read-only Firestore Admin API comparison",
+  "note": "Firestore automatically appends __name__ to composite indexes where it was not explicitly entered in the console. All 15 configured definitions are READY."
+}

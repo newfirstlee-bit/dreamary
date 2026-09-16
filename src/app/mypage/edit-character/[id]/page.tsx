@@ -4,7 +4,9 @@ import { useEffect, useState, useRef } from 'react';
 import ResilientImage from '@/components/ResilientImage';
 import { useRouter, useParams } from 'next/navigation';
 import { getUserId } from '@/lib/auth';
-import { getCharacterById, saveCharacter, Character } from '@/lib/db';
+import { getCharacterById, Character } from '@/lib/db';
+import { db } from '@/lib/firebase';
+import { doc, updateDoc } from '@/lib/dataFirestore';
 import { uploadProfileImageToImgbb } from '@/lib/imgbb';
 import { Loader2, ChevronLeft, Camera, User } from 'lucide-react';
 import { trackEvent } from '@/lib/mixpanel';
@@ -12,6 +14,20 @@ import { useLocale } from '@/lib/i18n';
 import { clearUserCache } from '@/lib/appCache';
 import { invalidateCharacterStore } from '@/store/useAppStore';
 import { resolveStaticEntityId } from '@/lib/navigation';
+
+async function updateCharacterWithConfirmation(charId: string, data: Record<string, unknown>) {
+  try {
+    await updateDoc(doc(db, 'characters', charId), data);
+  } catch (error) {
+    // A committed Firestore write can still surface a network error while the
+    // response is in flight. Confirm the document before showing a false failure.
+    const latest = await getCharacterById(charId);
+    const persisted = latest && Object.entries(data).every(([key, value]) =>
+      (latest as unknown as Record<string, unknown>)[key] === value
+    );
+    if (!persisted) throw error;
+  }
+}
 
 function GenderSelect({ value, onChange }: { value: string, onChange: (v: string) => void }) {
   const { t } = useLocale();
@@ -154,6 +170,7 @@ export default function EditCharacterPage() {
   };
 
   const handleSave = async () => {
+    if (saving || !hasChanges) return;
     setSaving(true);
     try {
       const userId = getUserId();
@@ -163,12 +180,10 @@ export default function EditCharacterPage() {
         finalImgUrl = await uploadProfileImageToImgbb(imageFile);
       }
 
-      const updatedChar: Character = {
-        ...initialChar,
-        id: charId,
-        userId: userId,
+      if (!initialChar || initialChar.userId !== userId) throw new Error('페어 접근 권한이 없습니다.');
+      const updatedChar = {
         name: name.trim(),
-        gender: (gender || undefined) as Character['gender'],
+        gender,
         feeling: feeling.trim(),
         title: title.trim(),
         exampleChat: exampleChat.trim(),
@@ -176,17 +191,21 @@ export default function EditCharacterPage() {
         worldview: worldview.trim(),
         extra: extra.trim(),
         narrative: narrative.trim(),
-        createdAt: initialChar?.createdAt || Date.now(),
+        image: finalImgUrl || '',
       };
       
       if (finalImgUrl) {
         updatedChar.image = finalImgUrl;
       }
 
-      await saveCharacter(updatedChar);
+      await updateCharacterWithConfirmation(charId, updatedChar);
       clearUserCache(userId);
       invalidateCharacterStore(userId);
-      trackEvent('Settings_Changed', { type: 'character_profile', character_id: updatedChar.id });
+      try {
+        trackEvent('Settings_Changed', { type: 'character_profile', character_id: charId });
+      } catch (analyticsError) {
+        console.warn('Character settings analytics failed after save', analyticsError);
+      }
       router.push('/mypage');
     } catch (err) {
       console.error(err);

@@ -13,6 +13,8 @@
 
 앱 변경을 전달하기 전에는 루트의 `APP_QA_CHECKLIST.md`와 `DEBUGGING.md`를 확인하고 최소한 `npm run check:app`과 대상 플랫폼 동기화·빌드를 수행한다.
 
+버전 변경·설치 파일 제작·서버 배포·OTA 패키징 및 게시 전에는 반드시 루트 `VERSIONING.md`를 읽고 버전 표시·호환성·회차 기록 규칙을 따른다.
+
 ## Firebase 조회 1원칙 (필수)
 
 - 인증/소유권/API 변경 또는 배포 검토 시 `SECURITY_DEPLOYMENT.md`의 미해결 차단 항목을 먼저 확인한다. 현재 Firestore의 광범위 허용 규칙이 해결되기 전에는 API 인증만으로 보안 완료를 선언하지 않는다.

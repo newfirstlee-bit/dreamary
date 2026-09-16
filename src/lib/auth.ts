@@ -5,7 +5,7 @@ export function generateUUID() {
     return crypto.randomUUID();
   }
   return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
-    var r = Math.random() * 16 | 0, v = c === 'x' ? r : (r & 0x3 | 0x8);
+    const r = Math.random() * 16 | 0, v = c === 'x' ? r : (r & 0x3 | 0x8);
     return v.toString(16);
   });
 }
@@ -32,6 +32,7 @@ function getCookie(name: string) {
 }
 
 import { auth } from './firebase';
+import { persistGuestIdentity, removeGuestPersistence } from './guestPersistence';
 
 export function getStoredGuestUserId(): string | null {
   if (typeof window === 'undefined') return null;
@@ -42,6 +43,11 @@ export function retireGuestIdentity(sourceUserId: string) {
   if (getStoredGuestUserId() !== sourceUserId) return;
   localStorage.removeItem(USER_ID_KEY);
   setCookie(USER_ID_KEY, '', -1);
+  localStorage.removeItem('backupCode');
+  localStorage.removeItem('backupCodeTime');
+  localStorage.removeItem('backupCodeOwner');
+  void removeGuestPersistence(sourceUserId);
+  window.dispatchEvent(new Event('dreamary-guest-identity-changed'));
   // Do not reuse a transferred UUID when the user later logs out.
 }
 
@@ -53,12 +59,13 @@ export function getUserId(): string {
   }
 
   let userId = localStorage.getItem(USER_ID_KEY);
-  let cookieUserId = getCookie(USER_ID_KEY);
+  const cookieUserId = getCookie(USER_ID_KEY);
 
   if (!userId && !cookieUserId) {
     const newId = generateUUID();
     localStorage.setItem(USER_ID_KEY, newId);
     setCookie(USER_ID_KEY, newId, 365);
+    void persistGuestIdentity(newId);
     return newId;
   }
 
@@ -69,6 +76,8 @@ export function getUserId(): string {
     localStorage.setItem(USER_ID_KEY, cookieUserId);
     userId = cookieUserId;
   }
+
+  if (userId || cookieUserId) void persistGuestIdentity(userId || cookieUserId || '');
 
   return userId || cookieUserId || '';
 }

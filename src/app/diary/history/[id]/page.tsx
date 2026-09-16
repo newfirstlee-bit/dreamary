@@ -5,14 +5,14 @@ import ResilientImage from '@/components/ResilientImage';
 import { useRouter, useParams, useSearchParams } from 'next/navigation';
 import { useLocale } from '@/lib/i18n';
 import { useUserId } from '@/hooks/useUserId';
-import { getDiaryById, getCharacterById, getUserProfile, getAdjacentDiaryIds, getTopics, Diary, Character, UserProfile, Topic } from '@/lib/db';
+import { getDiaryById, getDiaryAnswerNumber, getCharacterById, getUserProfile, getAdjacentDiaryIds, getTopics, Diary, Character, UserProfile, Topic } from '@/lib/db';
 import { apiPostJson } from '@/lib/api';
 import { Loader2, ChevronLeft, ChevronRight, Pencil, Siren, Trash2, User } from 'lucide-react';
 import { buildStaticEntityRoute, resolveStaticEntityId } from '@/lib/navigation';
 import { formatKoreanNameTemplate } from '@/lib/koreanJosa';
 import ReportModal, { ReportSubmitPayload } from '@/components/ReportModal';
 import DiaryInlineEditBox from '@/components/DiaryInlineEditBox';
-import { clearUserCache } from '@/lib/appCache';
+import { clearUserCache, readUserCache } from '@/lib/appCache';
 import { getLocalDateString } from '@/lib/dateString';
 
 function DiaryHistoryDetailContent() {
@@ -26,6 +26,7 @@ function DiaryHistoryDetailContent() {
   const diaryId = searchParams.get('entityId') || resolveStaticEntityId(params.id as string);
   
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(false);
   const [diary, setDiary] = useState<Diary | null>(null);
   const [character, setCharacter] = useState<Character | null>(null);
   const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
@@ -95,24 +96,42 @@ function DiaryHistoryDetailContent() {
 
   useEffect(() => {
     if (!userId) return;
-
+    let cancelled = false;
+    setLoadError(false);
+    setPrevDiaryId(null); setNextDiaryId(null);
+    const cached = readUserCache<{diary: Diary; character: Character; userProfile: UserProfile | null; topic: Topic | null}>(userId, 'diary-detail:' + diaryId);
+    const usable = cached?.diary.id === diaryId && cached.diary.userId === userId
+      && cached.character.userId === userId && cached.character.id === cached.diary.characterId;
+    setLoading(!usable);
+    setDiary(usable ? cached.diary : null);
+    setCharacter(usable ? cached.character : null);
+    setUserProfile(usable ? cached.userProfile : null);
+    setTopic(usable ? cached.topic : null);
     const init = async () => {
       try {
         const d = await getDiaryById(diaryId);
-
-        if (!d) {
+        if (cancelled) return;
+        if (!d || d.userId !== userId) {
           router.replace('/diary/history');
           return;
         }
 
-        const [profile, char, adjacentDiaries, topics] = await Promise.all([
+        // Render body as soon as the pair is ready; navigation and numbering
+        // must not gate a record the user has already selected in the list.
+        const char = usable ? cached.character : await getCharacterById(d.characterId);
+        if (cancelled) return;
+        if (!char || char.userId !== userId) throw new Error('Diary owner mismatch');
+        setDiary({ ...d, answerNumber: usable ? cached.diary.answerNumber : undefined });
+        setCharacter(char);
+        setLoading(false);
+        const [profile, adjacentDiaries, topics, answerNumber] = await Promise.all([
           getUserProfile(d.characterId),
-          getCharacterById(d.characterId),
           getAdjacentDiaryIds(userId, d.characterId, Number(d.createdAt || 0)),
-          getTopics()
+          getTopics(),
+          getDiaryAnswerNumber(d),
         ]);
-
-        setDiary(d);
+        if (cancelled) return;
+        setDiary({ ...d, answerNumber });
         setUserProfile(profile);
         setCharacter(char);
         setTopic(topics.find(t => t.id === d.topicId) || null);
@@ -120,15 +139,17 @@ function DiaryHistoryDetailContent() {
         setPrevDiaryId(adjacentDiaries.prevDiaryId);
         setNextDiaryId(adjacentDiaries.nextDiaryId);
       } catch (err) {
-        console.error(err);
+        if (!cancelled) setLoadError(true);
       } finally {
-        setLoading(false);
+        if (!cancelled) setLoading(false);
       }
     };
     init();
+    return () => { cancelled = true; };
   }, [diaryId, router, userId]);
 
-  if (loading || !diary || !character) {
+  if (loadError && (!diary || !character)) return <div className="app-container full-page"><p>{locale === 'ja' ? '読み込めませんでした。もう一度お試しください。' : '일기를 불러오지 못했습니다. 다시 시도해주세요.'}</p><button onClick={() => router.replace('/diary/history')}>{t('common.back')}</button></div>;
+  if (loading || !diary || !character || diary.id !== diaryId || diary.userId !== userId || character.userId !== userId) {
     return (
       <div className="app-container" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
         <Loader2 className="animate-spin" size={48} color="var(--point-color)" style={{ animation: 'spin 2s linear infinite' }} />
@@ -187,7 +208,7 @@ function DiaryHistoryDetailContent() {
         {/* Topic Display */}
         <div style={{ backgroundColor: 'white', padding: '20px', borderRadius: '15px', border: '1px solid var(--border-color)', marginBottom: '20px', boxShadow: '0 4px 10px rgba(0,0,0,0.02)' }}>
           <p style={{ color: 'var(--point-color)', fontSize: '0.85rem', fontWeight: 'bold', marginBottom: '8px' }}>
-            {topic ? `${topic.order}${t('common.nthQuestion')}` : t('common.question')}
+            {diary.answerNumber ? `${diary.answerNumber}${t('common.nthQuestion')}` : t('common.question')}
           </p>
           <h3 style={{ fontSize: '1.2rem', lineHeight: '1.4' }}>
             {formatKoreanNameTemplate(

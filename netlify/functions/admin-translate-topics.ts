@@ -2,8 +2,7 @@ import type { Config } from "@netlify/functions";
 import { adminDb } from '../../src/lib/firebase-admin';
 import { isAdminRequest } from '../../src/lib/server/adminSession';
 import type { Topic } from '../../src/lib/db';
-import { readAdminTopics as getTopics } from '../../src/lib/server/adminTopics';
-const saveTopic = async (topic: Topic) => adminDb!.collection('topics').doc(topic.id).set(topic);
+import { clearTopicCatalog } from '../../src/lib/server/topicCatalog';
 import { corsHeaders } from '../shared/cors';
 
 export const config: Config = {
@@ -205,18 +204,29 @@ export default async function reqHandler(req: Request) {
   }
 
   try {
-    const topics = await getTopics();
-    
-    let count = 0;
-    for (const t of topics) {
-      const translated = userTranslations[t.order];
-      if (translated && t.contentJa !== translated) {
-        await saveTopic({ ...t, contentJa: translated });
-        count++;
+    if (req.method !== 'POST' || !adminDb) return new Response(null, { status: 405 });
+    const { cursor } = await req.json().catch(() => ({}));
+    if (cursor && (typeof cursor !== 'string' || cursor.includes('/'))) return new Response(null, { status: 400 });
+    const result = await adminDb.runTransaction(async tx => {
+      const catalog = adminDb!.collection('topicCatalog').doc('current');
+      const current = await tx.get(catalog);
+      if (!Array.isArray(current.data()?.topics)) throw new Error('주제 묶음 준비가 필요합니다.');
+      let query = adminDb!.collection('topics').orderBy('__name__').limit(20);
+      if (cursor) query = query.startAfter(cursor);
+      const page = await tx.get(query);
+      const updates = new Map<string, Topic>();
+      for (const doc of page.docs) {
+        const topic = doc.data() as Topic, translated = userTranslations[topic.order];
+        if (translated && topic.contentJa !== translated) updates.set(doc.id, { ...topic, id: doc.id, contentJa: translated });
       }
-    }
-    
-    return new Response(JSON.stringify({ success: true, count }), { headers: corsHeaders });
+      const topics = current.data()!.topics.map((topic: Topic) => updates.get(topic.id) || topic);
+      if (Buffer.byteLength(JSON.stringify(topics)) > 600000) throw new Error('주제 묶음 용량을 초과했습니다.');
+      updates.forEach((topic, id) => tx.set(adminDb!.collection('topics').doc(id), topic));
+      if (updates.size) tx.set(catalog, { topics, updatedAt: Date.now() });
+      return { success: true, count: updates.size, cursor: page.size === 20 ? page.docs[page.size - 1].id : null };
+    });
+    clearTopicCatalog();
+    return Response.json(result, { headers: { ...corsHeaders, 'Cache-Control': 'no-store' } });
   } catch (err: any) {
     console.error('Translation error:', err);
     return new Response(JSON.stringify({ error: err.message }), { status: 500, headers: corsHeaders });

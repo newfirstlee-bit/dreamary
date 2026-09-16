@@ -6,6 +6,7 @@ import { dataIdentity, ensureDataSession } from './dataSession';
 
 function guarded<T extends (...args: any[]) => Promise<any>>(operation: T): T {
   return (async (...args: Parameters<T>) => {
+    if (operation === sdk.getDocFromServer && args[0]?.path === 'topicCatalog/current') return operation(...args);
     if (operation === sdk.getDocsFromServer && args[0]?.path === 'topics') return operation(...args);
     const identity = await ensureDataSession();
     if (identity !== dataIdentity()) throw new Error('사용자가 변경되었습니다. 다시 시도해주세요.');

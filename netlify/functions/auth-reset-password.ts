@@ -8,7 +8,6 @@ export const config: Config = {
   path: "/api/auth/reset-password"
 };
 
-const resend = new Resend(process.env.RESEND_API_KEY);
 
 async function getAdminAuth() {
   const [
@@ -64,29 +63,28 @@ export default async function reqHandler(req: Request) {
     const uid = snapshot.docs[0].id;
     if (!process.env.RESEND_API_KEY) throw new Error('Password delivery is not configured');
     const tempPassword = generateRandomPassword();
-    await adminAuth.updateUser(uid, { password: tempPassword });
+    const resend = new Resend(process.env.RESEND_API_KEY);
+    const { error: resendError } = await resend.emails.send({
+      from: process.env.RESEND_AUTH_FROM || 'onboarding@resend.dev',
+      to: email,
+      subject: '[Dreamary] 임시 비밀번호 발급 안내',
+      html: `
+        <div style="font-family: sans-serif; padding: 20px;">
+          <h2>Dreamary 임시 비밀번호</h2>
+          <p>회원님의 임시 비밀번호는 <strong>${tempPassword}</strong> 입니다.</p>
+          <p>보안을 위해 로그인 후 반드시 비밀번호를 변경해주세요.</p>
+        </div>
+      `
+    });
 
-    if (process.env.RESEND_API_KEY) {
-      const { data, error: resendError } = await resend.emails.send({
-        from: 'onboarding@resend.dev',
-        to: email,
-        subject: '[Dreamary] 임시 비밀번호 발급 안내',
-        html: `
-          <div style="font-family: sans-serif; padding: 20px;">
-            <h2>Dreamary 임시 비밀번호</h2>
-            <p>회원님의 임시 비밀번호는 <strong>${tempPassword}</strong> 입니다.</p>
-            <p>보안을 위해 로그인 후 반드시 비밀번호를 변경해주세요.</p>
-          </div>
-        `
-      });
-
-      if (resendError) {
-        console.error('Resend Error:', resendError);
-        return new Response(JSON.stringify({ error: `이메일 발송 실패: ${resendError.message}` }), { status: 500, headers: corsHeaders });
-      }
-    } else {
-      throw new Error('Password delivery is not configured');
+    if (resendError) {
+      // Do not invalidate the existing password when Resend rejects the recipient.
+      console.error('Resend Error:', resendError);
+      return new Response(JSON.stringify({ error: 'auth.mailDeliveryFailed' }), { status: 503, headers: corsHeaders });
     }
+
+    // Change the password only after Resend has accepted the message.
+    await adminAuth.updateUser(uid, { password: tempPassword });
 
     return new Response(JSON.stringify({ success: true }), { headers: corsHeaders });
 

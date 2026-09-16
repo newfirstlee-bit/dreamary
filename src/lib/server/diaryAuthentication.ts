@@ -7,9 +7,16 @@ const signingKeys = createRemoteJWKSet(new URL(
 ), { timeoutDuration: 5000, cooldownDuration: 30000, cacheMaxAge: 3600000 });
 
 export class DiaryAuthenticationError extends Error {
-  constructor(public readonly status: 400 | 401 | 403 | 409 | 429 | 503, message: string) {
+  constructor(public readonly status: 400 | 401 | 403 | 409 | 413 | 426 | 429 | 502 | 503, message: string) {
     super(message);
   }
+}
+
+export function assertClientProtocol(req: Request) {
+  const minimum = Number(process.env.MIN_CLIENT_PROTOCOL || 0);
+  const version = Number(req.headers.get('X-Client-Protocol') || 0);
+  if (Number.isSafeInteger(minimum) && minimum > 0 && (!Number.isSafeInteger(version) || version < minimum))
+    throw new DiaryAuthenticationError(426, '앱 업데이트가 필요합니다. 최신 버전으로 업데이트해주세요.');
 }
 
 export function projectId(): string {
@@ -26,6 +33,7 @@ export function projectId(): string {
  * Like verifyIdToken() without checkRevoked, this does not check revocation.
  */
 export async function requireDiaryLogin(req: Request, claimedUserId: unknown): Promise<string> {
+  assertClientProtocol(req);
   const authorization = req.headers.get('Authorization') || '';
   const match = /^Bearer ([^\s]+)$/i.exec(authorization);
   if (!match || match[1].length > 16384) {

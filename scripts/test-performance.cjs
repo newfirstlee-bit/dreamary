@@ -209,6 +209,9 @@ test('profile cache: successful edit invalidates cached data; login uses a diffe
   const auth = { currentUser: null };
   let profile = { id: 'c', name: 'before' }, reads = 0;
   const db = load('src/lib/db.ts', {
+    './appCache': { clearUserCache: () => {} },
+    './characterOrder': { copyRecentCharacterOrder: () => {} },
+    './productLimits': { CHAT_PAGE_SIZE: 30 },
     './firebase': { auth, db: {} },
     './auth': { getStoredGuestUserId: () => 'guest-uuid' },
     './guestSession': { getGuestSession: async () => 'guest-token' },
@@ -241,6 +244,8 @@ function diaryFixture(existing) {
     runTransaction: async action => action({ get: async target => target.get(), set: (_ref, diary) => { stored = diary; writes++; } }),
   };
   const { default: handler } = load('netlify/functions/diary.ts', {
+    // Quota/idempotency transactions are exercised by test-security; this fixture isolates diary persistence.
+    '../../src/lib/server/operationalGuard': { readJsonBody: req => req.json(), validateAiInput() {}, reserveAiRequest: async () => ({ signal: new AbortController().signal }), assertAiPermit: async () => {}, finishAiRequest: async () => {} },
     '../../src/lib/firebase-admin': { adminDb: db }, '../shared/cors': { corsHeaders: {} },
     '../../src/lib/diaryIdentity': { getDiaryDailyDocId: () => 'daily' },
     '../../src/lib/koreanJosa': { applyKoreanJosa: value => value, formatKoreanNameTemplate: value => value },
@@ -251,7 +256,7 @@ function diaryFixture(existing) {
     '../../src/lib/server/diaryDate': { currentDiaryDate: () => '2026-09-09' },
   }, {
     process: { env: { OPENROUTER_API_KEY: 'test-only' } },
-    fetch: async () => { generations++; return Response.json({ choices: [{ message: { content: '테스트 답변' } }] }); },
+    fetch: async () => { generations++; return Response.json({ choices: [{ message: { content: '테스트 답변' }, finish_reason: 'stop' }] }); },
   });
   const run = () => handler(new Request('https://app.test/api/diary', {
     method: 'POST', body: JSON.stringify({ character: { id: 'c', name: '캐릭터' }, topic: '주제', topicId: 't', userEntry: 'new input', userId: 'u', dateString: '2026-09-09' }),
@@ -276,9 +281,9 @@ test('diary server: response contains the committed diary, duplicate returns sto
   assert.equal(duplicate.stats().writes, 0);
 });
 
-test('image component: cache pipeline precedes img, stale replies ignored, only owned blobs revoked', async () => {
+test('image component: remote URL renders immediately, cached errors recover, only owned blobs revoke', async () => {
   let cursor = 0;
-  const slots = [], effects = [], requests = [], revoked = [];
+  const slots = [], effects = [], cachedReads = [], warmed = [], revoked = [];
   const hooks = {
     default: { createElement: (type, props, ...children) => ({ type, props, children }), Fragment: 'fragment' },
     useState: initial => {
@@ -299,7 +304,10 @@ test('image component: cache pipeline precedes img, stale replies ignored, only 
   };
   const { default: Image } = load('src/components/ResilientImage.tsx', {
     react: hooks, '@/lib/imageDiagnostics': { reportImageLoadFailure() {} },
-    '@/lib/imageCache': { resolveImageFromCacheOrNetwork: () => { const request = deferred(); requests.push(request); return request.promise; } },
+    '@/lib/imageCache': {
+      readCachedImage: () => { const request = deferred(); cachedReads.push(request); return request.promise; },
+      warmImageCache: url => warmed.push(url),
+    },
   }, { URL: { createObjectURL: () => 'blob:owned', revokeObjectURL: value => revoked.push(value) } });
   const render = src => {
     cursor = 0;
@@ -307,15 +315,76 @@ test('image component: cache pipeline precedes img, stale replies ignored, only 
     while (effects.length) effects.shift()();
     return output;
   };
-  assert.equal(render('https://images.test/a').type, 'fragment');
-  render('https://images.test/b');
-  requests[0].resolve(new Blob(['old']));
-  await Promise.resolve();
-  assert.equal(render('https://images.test/b').type, 'fragment');
-  requests[1].resolve(new Blob(['new']));
+  const first = render('https://images.test/a');
+  assert.equal(first.props.src, 'https://images.test/a');
+  assert.deepEqual(warmed, ['https://images.test/a']);
+  const second = render('https://images.test/b');
+  assert.equal(second.props.src, 'https://images.test/b');
+  second.props.onError();
+  cachedReads[0].resolve(new Blob(['cached']));
   await Promise.resolve();
   assert.equal(render('https://images.test/b').props.src, 'blob:owned');
   assert.equal(render('blob:caller-owned').props.src, 'blob:caller-owned');
   render('/local.png');
   assert.deepEqual(revoked, ['blob:owned']);
+});
+
+test('chat history: 100/1,000/10,000 records keep a 30-document window and tie-safe older cursor', async () => {
+  for (const size of [100, 1000, 10000]) {
+    const rows = Array.from({ length: size }, (_, i) => ({ id: String(i).padStart(5, '0'), userId: 'u', characterId: 'c', createdAt: Math.floor(i / 3), role: 'user', content: 'synthetic' }));
+    const caps = []; let listenerClosed = false;
+    const firestore = {
+      collection: (_db, name) => name, where: (...args) => ({ kind: 'where', args }),
+      orderBy: (...args) => ({ kind: 'order', args }), limit: n => ({ kind: 'limit', n }), startAfter: doc => ({ kind: 'cursor', doc }),
+      query: (name, ...conditions) => ({ name, conditions }),
+      getDocs: async ({ conditions }) => {
+        const cap = conditions.find(c => c.kind === 'limit')?.n; assert.equal(cap, 30); caps.push(cap);
+        let values = [...rows];
+        for (const { args } of conditions.filter(c => c.kind === 'where')) values = values.filter(v => v[args[0]] === args[2]);
+        values.sort((a,b) => b.createdAt - a.createdAt || b.id.localeCompare(a.id));
+        const cursor = conditions.find(c => c.kind === 'cursor')?.doc;
+        if (cursor) values = values.slice(values.findIndex(v => v.id === cursor.id) + 1);
+        const docs = values.slice(0,cap).map(value => ({ id: value.id, data: () => value }));
+        return { docs, size: docs.length, empty: !docs.length };
+      },
+      onSnapshot: (query, callback) => { void firestore.getDocs(query).then(callback); return () => { listenerClosed = true; }; },
+    };
+    const { ReadCache } = load('src/lib/readCache.ts');
+    const db = load('src/lib/db.ts', {
+      './productLimits': { CHAT_PAGE_SIZE: 30 }, './firebase': { auth: {}, db: {} }, './auth': {}, './guestSession': {}, './appCache': {}, './characterOrder': {}, './api': {},
+      './diaryIdentity': {}, './dataFirestore': firestore,
+      './dataReadCache': { profileReadCache: new ReadCache(1000), topicReadCache: new ReadCache(1000) },
+    });
+    const first = await db.getChatMessagesPage('u','c');
+    const second = await db.getChatMessagesPage('u','c', first.nextCursor);
+    assert.equal(first.messages.length, 30); assert.equal(second.messages.length, 30);
+    assert.equal(new Set([...first.messages, ...second.messages].map(m => m.id)).size, 60);
+    assert.equal(first.messages.at(-1).id, String(size - 1).padStart(5,'0'));
+    const close = db.subscribeChatMessages('u','c', messages => assert.equal(messages.length,30));
+    await Promise.resolve(); close(); assert.equal(listenerClosed, true); assert.deepEqual(caps, [30,30,30]);
+  }
+});
+
+test('manual backup waits for server completion before retiring source and invalidates both owners', async () => {
+  const events = []; let page = 0;
+  const client = load('src/lib/db.ts', {
+    './productLimits': {}, './firebase': {}, './dataReadCache': {}, './dataFirestore': {}, './diaryIdentity': {}, './guestSession': {},
+    './auth': { retireGuestIdentity: id => events.push('retire:' + id) },
+    './appCache': { clearUserCache: id => events.push('clear:' + id) },
+    './characterOrder': { copyRecentCharacterOrder: (a,b) => events.push('order:' + a + ':' + b) },
+    './api': { apiPostJson: async (_url, body) => { assert.equal(body.progressVersion, 1); assert.equal(events.some(e => e.startsWith('retire:')), false); return { done: ++page === 2, sourceUUID: 'guest', stage: page === 1 ? 'characters' : 'complete' }; } },
+  });
+  await client.migrateGuestBackup('TESTCODE', 'alice', stage => events.push(stage));
+  assert.equal(page, 2);
+  assert.deepEqual(events, ['diaries', 'characters', 'complete', 'clear:guest', 'clear:alice', 'order:guest:alice', 'retire:guest']);
+});
+
+test('list recovery respects pending explicit backup code without starting an automatic transfer', async () => {
+  let transfers = 0;
+  const recovery = load('src/lib/ownership.ts', {
+    './db': { getCharactersByUser: async () => [], prepareOwnershipMigration: () => { transfers++; throw new Error(); } },
+    './appCache': {}, './characterOrder': {}, './auth': { getStoredGuestUserId: () => 'guest' },
+  }, { window: {}, localStorage: { getItem: key => key === 'backupCode' ? 'TESTCODE' : String(Date.now()) } });
+  assert.equal((await recovery.getCharactersWithGuestRecovery('alice', true)).length, 0);
+  assert.equal(transfers, 0);
 });

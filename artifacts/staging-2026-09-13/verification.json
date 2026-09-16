@@ -1,0 +1,35 @@
+{
+  "date": "2026-09-13",
+  "project": "dreamary-staging",
+  "deploymentId": "6aa6aa3da06f6a1a5a2eedec",
+  "deploymentReady": true,
+  "homepageStatus": 200,
+  "apiChecksPassed": 16,
+  "indexesReady": 15,
+  "pagination": [
+    "diaries 30+5",
+    "chatMessages 30+5"
+  ],
+  "scheduledJobChecksPassed": 6,
+  "syntheticCleanupComplete": true,
+  "checkApp": "passed",
+  "nativeSync": [
+    "ios",
+    "android"
+  ],
+  "nativeBuild": [
+    "iOS Simulator Debug",
+    "Android Debug"
+  ],
+  "clientKnownServerSecretHits": 0,
+  "productionChanged": false,
+  "paidPlanRequiredForCompletedWork": false,
+  "notPerformed": [
+    "remote GitHub CI",
+    "physical device UI",
+    "AI/mail/ImgBB external integration on staging",
+    "actual APNs/FCM delivery",
+    "production operations rollout",
+    "OTA"
+  ]
+}

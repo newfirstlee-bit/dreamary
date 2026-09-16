@@ -1,3 +1,4 @@
+import { readJsonBody, validateAiInput, reserveAiRequest, assertAiPermit, finishAiRequest, type AiPermit } from '../../src/lib/server/operationalGuard';
 import type { Config } from "@netlify/functions";
 import type { ChatMessage } from '../../src/lib/db';
 import { adminDb } from '../../src/lib/firebase-admin';
@@ -10,36 +11,40 @@ export const config: Config = {
   path: "/api/chat"
 };
 
-async function* parseOpenRouterStream(stream: ReadableStream<Uint8Array>) {
-  const reader = stream.getReader();
-  const decoder = new TextDecoder();
-  let buffer = '';
-
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    buffer += decoder.decode(value, { stream: true });
-    
-    const lines = buffer.split('\n');
-    buffer = lines.pop() || '';
-    
-    for (let line of lines) {
-      line = line.trim();
-      if (line.startsWith('data: ') && line !== 'data: [DONE]') {
-        try {
-          const data = JSON.parse(line.slice(6));
-          if (data.choices && data.choices[0].delta && data.choices[0].delta.content) {
-            yield data.choices[0].delta.content;
-          }
-        } catch (e) {
-          // parse error, ignore
-        }
-      }
+export async function* parseOpenRouterStream(stream: ReadableStream<Uint8Array>) {
+  const reader = stream.getReader(), decoder = new TextDecoder();
+  let buffer = '', finished = false, doneMarker = false;
+  const parse = (line: string): string => {
+    line = line.trim();
+    if (!line.startsWith('data:')) return '';
+    const payload = line.slice(5).trim();
+    if (payload === '[DONE]') { doneMarker = true; return ''; }
+    const data = JSON.parse(payload);
+    if (data.error) throw new Error('AI provider stream error');
+    const choice = data.choices?.[0];
+    if (choice?.finish_reason) {
+      if (choice.finish_reason !== 'stop') throw new Error('AI reply did not finish normally');
+      finished = true;
     }
-  }
+    return choice?.delta?.content || '';
+  };
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      if (buffer.length > 65536) throw new Error('AI stream frame too large');
+      const lines = buffer.split('\n'); buffer = lines.pop() || '';
+      for (const line of lines) { const content = parse(line); if (content) yield content; }
+    }
+    buffer += decoder.decode();
+    if (buffer.trim()) { const content = parse(buffer); if (content) yield content; }
+    if (!finished || !doneMarker) throw new Error('Incomplete AI reply');
+  } finally { await reader.cancel().catch(() => {}); reader.releaseLock(); }
 }
 
 export default async function reqHandler(req: Request) {
+  let permit: AiPermit | undefined;
   // Handle CORS Preflight
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders, status: 204 });
@@ -47,8 +52,10 @@ export default async function reqHandler(req: Request) {
 
   try {
     if (req.method !== 'POST') return new Response(null, { status: 405, headers: corsHeaders });
-    const { character, userProfile, messages, isFirstPing, userId, isAdTurn, requestId, preferJsonResponse } = await req.json();
+    const { character, userProfile, messages, isFirstPing, userId, isAdTurn, requestId, preferJsonResponse } = await readJsonBody(req);
     const owner = await requireDataOwner(req, userId);
+    validateAiInput(character, userProfile, messages);
+    if (requestId !== undefined && (typeof requestId !== 'string' || !/^[\w:-]{1,300}$/.test(requestId))) throw new DiaryAuthenticationError(400, '전송 요청을 확인해주세요.');
     if (!adminDb) throw new DiaryAuthenticationError(503, '서버 설정이 필요합니다.');
 
     if (!character || !messages) {
@@ -58,11 +65,13 @@ export default async function reqHandler(req: Request) {
     await assertGuestActive(adminDb, owner);
     const charRef = adminDb.collection('characters').doc(character.id);
     const charSnapshot = await charRef.get();
-    if (charSnapshot.data()?.userId !== owner.uid || charSnapshot.data()?.deleting) throw new DiaryAuthenticationError(403, '채팅 접근 권한이 없습니다.');
+    if (charSnapshot.data()?.userId !== owner.uid || charSnapshot.data()?.deleting || charSnapshot.data()?.chatClearing) throw new DiaryAuthenticationError(403, '채팅 접근 권한이 없습니다.');
+    const chatEpoch = charSnapshot.data()?.chatEpoch || 0;
     const saveChatMessage = async (message: ChatMessage) => adminDb!.runTransaction(async transaction => {
       await assertGuestActive(adminDb!, owner, transaction);
+      if (permit) await assertAiPermit(transaction, permit);
       const current = await transaction.get(charRef);
-      if (current.data()?.userId !== owner.uid || current.data()?.deleting) throw new DiaryAuthenticationError(403, '채팅 소유자가 변경되었습니다.');
+      if (current.data()?.userId !== owner.uid || current.data()?.deleting || current.data()?.chatClearing || (current.data()?.chatEpoch || 0) !== chatEpoch) throw new DiaryAuthenticationError(403, '채팅 소유자가 변경되었습니다.');
       const ref = adminDb!.collection('chatMessages').doc(message.id);
       const existing = await transaction.get(ref);
       if (existing.exists) {
@@ -76,10 +85,10 @@ export default async function reqHandler(req: Request) {
 
     if (requestId) {
       const snapshot = await adminDb.collection('chatMessages').where('userId', '==', owner.uid)
-        .where('characterId', '==', character.id).where('requestId', '==', requestId).limit(1).get();
+        .where('characterId', '==', character.id).where('requestId', '==', requestId).where('role', '==', 'assistant').limit(1).get();
       const existing = snapshot.empty ? null : snapshot.docs[0].data() as ChatMessage;
       if (existing) {
-        return new Response(JSON.stringify({ reply: existing.content, savedId: existing.id }), { headers: { ...corsHeaders, 'Cache-Control': 'no-store' } });
+        return new Response(JSON.stringify({ reply: existing.content, savedId: existing.id }), { headers: { ...corsHeaders, 'Content-Type': 'application/json', 'Cache-Control': 'no-store' } });
       }
     }
 
@@ -88,6 +97,13 @@ export default async function reqHandler(req: Request) {
       return new Response(JSON.stringify({ error: 'OpenRouter API Key is not configured' }), { status: 500, headers: corsHeaders });
     }
 
+    const newMsgId = requestId ? 'reply_' + secretHash(JSON.stringify(isFirstPing ? [owner.uid, character.id, requestId, chatEpoch] : [owner.uid, character.id, requestId])) : crypto.randomUUID();
+    permit = await reserveAiRequest(adminDb, owner.uid, 'chat:' + character.id + ':' + (requestId || newMsgId) + (isFirstPing ? ':epoch:' + chatEpoch : ''), 1, adminDb.collection('chatMessages').doc(newMsgId));
+    if (permit.savedRecord) {
+      const saved = permit.savedRecord;
+      return Response.json({ reply: saved.content, savedId: saved.id }, { headers: { ...corsHeaders, 'Cache-Control': 'no-store' } });
+    }
+    const activePermit = permit;
     const locale = character.locale || 'ko';
     
     // Fallbacks and translations for default names
@@ -199,6 +215,7 @@ ${(userName === '유저' || userName === '나' || userName === 'ユーザー') ?
 
     const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
       method: "POST",
+      signal: permit!.signal,
       headers: {
         "Authorization": `Bearer ${apiKey}`,
         "Content-Type": "application/json"
@@ -215,12 +232,11 @@ ${(userName === '유저' || userName === '나' || userName === 'ユーザー') ?
       })
     });
 
-    if (!response.ok) return Response.json({ error: '채팅 답변 생성에 실패했습니다.' }, { status: response.status, headers: corsHeaders });
+    if (!response.ok) throw new DiaryAuthenticationError(502, '채팅 답변 생성에 실패했습니다.');
     const jsonResponse = isFirstPing || preferJsonResponse;
-    const newMsgId = requestId ? 'reply_' + secretHash(JSON.stringify([owner.uid, character.id, requestId])) : crypto.randomUUID();
     const stream = new ReadableStream({
       async start(controller) {
-        let connected = true, errored = false, fullReply = '';
+        let connected = true, errored = false, completed = false, fullReply = '';
         const enqueue = (text: string) => {
           if (connected) try { controller.enqueue(new TextEncoder().encode(text)); } catch { connected = false; }
         };
@@ -237,11 +253,13 @@ ${(userName === '유저' || userName === '나' || userName === 'ユーザー') ?
             role: 'assistant', content: fullReply, createdAt: Date.now(),
             isAdLocked: isAdTurn === true, ...(requestId ? { requestId } : {}),
           });
+          completed = true;
           if (jsonResponse) enqueue(JSON.stringify({ reply: saved.content, savedId: saved.id }));
         } catch {
           if (jsonResponse) enqueue(JSON.stringify({ error: '채팅 저장에 실패했습니다. 다시 시도해주세요.' }));
           else { errored = true; if (connected) controller.error(new Error('채팅 저장에 실패했습니다.')); }
         } finally {
+          await finishAiRequest(adminDb!, activePermit, completed).catch(() => console.error('AI reservation release failed'));
           if (keepAlive) clearInterval(keepAlive);
           if (connected && !errored) controller.close();
         }
@@ -251,5 +269,8 @@ ${(userName === '유저' || userName === '나' || userName === 'ユーザー') ?
       ...corsHeaders, 'Content-Type': jsonResponse ? 'application/json; charset=utf-8' : 'text/plain; charset=utf-8',
       'Transfer-Encoding': 'chunked', 'Cache-Control': 'no-store, no-transform', 'X-Message-Id': newMsgId,
     } });
-  } catch (error) { return securityErrorResponse(error, corsHeaders); }
+  } catch (error) {
+    if (permit && adminDb) await finishAiRequest(adminDb, permit, false).catch(() => {});
+    return securityErrorResponse(error, corsHeaders);
+  }
 }

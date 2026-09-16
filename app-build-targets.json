@@ -1,12 +1,17 @@
 {
   "branch": {
-    "apiUrl": "https://deploy-preview-2--dreamary.netlify.app",
-    "firebaseProjectId": "dreamary-1a9af",
+    "apiUrl": "https://dreamary-staging.netlify.app",
+    "firebaseProjectId": "dreamary-staging",
     "label": "app · dev"
   },
   "release": {
     "apiUrl": "https://dreamary.netlify.app",
     "firebaseProjectId": "dreamary-1a9af",
     "label": "app · prod"
+  },
+  "test": {
+    "apiUrl": "http://127.0.0.1:3000",
+    "firebaseProjectId": "demo-dreamary-security",
+    "label": "app · dev"
   }
 }

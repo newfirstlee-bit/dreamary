@@ -1,0 +1,30 @@
+{
+  "journey": "Android app restart auth and ad-block regression",
+  "device": "Samsung SM-A102N (720x1560)",
+  "results": [
+    {
+      "action": "Install the updated debug APK without clearing application data",
+      "status": "PASSED",
+      "commands": ["adb install -r android/app/build/outputs/apk/debug/app-debug.apk"],
+      "comment": "Package update completed successfully and existing app data was preserved."
+    },
+    {
+      "action": "Verify that the authenticated My Page is visible before restart",
+      "status": "PASSED",
+      "commands": ["adb shell input tap 630 1400", "adb shell screencap"],
+      "comment": "The account profile and three owned pairs were visible; no global ad-block modal covered the app."
+    },
+    {
+      "action": "Force-stop and relaunch the app",
+      "status": "PASSED",
+      "commands": ["adb shell am force-stop com.dreamary.app", "adb shell monkey -p com.dreamary.app -c android.intent.category.LAUNCHER 1"],
+      "comment": "The application relaunched normally."
+    },
+    {
+      "action": "Verify authentication and ad-block state after restart",
+      "status": "PASSED",
+      "commands": ["adb shell input tap 630 1400", "adb shell screencap"],
+      "comment": "The before/after My Page screenshots had the same SHA-256 hash; the logged-in screen remained and no global ad-block modal appeared."
+    }
+  ]
+}

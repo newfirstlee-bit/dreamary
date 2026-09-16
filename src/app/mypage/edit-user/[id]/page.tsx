@@ -10,6 +10,20 @@ import { Loader2, ChevronLeft, Camera, User } from 'lucide-react';
 import { trackEvent } from '@/lib/mixpanel';
 import { useLocale } from '@/lib/i18n';
 import { resolveStaticEntityId } from '@/lib/navigation';
+import { clearUserCache } from '@/lib/appCache';
+
+async function saveUserProfileWithConfirmation(user: UserProfile) {
+  try {
+    await saveUserProfile(user);
+  } catch (error) {
+    // The write may have committed even when its response was interrupted.
+    const latest = await getUserProfile(user.id);
+    const persisted = latest && Object.entries(user).every(([key, value]) =>
+      (latest as unknown as Record<string, unknown>)[key] === value
+    );
+    if (!persisted) throw error;
+  }
+}
 
 function GenderSelect({ value, onChange }: { value: string, onChange: (v: string) => void }) {
   const { t } = useLocale();
@@ -53,6 +67,7 @@ export default function EditUserPage({ params }: { params: { id: string } }) {
   const [extra, setExtra] = useState('');
   const [imageUrl, setImageUrl] = useState('');
   const [imageFile, setImageFile] = useState<File | null>(null);
+  const [initialProfile, setInitialProfile] = useState<Partial<UserProfile> | null>(null);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const profileScrollRef = useRef<HTMLElement>(null);
@@ -97,6 +112,7 @@ export default function EditUserPage({ params }: { params: { id: string } }) {
         const resolvedId = resolveStaticEntityId(params.id);
         setProfileId(resolvedId);
         const profile = await getUserProfile(resolvedId);
+        setInitialProfile(profile || {});
         
         if (profile) {
           setName(profile.name || '');
@@ -123,6 +139,7 @@ export default function EditUserPage({ params }: { params: { id: string } }) {
   };
 
   const handleSave = async () => {
+    if (saving || !profileId || !hasChanges) return;
     setSaving(true);
     try {
       let finalImgUrl = imageUrl;
@@ -134,18 +151,23 @@ export default function EditUserPage({ params }: { params: { id: string } }) {
       const updatedUser: UserProfile = {
         id: profileId,
         name: name.trim() || t('common.user'),
-        gender: (gender || undefined) as UserProfile['gender'],
+        ...(gender ? { gender: gender as UserProfile['gender'] } : {}),
         feeling: feeling.trim(),
         extra: extra.trim(),
-        createdAt: Date.now()
+        createdAt: initialProfile?.createdAt || Date.now()
       };
       
       if (finalImgUrl) {
         updatedUser.image = finalImgUrl;
       }
 
-      await saveUserProfile(updatedUser);
-      trackEvent('Settings_Changed', { type: 'user_profile' });
+      await saveUserProfileWithConfirmation(updatedUser);
+      clearUserCache(getUserId());
+      try {
+        trackEvent('Settings_Changed', { type: 'user_profile' });
+      } catch (analyticsError) {
+        console.warn('User settings analytics failed after save', analyticsError);
+      }
       router.push('/mypage');
     } catch (err) {
       console.error(err);
@@ -153,6 +175,10 @@ export default function EditUserPage({ params }: { params: { id: string } }) {
       setSaving(false);
     }
   };
+
+  const hasChanges = initialProfile !== null && (imageFile !== null ||
+    name !== (initialProfile.name || '') || gender !== (initialProfile.gender || '') ||
+    feeling !== (initialProfile.feeling || '') || extra !== (initialProfile.extra || ''));
 
   if (loading) {
     return (
@@ -251,7 +277,7 @@ export default function EditUserPage({ params }: { params: { id: string } }) {
       <footer className="fixed-cta-footer">
         <button 
           onClick={handleSave}
-          disabled={saving || !profileId || !name.trim() || !gender || !feeling.trim()}
+          disabled={saving || !profileId || !hasChanges}
           className="btn-primary"
           style={{ width: '100%', display: 'flex', justifyContent: 'center', alignItems: 'center' }}
         >

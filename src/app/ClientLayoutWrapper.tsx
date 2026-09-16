@@ -13,6 +13,8 @@ import { useAuth } from '@/components/AuthContext';
 import { useNativeNavigation } from '@/hooks/useNativeNavigation';
 import { Capacitor } from '@capacitor/core';
 import { shouldShowBottomNav } from '@/lib/navigation';
+import { initializeOta } from '@/lib/ota';
+import { hydrateGuestIdentity } from '@/lib/guestPersistence';
 import {
   attachDiaryPushOpenHandler,
   checkDiaryPushPermission,
@@ -100,9 +102,20 @@ export default function ClientLayoutWrapper({ children }: { children: React.Reac
   const navigateBack = useCallback(() => router.back(), [router]);
   useNativeNavigation({ pathname, navigateHome, navigateBack });
 
+  useEffect(() => { void initializeOta(); }, []);
+
   const isAdmin = pathname?.startsWith('/admin');
   const isBottomNavRoute = shouldShowBottomNav(pathname);
   const [isKeyboardOpen, setIsKeyboardOpen] = useState(false);
+  const [guestIdentityReady, setGuestIdentityReady] = useState(false);
+
+  useEffect(() => {
+    let active = true;
+    hydrateGuestIdentity()
+      .catch(error => console.warn('Guest identity restore skipped:', error))
+      .finally(() => { if (active) setGuestIdentityReady(true); });
+    return () => { active = false; };
+  }, []);
 
   useEffect(() => {
     const viewport = window.visualViewport;
@@ -290,6 +303,8 @@ export default function ClientLayoutWrapper({ children }: { children: React.Reac
       </div>
     );
   }
+
+  if (!guestIdentityReady) return null;
 
   return (
     <AuthProvider>

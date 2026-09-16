@@ -1,0 +1,11 @@
+{
+  "checkedAt": "2026-09-16T11:30:00+09:00",
+  "regression": {"tests": 92, "passed": 92, "failed": 0},
+  "checkApp": "passed",
+  "lint": "passed with existing warnings",
+  "nativeSync": ["ios", "android"],
+  "nativeBuilds": {"iosSimulator": "passed", "androidDebug": "passed"},
+  "demoEmulator": {"rules": {"passed": 7, "failed": 0}, "backupRestore": {"passed": 1, "failed": 0}},
+  "productionReadOnly": {"pendingDataJobsSample": 0, "pendingImageDeletionSample": 0, "compositeIndexes": {"expected": 15, "remote": 0, "ready": 0, "creationAttempt": "permission_denied"}},
+  "excluded": ["admin security", "R13 report processing"]
+}

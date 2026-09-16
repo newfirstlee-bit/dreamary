@@ -1,3 +1,5 @@
+import { ReadCache } from '@/lib/readCache';
+const statsCache = new ReadCache<{ users: number; characters: number; diaries: number; chats: number }>(300000, 1);
 import { NextResponse } from 'next/server';
 import { isAdminRequest } from '@/lib/server/adminSession';
 import { adminDb } from '@/lib/firebase-admin';
@@ -17,6 +19,7 @@ export async function GET(req: Request) {
       return NextResponse.json({ users: 0, characters: 0, diaries: 0, chats: 0 });
     }
 
+    const result = await statsCache.get('all', async () => {
     const [users, characters, diaries, chats] = await Promise.all([
       countCollection('accounts'),
       countCollection('characters'),
@@ -24,12 +27,9 @@ export async function GET(req: Request) {
       countCollection('chatMessages'),
     ]);
 
-    return NextResponse.json({
-      users,
-      characters,
-      diaries,
-      chats,
+    return { users, characters, diaries, chats };
     });
+    return NextResponse.json(result, { headers: { 'Cache-Control': 'no-store' } });
   } catch (error: any) {
     console.error('Admin stats failed:', error);
     return NextResponse.json({ error: error?.message || 'Failed to load admin stats' }, { status: 500 });

@@ -1,0 +1,11 @@
+{
+  "site_id": "12c6d1e4-6439-4cf9-b3e2-a27cf0932e58",
+  "site_name": "dreamary-staging",
+  "deploy_id": "6aa6aa3da06f6a1a5a2eedec",
+  "deploy_url": "https://6aa6aa3da06f6a1a5a2eedec--dreamary-staging.netlify.app",
+  "logs": "https://app.netlify.com/projects/dreamary-staging/deploys/6aa6aa3da06f6a1a5a2eedec",
+  "function_logs": "https://app.netlify.com/projects/dreamary-staging/logs/functions",
+  "edge_function_logs": "https://app.netlify.com/projects/dreamary-staging/logs/edge-functions",
+  "url": "https://dreamary-staging.netlify.app"
+}npm warn deprecated cron-parser@4.9.0: v4 is no longer maintained, upgrade to v5
+npm warn deprecated node-domexception@1.0.0: Use your platform's native DOMException instead

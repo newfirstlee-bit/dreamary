@@ -25,9 +25,9 @@ export default async function handler(req: Request) {
       const [used, collision] = await Promise.all([transaction.get(usage), transaction.get(codeRef)]);
       if ((used.data()?.count || 0) >= 3) throw new DiaryAuthenticationError(429, '하루 발급 한도(3회)를 초과했습니다.');
       if (collision.exists) throw new DiaryAuthenticationError(409, '백업 코드를 다시 발급해주세요.');
-      transaction.set(usage, { sourceUUID: owner.uid, count: (used.data()?.count || 0) + 1, date: day });
+      transaction.set(usage, { sourceUUID: owner.uid, count: (used.data()?.count || 0) + 1, date: day, expiresAt: new Date(Date.now() + 7 * 86400000) });
       transaction.create(codeRef, { sourceUUID: owner.uid, credentialHash: owner.hash,
-        expiresAt: Date.now() + 86400000, createdAt: Date.now(), usedByUserId: null });
+        expiresAt: Date.now() + 86400000, cleanupAt: new Date(Date.now() + 30 * 86400000), createdAt: Date.now(), usedByUserId: null });
     });
     return Response.json({ code }, { headers: { ...corsHeaders, 'Cache-Control': 'no-store' } });
   } catch (error) { return securityErrorResponse(error, corsHeaders); }

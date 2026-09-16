@@ -13,6 +13,9 @@ export const getApiUrl = (endpoint: string) => {
 };
 
 export const apiFetch = async (endpoint: string, options?: RequestInit) => {
+  const versionHeaders = new Headers(options?.headers);
+  versionHeaders.set('X-Client-Protocol', '1');
+  options = { ...options, headers: versionHeaders };
   if (endpoint === '/api/chat' && typeof options?.body === 'string') {
     const data = JSON.parse(options.body);
     const headers = new Headers(options.headers);
@@ -26,17 +29,20 @@ export const apiFetch = async (endpoint: string, options?: RequestInit) => {
 interface ApiPostJsonOptions {
   headers?: Record<string, string>;
   readTimeout?: number;
+  signal?: AbortSignal;
 }
 
 const postJson = async <T = any>(endpoint: string, data: unknown, options: ApiPostJsonOptions = {}): Promise<T> => {
-  const headers: Record<string, string> = { 'Content-Type': 'application/json', ...(options.headers || {}) };
-  if (['/api/diary', '/api/diary/edit', '/api/backup/generate', '/api/backup/migrate', '/api/data/session', '/api/chat', '/api/character/delete', '/api/reports/create'].includes(endpoint)) {
+  if (options.signal?.aborted) throw new Error('요청이 취소되었습니다.');
+  const headers: Record<string, string> = { 'Content-Type': 'application/json', 'X-Client-Protocol': '1', ...(options.headers || {}) };
+  if (['/api/diary', '/api/diary/edit', '/api/backup/generate', '/api/backup/migrate', '/api/data/session', '/api/chat', '/api/chat/status', '/api/character/delete', '/api/character/create', '/api/chat/delete', '/api/images/upload', '/api/reports/create'].includes(endpoint)) {
     // Do not let an override supply a stale token belonging to another account.
     for (const key of Object.keys(headers)) {
       if (key.toLowerCase() === 'authorization') delete headers[key];
     }
     const payload = data as { sourceUUID?: string; uid?: string };
-    const identity = endpoint === '/api/backup/generate' ? { userId: payload.sourceUUID }
+    const identity = endpoint === '/api/character/create' ? { userId: (data as { character: { userId: string } }).character.userId }
+      : endpoint === '/api/backup/generate' ? { userId: payload.sourceUUID }
       : endpoint === '/api/backup/migrate' ? { userId: payload.uid } : data;
     Object.assign(headers, await diaryRequestHeaders(identity, endpoint === '/api/backup/migrate'));
     if (endpoint === '/api/diary' || endpoint === '/api/diary/edit') {
@@ -44,7 +50,7 @@ const postJson = async <T = any>(endpoint: string, data: unknown, options: ApiPo
     }
   }
 
-  if (typeof window !== 'undefined' && Capacitor.isNativePlatform()) {
+  if (typeof window !== 'undefined' && Capacitor.isNativePlatform() && !options.signal) {
     const response = await CapacitorHttp.post({
       url: getApiUrl(endpoint),
       headers,
@@ -72,7 +78,10 @@ const postJson = async <T = any>(endpoint: string, data: unknown, options: ApiPo
     return parsed as T;
   }
 
+  if (options.signal?.aborted) throw new Error('요청이 취소되었습니다.');
   const controller = new AbortController();
+  const abort = () => controller.abort();
+  options.signal?.addEventListener('abort', abort, { once: true });
   const timeout = setTimeout(() => controller.abort(), options.readTimeout || 90000);
   try {
     const response = await apiFetch(endpoint, {
@@ -85,6 +94,7 @@ const postJson = async <T = any>(endpoint: string, data: unknown, options: ApiPo
     return parsed as T;
   } finally {
     clearTimeout(timeout);
+    options.signal?.removeEventListener('abort', abort);
   }
 };
 

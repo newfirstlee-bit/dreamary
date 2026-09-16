@@ -5,18 +5,17 @@ import Image from 'next/image';
 import { useRouter } from 'next/navigation';
 import { useOnboardingStore } from '@/store/useOnboardingStore';
 import { getUserId, generateUUID } from '@/lib/auth';
-import { saveCharacter, saveUserProfile, Character, UserProfile } from '@/lib/db';
+import { saveCharacter, Character, UserProfile } from '@/lib/db';
 import { uploadProfileImageToImgbb } from '@/lib/imgbb';
 import { ChevronLeft, Camera, Loader2, User } from 'lucide-react';
 import { trackEvent } from '@/lib/mixpanel';
 import { useLocale } from '@/lib/i18n';
 import { clearUserCache } from '@/lib/appCache';
-import { withTimeout } from '@/lib/async';
-import { invalidateCharacterStore } from '@/store/useAppStore';
+import { invalidateCharacterStore, useAppStore } from '@/store/useAppStore';
+import { useAsyncActionLock } from '@/hooks/useAsyncActionLock';
+import { measurePhase } from '@/lib/performanceTrace';
 import { ensureInitialPing } from '@/lib/initialPing';
 import { applyKoreanJosa } from '@/lib/koreanJosa';
-
-const SAVE_TIMEOUT_MS = 15000;
 
 type Phase = 'character' | 'narrative-prompt' | 'narrative' | 'user' | 'saving';
 
@@ -33,9 +32,21 @@ export default function OnboardingPage() {
   const [isNextEnabled, setIsNextEnabled] = useState(false);
   const pendingCharacterIdRef = useRef<string | null>(null);
   const pendingCharacterCreatedAtRef = useRef<number | null>(null);
+  const { runLocked: runSaveLocked } = useAsyncActionLock();
 
   useEffect(() => {
     trackEvent('Onboarding_Started');
+    // Recover only the current owner's unfinished submission, with the same ID.
+    try {
+      const draft = JSON.parse(localStorage.getItem('pair_submission_' + getUserId()) || 'null');
+      if (draft?.owner === getUserId() && typeof draft.id === 'string' && draft.fields) {
+        pendingCharacterIdRef.current = draft.id;
+        pendingCharacterCreatedAtRef.current = draft.createdAt;
+        useOnboardingStore.setState(draft.fields);
+        setPhase('narrative-prompt');
+        setShowUserModal(true);
+      }
+    } catch { /* An invalid local draft must not prevent onboarding. */ }
     
     if (typeof window !== 'undefined') {
       const searchParams = new URLSearchParams(window.location.search);
@@ -130,28 +141,10 @@ export default function OnboardingPage() {
     setShowUserModal(true);
   };
 
-  const handleFinish = async () => {
+  const handleFinish = () => runSaveLocked(async () => {
     setPhase('saving');
     try {
       const userId = getUserId();
-      
-      let charImgUrl = store.charImage;
-      if (store.charImageFile) {
-        charImgUrl = await withTimeout(
-          uploadProfileImageToImgbb(store.charImageFile),
-          SAVE_TIMEOUT_MS,
-          '이미지 업로드 시간이 초과되었습니다.'
-        );
-      }
-
-      let userImgUrl = store.userImage;
-      if (store.userImageFile) {
-        userImgUrl = await withTimeout(
-          uploadProfileImageToImgbb(store.userImageFile),
-          SAVE_TIMEOUT_MS,
-          '이미지 업로드 시간이 초과되었습니다.'
-        );
-      }
 
       // Keep the same document ID across retries. A timed-out Firestore write
       // can still finish later; a fresh UUID would create a duplicate pair.
@@ -159,6 +152,25 @@ export default function OnboardingPage() {
       const pendingCharacterCreatedAt = pendingCharacterCreatedAtRef.current || Date.now();
       pendingCharacterIdRef.current = pendingCharacterId;
       pendingCharacterCreatedAtRef.current = pendingCharacterCreatedAt;
+      const persistSubmission = () => {
+        const fields = Object.fromEntries(Object.entries(useOnboardingStore.getState())
+          .filter(([key, value]) => /^(char|user)/.test(key) && !key.endsWith('File') &&
+            (value === null || typeof value === 'string'))
+          .map(([key, value]) => [key, typeof value === 'string' && value.startsWith('blob:') ? null : value]));
+        localStorage.setItem('pair_submission_' + userId, JSON.stringify({ owner: userId, id: pendingCharacterId, createdAt: pendingCharacterCreatedAt, fields }));
+      };
+      persistSubmission();
+      // Independent compressed uploads share the wait. Each successful URL is
+      // retained immediately so a later failure does not upload it again.
+      const [charImgUrl, userImgUrl] = await measurePhase('character.create', 'images', () => Promise.all([
+        store.charImageFile ? uploadProfileImageToImgbb(store.charImageFile).then(url => {
+          store.setCharField('charImage', url); store.setCharField('charImageFile', null); persistSubmission(); return url;
+        }) : Promise.resolve(store.charImage),
+        store.userImageFile ? uploadProfileImageToImgbb(store.userImageFile).then(url => {
+          store.setUserField('userImage', url); store.setUserField('userImageFile', null); persistSubmission(); return url;
+        }) : Promise.resolve(store.userImage),
+      ]));
+      if (getUserId() !== userId) throw new Error('계정이 변경되었습니다. 원래 계정에서 다시 시도해주세요.');
 
       const newChar: any = {
         id: pendingCharacterId,
@@ -180,12 +192,6 @@ export default function OnboardingPage() {
         newChar.homeBackgroundImage = charImgUrl;
       }
 
-      await withTimeout(
-        saveCharacter(newChar as Character),
-        SAVE_TIMEOUT_MS,
-        '캐릭터 저장 시간이 초과되었습니다.'
-      );
-
       let activeUserProfile: UserProfile;
 
       if (store.userName.trim()) {
@@ -198,11 +204,6 @@ export default function OnboardingPage() {
         };
         if (userImgUrl) newUser.image = userImgUrl;
         
-        await withTimeout(
-          saveUserProfile(newUser as UserProfile),
-          SAVE_TIMEOUT_MS,
-          '유저 정보 저장 시간이 초과되었습니다.'
-        );
         activeUserProfile = newUser as UserProfile;
       } else {
         // Save empty user profile
@@ -212,29 +213,34 @@ export default function OnboardingPage() {
           feeling: '',
           createdAt: Date.now()
         };
-        await withTimeout(
-          saveUserProfile(emptyUser as UserProfile),
-          SAVE_TIMEOUT_MS,
-          '유저 정보 저장 시간이 초과되었습니다.'
-        );
         activeUserProfile = emptyUser as UserProfile;
       }
+
+      // One atomic server write avoids a saved character with a missing profile,
+      // and uses the real request deadline instead of abandoning a live request at 15s.
+      const savedCharacter = await measurePhase('character.create', 'save', () => saveCharacter(newChar as Character, activeUserProfile));
+      if (getUserId() !== userId) throw new Error('계정이 변경되었습니다. 원래 계정에서 저장 결과를 확인해주세요.');
+      const previousState = useAppStore.getState();
+      const previousCharacters = previousState.characterOwnerId === userId ? previousState.characters : null;
+      clearUserCache(userId);
+      invalidateCharacterStore(userId);
+      if (previousCharacters) useAppStore.getState().setCharacters(userId,
+        [...previousCharacters.filter(char => char.id !== savedCharacter.id && char.id !== 'dummy'), savedCharacter]);
 
       // Do not block character creation on AI generation. Home/chat will share
       // this in-flight request and retry later if the server is temporarily down.
       void ensureInitialPing({
-        character: newChar as Character,
+        character: savedCharacter,
         userProfile: activeUserProfile,
         userId,
       }).catch(err => console.error('Initial ping failed:', err));
 
       store.reset();
+      localStorage.removeItem('pair_submission_' + userId);
       trackEvent('Character_Created', {
         character_name: newChar.name,
         has_image: !!charImgUrl
       });
-      clearUserCache(userId);
-      invalidateCharacterStore(userId);
       pendingCharacterIdRef.current = null;
       pendingCharacterCreatedAtRef.current = null;
       router.push('/');
@@ -244,7 +250,7 @@ export default function OnboardingPage() {
       setPhase('narrative-prompt');
       setShowUserModal(true);
     }
-  };
+  });
 
   const renderProgressBar = () => {
     let progress = 0;
@@ -424,6 +430,8 @@ const AutoResizeTextarea = forwardRef<HTMLTextAreaElement, React.TextareaHTMLAtt
     />
   );
 });
+
+AutoResizeTextarea.displayName = 'AutoResizeTextarea';
 
 function ImageUpload({ imagePreview, onFileSelect }: { imagePreview: string | null, onFileSelect: (f: File) => void }) {
   const fileInputRef = useRef<HTMLInputElement>(null);

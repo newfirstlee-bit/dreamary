@@ -1,0 +1,33 @@
+check-app:
+ ✓ Compiled successfully
+ ✓ Generating static pages (54/54)
+
+web-build:
+ℹ tests 59
+ℹ pass 59
+ℹ fail 0
+ ✓ Compiled successfully
+ ✓ Generating static pages (54/54)
+
+test-build:
+ ✓ Compiled successfully
+ ✓ Generating static pages (54/54)
+
+rules:
+ℹ tests 7
+ℹ pass 7
+ℹ fail 0
+ℹ tests 1
+ℹ pass 1
+ℹ fail 0
+✔  Script exited successfully (code 0)
+
+cap-sync:
+✔ Copying web assets from out to android/app/src/main/assets/public in 22.27ms
+✔ Copying web assets from out to ios/App/App/public in 22.49ms
+
+ios-build:
+** BUILD SUCCEEDED **
+
+android-build:
+BUILD SUCCESSFUL in 1s
