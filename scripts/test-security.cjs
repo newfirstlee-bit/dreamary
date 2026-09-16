@@ -666,6 +666,10 @@ test('password recovery screen uses the canonical production mail function', () 
   const source = fs.readFileSync(path.join(root, 'src/app/(auth)/reset-password/page.tsx'), 'utf8');
   assert.match(source, /apiPostJson\('\/api\/auth\/reset-password'/);
   assert.doesNotMatch(source, /\.netlify\/functions\/reset-password/);
+  const route = fs.readFileSync(path.join(root, 'src/app/api/auth/reset-password/route.ts'), 'utf8');
+  assert.match(route, /netlify\/functions\/auth-reset-password/);
+  assert.match(route, /export const POST = handler/);
+  assert.match(route, /export const OPTIONS = handler/);
 });
 
 test('canonical password recovery never changes credentials before mail acceptance', () => {

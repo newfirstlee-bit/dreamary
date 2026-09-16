@@ -24,12 +24,15 @@ Codex는 앱 버전 변경, 설치 파일 제작, 서버 배포, OTA 패키징·
 
 | 정식 버전 | 환경 | OTA 회차 | 상태 | 내용 |
 |---|---|---|---|---|
+| 1.0.0 | release | 없음 | build 6 생성·TestFlight 처리 중 | 운영 첫 제출용 새 설치 파일. iOS 최소 버전 15.0, 새 정식 설치본은 OTA 회차 없이 시작하며 release OTA 채널은 비활성 상태 |
 | 1.0.0 | branch | 14 | build 5 실기기 적용 확인 대기 | 비로그인 UUID·게스트 인증키 네이티브 보조 저장 및 저장 경합 직렬화 |
 | 1.0.0 | branch | 8 | iPhone·갤럭시 실기기 적용 확인 | 매 새 실행 OTA 확인, 6시간 제한 제거. manifest sequence 13 |
 | 1.0.0 | branch | 9 | build 5 기준 게시, 실기기 적용 대기 | 비밀번호 찾기·백업 이전·프로필 저장 수정. nativeHash `30562bfc…`, manifest sequence 14 |
 | 1.0.0 | branch | 7 | 게시 완료 | 비로그인 백업 진행 표시, iOS 클립보드 fallback, 백업코드 이전 순서 수정. manifest sequence 12, nativeHash `0d445871…` |
 
 게시 시 날짜, ZIP 메타데이터 경로, bundleId, nativeHash, manifest sequence, 테스트 결과를 이 표 아래에 기록한다. 과거 회차 표시 없이 게시된 번들은 소급해 적용 완료로 취급하지 않는다.
+
+2026-09-16 release build 6 기록: 운영 Firebase `dreamary-1a9af`, API `https://dreamary.netlify.app`, nativeHash `fe5ef3ade22af3f0293793cd7c4b3e07501633f08e9579b27929dc90fb4b2ed3`. `npm run check:app`, 운영 release 빌드, 양 플랫폼 sync, Android Release AAB, iOS Release Simulator 및 기기 Archive가 통과했다. iOS Archive는 버전 `1.0.0(6)`, 최소 iOS 15.0으로 App Store Connect 업로드 성공 후 처리 중이다. Android 서명 AAB는 `artifacts/release-2026-09-16/dreamary-1.0.0-6.aab`이며 Google Play 업로드 전 키 별도 보관이 남아 있다. 상세 증거는 같은 폴더의 `release-build.json`을 따른다.
 
 2026-09-15 게시 기록: OTA ZIP `/private/tmp/dreamary-ota-v7.zip`, bundleId `ed6115f1-0ba6-455d-9f14-e72ae772072c`, branch manifest sequence `12`, Netlify OTA deploy `6aa8f8b8f991095d587326ed`. iPhone `com.repov.dreamary`와 Android `com.dreamary.app`에서 빌드 번호 `4`, OTA 회차 `4` 및 현재 nativeHash 일치를 확인했고, revision 7은 새로 게시했다.
 

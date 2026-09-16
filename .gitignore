@@ -45,6 +45,14 @@ next-env.d.ts
 /backups/
 *.drmbkp
 
+# Signed store binaries are local release artifacts, not source files
+*.aab
+*.ipa
+*.xcarchive/
+/artifacts/production-*/*.log
+/artifacts/production-*/
+/artifacts/release-*/
+
 # Local deployment coordination
 .staging-deploy.lock
 
