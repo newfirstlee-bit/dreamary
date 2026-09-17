@@ -48,7 +48,7 @@
 
 - GitHub 기존 인증으로 `newfirstlee-bit/dreamary` 저장소의 push/admin 권한을 확인했다. 저장소는 공개 상태이므로 업로드 후보에서 환경 파일·아티팩트·scratch 스크립트를 제외했다.
 - `.github/workflows/verify.yml`에 중복 실행 취소, 20분 제한, 수동 실행 이벤트와 단계별 이름을 추가했다. CI 권한은 `contents: read`이며 실제 Firebase/Netlify 비밀값 없이 demo 빌드·에뮬레이터만 사용한다.
-- 로컬 린트 통과(기존 경고 있음), YAML 구문 확인, 소스 338개에서 알려진 실제 서버 비밀값 검출 0건. 업로드 후보 변경 103개와 파일 해시는 `artifacts/ci-2026-09-13/preflight.json`에 기록했다. 이후 Git 커밋·push와 원격 CI 실행을 완료했으며, 최신 Verify run `35186294695`(commit `074bf12`)에서 회귀 98개를 포함한 검증이 성공했다.
+- 로컬 린트 통과(기존 경고 있음), YAML 구문 확인, 소스 338개에서 알려진 실제 서버 비밀값 검출 0건. 업로드 후보 변경 103개와 파일 해시는 `artifacts/ci-2026-09-13/preflight.json`에 기록했다. 이후 Git 커밋·push와 원격 CI 실행을 완료했으며, 코드 검증 run `35186294695`(commit `074bf12`)과 문서 반영 run `35186462305`(commit `4cba20f`)에서 회귀 98개를 포함한 검증이 성공했다.
 - 운영 Netlify의 저장소/브랜치 자동 배포 설정을 읽으려던 요청이 **자동 승인 검토의 Codex 사용량 한도 초과**로 거부됐다. 안내된 재개 시각은 **2026-09-14 03:41 KST**다. Netlify 유료 요금제 필요나 GitHub 권한 부족이 아니다. 이 조회를 다른 경로로 우회하지 않았다.
 
 1. 원격 GitHub CI 검증은 완료됐다. `.github/workflows/verify.yml`은 실제 저장소에서 회귀·타입·린트·demo 빌드·Firestore Emulator 검사를 수행한다. 이후 변경은 push마다 같은 검증을 다시 통과해야 한다. 기존 저장소의 Netlify 자동 배포와 GitHub CI 검증은 별도 흐름으로 유지한다.
