@@ -1,13 +1,11 @@
 import { Capacitor } from '@capacitor/core';
+import { Preferences } from '@capacitor/preferences';
 
 const USER_ID_KEY = 'dreamary_user_id';
 
 const NATIVE_USER_ID_KEY = 'dreamary_guest_identity_v1';
 const NATIVE_SECRET_PREFIX = 'dreamary_guest_secret_v1_';
 
-type PreferencesApi = typeof import('@capacitor/preferences')['Preferences'];
-
-let preferencesPromise: Promise<PreferencesApi | null> | undefined;
 const pendingUserOperations = new Map<string, Promise<void>>();
 
 function queueUserOperation(userId: string, operation: () => Promise<void>): Promise<void> {
@@ -20,14 +18,8 @@ function queueUserOperation(userId: string, operation: () => Promise<void>): Pro
   return next;
 }
 
-async function getPreferences(): Promise<PreferencesApi | null> {
-  if (!Capacitor.isNativePlatform()) return null;
-  if (!preferencesPromise) {
-    preferencesPromise = import('@capacitor/preferences')
-      .then(({ Preferences }) => Preferences)
-      .catch(() => null);
-  }
-  return preferencesPromise;
+function getPreferences(): typeof Preferences | null {
+  return Capacitor.isNativePlatform() ? Preferences : null;
 }
 
 function getCookie(name: string): string | null {
@@ -56,7 +48,7 @@ function secretKey(userId: string) {
  * active identity after login, logout, or a completed migration.
  */
 export async function hydrateGuestIdentity(): Promise<void> {
-  const preferences = await getPreferences();
+  const preferences = getPreferences();
   if (!preferences || typeof window === 'undefined') return;
 
   const localId = localStorage.getItem(USER_ID_KEY) || getCookie(USER_ID_KEY);
@@ -76,7 +68,7 @@ export async function hydrateGuestIdentity(): Promise<void> {
 export async function readGuestSecret(userId: string): Promise<string | null> {
   if (typeof window === 'undefined') return null;
   const localSecret = localStorage.getItem(`dreamary_guest_secret_${userId}`);
-  const preferences = await getPreferences();
+  const preferences = getPreferences();
   if (!preferences) return localSecret;
   if (localSecret) {
     await preferences.set({ key: secretKey(userId), value: localSecret });
@@ -89,21 +81,21 @@ export async function readGuestSecret(userId: string): Promise<string | null> {
 
 export async function persistGuestSecret(userId: string, secret: string): Promise<void> {
   await queueUserOperation(userId, async () => {
-    const preferences = await getPreferences();
+    const preferences = getPreferences();
     if (preferences) await preferences.set({ key: secretKey(userId), value: secret });
   });
 }
 
 export async function persistGuestIdentity(userId: string): Promise<void> {
   await queueUserOperation(userId, async () => {
-    const preferences = await getPreferences();
+    const preferences = getPreferences();
     if (preferences) await preferences.set({ key: NATIVE_USER_ID_KEY, value: userId });
   });
 }
 
 export async function removeGuestPersistence(userId: string): Promise<void> {
   await queueUserOperation(userId, async () => {
-    const preferences = await getPreferences();
+    const preferences = getPreferences();
     if (!preferences) return;
     await Promise.all([
       preferences.remove({ key: NATIVE_USER_ID_KEY }),

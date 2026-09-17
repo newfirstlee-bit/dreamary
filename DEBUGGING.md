@@ -1,5 +1,14 @@
 # Dreamary 모바일 디버깅 기록
 
+## 2026-09-17 — iOS 운영 Release 첫 실행이 흰 화면에서 멈춤
+
+- 증상: 운영 설정으로 만든 iOS `1.0.0(6)` Release 앱이 정적 웹 리소스를 모두 읽고 `WebView loaded`까지 기록한 뒤에도 흰 화면을 유지했다. 앱의 OTA 초기화·분석·상태바 효과는 실행됐지만 하단 탭과 화면 본문은 렌더링되지 않았다.
+- 기존 사례 대조: 2026-09-16의 OTA 후 비로그인 UUID 보존 작업에서 화면보다 먼저 `hydrateGuestIdentity()`를 완료하도록 바꾼 흐름과 직접 관련됐다. Firebase 인증 복원 무한 대기 사례와 증상은 비슷하지만, 인증 제한시간보다 앞선 비로그인 보조 저장소 단계에서 멈춘 것이 차이다.
+- 근본 원인: `@capacitor/preferences`의 `Preferences`는 Capacitor 플러그인 프록시다. 이 프록시 객체 자체를 async 함수에서 반환하거나 `await getPreferences()`로 기다리면 Promise의 thenable 해석 대상이 되어 완료되지 않았다. 실제 `Preferences.get()` 네이티브 호출 전부터 멈춰 `guestIdentityReady`가 영원히 false였다.
+- 해결 방법: Preferences를 정적 import하고 플러그인 객체는 동기적으로 참조한다. `await`는 `get`·`set`·`remove` 같은 실제 플러그인 메서드 결과에만 적용한다. UUID를 화면 렌더 전에 복원하고 기존 로컬 값을 우선하는 순서는 유지했다.
+- 재발 방지: Capacitor `registerPlugin()` 결과나 그 프록시를 Promise의 반환값·resolve 값으로 넘기거나 직접 await하지 않는다. 네이티브 플러그인 초기화 코드는 실제 메서드 Promise만 기다리는지 정적 회귀 검사한다.
+- 회귀 확인: 수정 전 iOS Release에서 8초 이후에도 완전한 흰 화면이고 Preferences 네이티브 호출이 없었다. 수정 후 같은 시뮬레이터에서 로딩 UI와 하단 탭이 즉시 나타나고 교환일기 화면까지 진입했으며, 생성된 UUID와 사용자별 게스트 인증키가 iOS Preferences에 저장된 것을 확인했다. 정식 제출본은 이미 업로드된 build 6을 사용하지 않고 build 7로 다시 만든다.
+
 ## 2026-09-16 — 운영 비밀번호 찾기 canonical 경로만 404
 
 - 증상: 운영 배포 후 `/api/auth/reset-password`가 함수의 JSON 404가 아니라 Next 웹 404 HTML을 반환했다. `/api/chat` 등 다른 운영 API와 스테이징의 같은 비밀번호 경로는 정상이며, 함수 직접 이름 경로도 운영에서 등록되지 않았다. 존재하지 않는 합성 계정만 사용해 확인했고 메일·비밀번호 변경은 없었다.

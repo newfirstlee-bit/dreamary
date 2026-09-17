@@ -37,6 +37,13 @@ test('post-login API errors never become incorrect-password messages', () => {
   assert.equal(loginFailureKind(new Error('unknown'), 'credentials'), 'unavailable');
 });
 
+test('guest identity restoration does not depend on a late native chunk', () => {
+  const source = fs.readFileSync(require.resolve('../src/lib/guestPersistence.ts'), 'utf8');
+  assert.match(source, /import \{ Preferences \} from '@capacitor\/preferences';/);
+  assert.doesNotMatch(source, /import\('@capacitor\/preferences'\)/);
+  assert.doesNotMatch(source, /await getPreferences\(\)/);
+});
+
 test('real login form distinguishes credential rejection, post-login 404, and successful routing', async () => {
   for (const scenario of ['credentials', 'post-login', 'success']) {
     const state = ['example', 'synthetic-password', '', false, false];
