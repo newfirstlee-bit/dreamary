@@ -30,7 +30,7 @@
 - [x] 운영 Firestore 암호화 백업 생성·로컬 무결성 확인: 2026-09-16 `backups/dreamary-1a9af-20260916T080558Z.drmbkp`, 7,315문서, 2,502,671바이트. 사용자 터미널 `verified:true`, 로컬 파일 존재/권한/체크섬 확인.
 - [x] 실제 운영 사본의 격리 DB 복원·전체 내용 대조 완료: 2026-09-16 21:46 KST, 7,315문서, `verifiedEveryDocument: true`, 원본 체크섬 일치. 결과는 백업 옆 `.restore-check.json`. 78문서 후 JSON 해석 실패는 공통 UTF-8 읽기 경로 적용 후 같은 사본으로 재시험 통과(운영 DB 수정 없음).
 - [x] Google Drive 보관: `Dreamary 운영백업` 폴더에 운영 암호화 파일 업로드 완료. 파일 ID `103RbfkLkVmxtxxJtvYPo-dcrZun7flXW`, 일반 액세스 제한됨·소유자 1명 확인. 암호문구는 업로드하지 않았다. https://drive.google.com/drive/folders/1zJVkNcR-4y8TkB90ZeYWL2aWTaNxjj8O
-- [x] GitHub 저장소에 `.github/workflows/verify.yml`을 push해 원격 CI 1회 실행(Verify run `35065744619`, success). 보호 규칙 연결은 GitHub 저장소 설정에서 별도 결정.
+- [x] GitHub 저장소에 `.github/workflows/verify.yml`을 push해 원격 CI 검증 완료. 최신 Verify run `35186294695`(commit `074bf12`)에서 회귀 98개를 포함한 검증이 성공했다. 보호 규칙 연결은 GitHub 저장소 설정에서 별도 결정.
 - [ ] iOS·Android 알림 권한이 허용된 실기기에서 실제 푸시 도착을 확인.
 
 완료된 외부 설정:
