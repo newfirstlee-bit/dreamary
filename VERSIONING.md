@@ -24,7 +24,7 @@ Codex는 앱 버전 변경, 설치 파일 제작, 서버 배포, OTA 패키징·
 
 | 정식 버전 | 환경 | OTA 회차 | 상태 | 내용 |
 |---|---|---|---|---|
-| 1.0.0 | release | 없음 | build 7 제작 중 | iOS build 6 첫 실행 흰 화면 수정본. iOS 최소 버전 15.0, 새 정식 설치본은 OTA 회차 없이 시작하며 release OTA 채널은 비활성 상태 |
+| 1.0.0 | release | 없음 | build 7 Archive 성공, 배포용 export 대기 | iOS build 6 첫 실행 흰 화면 수정본. iOS 최소 버전 15.0, 새 정식 설치본은 OTA 회차 없이 시작하며 release OTA 채널은 비활성 상태 |
 | 1.0.0 | branch | 14 | build 5 실기기 적용 확인 대기 | 비로그인 UUID·게스트 인증키 네이티브 보조 저장 및 저장 경합 직렬화 |
 | 1.0.0 | branch | 8 | iPhone·갤럭시 실기기 적용 확인 | 매 새 실행 OTA 확인, 6시간 제한 제거. manifest sequence 13 |
 | 1.0.0 | branch | 9 | build 5 기준 게시, 실기기 적용 대기 | 비밀번호 찾기·백업 이전·프로필 저장 수정. nativeHash `30562bfc…`, manifest sequence 14 |
@@ -35,6 +35,7 @@ Codex는 앱 버전 변경, 설치 파일 제작, 서버 배포, OTA 패키징·
 2026-09-16 release build 6 기록: 운영 Firebase `dreamary-1a9af`, API `https://dreamary.netlify.app`, nativeHash `fe5ef3ade22af3f0293793cd7c4b3e07501633f08e9579b27929dc90fb4b2ed3`. `npm run check:app`, 운영 release 빌드, 양 플랫폼 sync, Android Release AAB, iOS Release Simulator 및 기기 Archive가 통과했다. iOS Archive는 버전 `1.0.0(6)`, 최소 iOS 15.0으로 App Store Connect 업로드 성공 후 처리 중이다. Android 서명 AAB는 `artifacts/release-2026-09-16/dreamary-1.0.0-6.aab`이며 Google Play 업로드 전 키 별도 보관이 남아 있다. 상세 증거는 같은 폴더의 `release-build.json`을 따른다.
 
 2026-09-17 release build 7 준비: iOS build 6을 시뮬레이터에서 최종 확인하다 앱 시작 단계의 Capacitor Preferences 프록시 대기를 발견했다. `Preferences` 객체 자체를 await하지 않고 실제 저장 메서드만 기다리도록 수정한 뒤 같은 Release 시뮬레이터에서 로딩 화면과 교환일기 화면 진입, UUID·게스트 인증키의 네이티브 저장을 확인했다. build 6은 심사 대상으로 선택하지 않고 iOS·Android build 7로 교체한다. Android unsigned AAB를 기존 업로드 키로 서명·검증했고, 서명 파일은 `artifacts/release-2026-09-17/dreamary-1.0.0-7.aab`, SHA-256은 `37390572bdd4f9f6083e2b58b133f897f76afb6b6f1f83dc27daed40cb8e6d0c`이다. iOS 실기기 Archive는 Codex 사용량 제한으로 아직 생성하지 못했다.
+2026-09-18 release build 7 Archive 완료: `/private/tmp/Dreamary-1.0.0-7-ios.xcarchive`, 22MB. Archive의 `CFBundleShortVersionString=1.0.0`, `CFBundleVersion=7`, Team `3JK7S5V6BD`, 서명 `Apple Development: shinwon lee (7AR24494FZ)`를 확인했고 `codesign --verify --deep --strict`를 통과했다. TestFlight 업로드 전에는 App Store 배포용 인증서·프로파일로 export 가능한지 확인해야 한다.
 
 2026-09-15 게시 기록: OTA ZIP `/private/tmp/dreamary-ota-v7.zip`, bundleId `ed6115f1-0ba6-455d-9f14-e72ae772072c`, branch manifest sequence `12`, Netlify OTA deploy `6aa8f8b8f991095d587326ed`. iPhone `com.repov.dreamary`와 Android `com.dreamary.app`에서 빌드 번호 `4`, OTA 회차 `4` 및 현재 nativeHash 일치를 확인했고, revision 7은 새로 게시했다.
 

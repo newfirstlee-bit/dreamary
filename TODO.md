@@ -9,7 +9,7 @@
 - [x] 운영 ImgBB 키 재등록: 사용자가 운영 등록을 명시적으로 허용했고 기존 운영·스테이징의 동일 키로 `IMGBB_API_KEY`를 등록했다. 무료 요금제의 전체 scope를 사용하되 `NEXT_PUBLIC_` 없이 서버 코드에서만 참조한다.
 - [x] 분리된 운영 소스에서 의존성 설치·Netlify 서버/웹 빌드 통과. 운영 게시 전 후보는 `artifacts/production-2026-09-16/release-candidate.json` 참조.
 - [x] Netlify 운영 게시 → 호환 Firestore 규칙 적용 → 합성 API 점검 완료. 활성 운영 배포 `6aaa99386e0661bc90373005`; Firestore 규칙 `032b0b1b-7015-4a5a-8969-695dc8ff419c`. 로그인·권한 거부·페어 5개 제한·이미지·선톡·채팅·일기 저장을 합성 데이터로 확인하고 정리했다. 비밀번호 찾기 canonical 404는 연결 경로를 보완해 재배포 후 OPTIONS 204와 미존재 합성 계정 JSON 404를 확인했다.
-- [ ] 운영 release `1.0.0` build 7 재생성. build 6의 iOS 첫 실행 흰 화면 원인은 수정·시뮬레이터 검증했고 Android 서명 AAB까지 준비했다. iOS 실기기 Archive는 Codex 사용량 제한으로 남아 있으며 build 6은 심사에 사용하지 않는다.
+- [x] 운영 release `1.0.0` build 7 생성. build 6의 iOS 첫 실행 흰 화면 원인은 수정·시뮬레이터 검증했고 Android 서명 AAB와 iOS 실기기 Archive를 준비했다. iOS Archive는 `/private/tmp/Dreamary-1.0.0-7-ios.xcarchive`이며, TestFlight 전 배포용 export 확인이 남아 있다. build 6은 심사에 사용하지 않는다.
 - [ ] TestFlight 내부 설치 확인. 연결된 iPhone의 통신이 끊겨 로컬 덮어쓰기 설치는 보류했다.
 - [ ] Google Play 내부 테스트 업로드. 서명 AAB는 `artifacts/release-2026-09-17/dreamary-1.0.0-7.aab`로 준비됐고 SHA-256은 VERSIONING.md에 기록했다. 최초 업로드 전에 저장소 밖 업로드 키를 별도 보관해야 한다.
 - [ ] 양 플랫폼 내부 테스트 최종 확인 후 App Store·Google Play 심사 제출.
